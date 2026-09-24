@@ -25,6 +25,9 @@ import {
 import {
     applyMovementStateDelta,
     copyMovementState,
+    MovementDriver,
+    MovementDriverComponent,
+    MovementPhysicsComponent,
     MovementState,
     MovementStateComponent,
     MovementStateDelta,
@@ -37,6 +40,10 @@ import {
 } from './movement_plugin';
 import { TimeResource, wallClockNow } from './time_plugin';
 import { NetworkReceivePhase, NetworkTiming, NetworkTimingResource, MOVEMENT_SNAPSHOT_INTERVAL_MS } from './network_timing';
+import {
+    ClientPrediction, controlsDiffer, InputAck, inputPredictionSuspended,
+    MovementCommand, ServerCommandQueue,
+} from './input_prediction';
 
 export class Peers {
     readonly current: BehaviorSubject<Set<string>>;
@@ -137,8 +144,27 @@ export const Message = t.partial({
      * deltas self-healing without per-packet acknowledgements.
      */
     stateHashes: map(t.string /* Entity UUID */, t.number),
+    /** Owner -> server: movement commands for input-predicted ships. */
+    inputs: map(t.string /* Entity UUID */, t.array(MovementCommand)),
+    /** Server -> owner: last applied command and the resulting state. */
+    inputAcks: map(t.string /* Entity UUID */, InputAck),
 });
 export type Message = t.TypeOf<typeof Message>;
+
+export interface MultiplayerOptions {
+    /**
+     * Predict this client's own ships from input and let the server author
+     * their movement. Servers accept both this and the owner-authored pose
+     * path, per entity.
+     */
+    readonly inputPrediction?: boolean;
+}
+
+export const INPUT_ACK_INTERVAL_MS = 1000 / 30;
+/** High refresh-rate clients batch commands instead of sending per frame. */
+const INPUT_SEND_INTERVAL_MS = 1000 / 60 - 1;
+/** After prediction starves (no acks), use the pose path for this long. */
+const PREDICTION_FALLBACK_MS = 5000;
 
 /** How often the server publishes state hashes to each peer. */
 export const STATE_HASH_INTERVAL_MS = 500;
@@ -995,8 +1021,23 @@ function mergeInboundState(
     return localEntity;
 }
 
+function withoutMovement(entityDelta: EntityDelta): EntityDelta | undefined {
+    const componentStates = new Map(entityDelta.componentStates ?? []);
+    const componentDeltas = new Map(entityDelta.componentDeltas ?? []);
+    componentStates.delete(MovementStateComponent.name);
+    componentDeltas.delete(MovementStateComponent.name);
+    const filtered: EntityDelta = {};
+    if (componentStates.size > 0) filtered.componentStates = componentStates;
+    if (componentDeltas.size > 0) filtered.componentDeltas = componentDeltas;
+    if (entityDelta.removeComponents?.size) {
+        filtered.removeComponents = entityDelta.removeComponents;
+    }
+    return Object.keys(filtered).length > 0 ? filtered : undefined;
+}
+
 export function multiplayer(communicator: Communicator,
-    warn: (message: string) => void = console.warn): Plugin {
+    warn: (message: string) => void = console.warn,
+    options: MultiplayerOptions = {}): Plugin {
     const MultiplayerQuery = new Query([UUID, GetEntity, MultiplayerData] as const);
     const lastMovementSnapshotAt = new Map<string, number>();
     const lastMovementWireState = new Map<string, MovementState>();
@@ -1014,6 +1055,86 @@ export function multiplayer(communicator: Communicator,
     const interestedEntitiesByPeer = new Map<string, Set<string>>();
     const deferredOwnerWeaponIntent = new Map<string, Map<string, boolean>>();
     const movementSnapshotIntervalMs = MOVEMENT_SNAPSHOT_INTERVAL_MS;
+
+    // Client: own ships predicted from input. Sequence numbers are per
+    // entity and keep counting across prediction sessions.
+    const commandSeqs = new Map<string, number>();
+    let lastInputSendAt = -Infinity;
+    const predictions = new Map<string, {
+        entity: Entity; prediction: ClientPrediction; driver: MovementDriver;
+    }>();
+    const predictionFallbackUntil = new Map<string, number>();
+    // Server: player ships driven by their owner's commands.
+    const inputQueues = new Map<string, {
+        entity: Entity; queue: ServerCommandQueue; driver: MovementDriver;
+        lastAckAt: number;
+    }>();
+
+    function stopPrediction(uuid: string): void {
+        const record = predictions.get(uuid);
+        if (!record) return;
+        predictions.delete(uuid);
+        if (record.entity.components.get(MovementDriverComponent) === record.driver) {
+            record.entity.components.delete(MovementDriverComponent);
+        }
+    }
+
+    function startPrediction(uuid: string, entity: Entity): void {
+        const prediction = new ClientPrediction(() => {
+            const seq = (commandSeqs.get(uuid) ?? 0) + 1;
+            commandSeqs.set(uuid, seq);
+            return seq;
+        });
+        const driver: MovementDriver = {
+            integrate: (state, physics, time, entities) =>
+                prediction.predict(state, physics, time.delta_ms, entities),
+        };
+        entity.components.set(MovementDriverComponent, driver);
+        predictions.set(uuid, { entity, prediction, driver });
+    }
+
+    function endServerInputMode(uuid: string): void {
+        const record = inputQueues.get(uuid);
+        if (!record) return;
+        inputQueues.delete(uuid);
+        if (record.entity.components.get(MovementDriverComponent) === record.driver) {
+            record.entity.components.delete(MovementDriverComponent);
+        }
+        // Rewind history is in server time; owner poses use the owner clock.
+        const track = record.entity.components.get(GuidanceTargetTrackComponent);
+        if (track) track.snapshots = [];
+    }
+
+    function startServerInputMode(uuid: string, entity: Entity, firstSeq: number) {
+        const queue = new ServerCommandQueue(firstSeq);
+        const driver: MovementDriver = {
+            integrate(state, physics, time, entities) {
+                queue.step(state, physics, time.delta_ms, entities);
+                // The server now authors this pose, so it also feeds the
+                // lag-compensation history (in server time).
+                let track = entity.components.get(GuidanceTargetTrackComponent);
+                if (!track) {
+                    track = { snapshots: [] };
+                    entity.components.set(GuidanceTargetTrackComponent, track);
+                }
+                queueGuidanceTargetSnapshot(track, state, queue.stateTime(time.time));
+            },
+        };
+        const track = entity.components.get(GuidanceTargetTrackComponent);
+        if (track?.clock) {
+            const offset = track.clock.offset;
+            track.snapshots = track.snapshots.map(snapshot => ({
+                ...snapshot, serverTime: snapshot.serverTime + offset,
+            }));
+            track.clock = undefined;
+        }
+        entity.components.set(MovementDriverComponent, driver);
+        lastOwnerMovementTime.delete(uuid);
+        const record = { entity, queue, driver, lastAckAt: -Infinity };
+        inputQueues.set(uuid, record);
+        return record;
+    }
+
     let messageSubscription: { unsubscribe(): void } | undefined;
     let peerLeaveSubscription: { unsubscribe(): void } | undefined;
     let connectionSubscription: { unsubscribe(): void } | undefined;
@@ -1030,6 +1151,9 @@ export function multiplayer(communicator: Communicator,
         nextMovementSequenceByEntity.delete(uuid);
         latestInboundMovement.delete(uuid);
         lastOwnerMovementTime.delete(uuid);
+        endServerInputMode(uuid);
+        stopPrediction(uuid);
+        predictionFallbackUntil.delete(uuid);
     }
 
     function encodeEntityForPeers(
@@ -1045,7 +1169,7 @@ export function multiplayer(communicator: Communicator,
         // The server may have integrated or knocked this ship locally for
         // hit detection. Observers must see the owner's last accepted pose,
         // not that competing copy.
-        if (!isAdmin || owner === localUuid) {
+        if (!isAdmin || owner === localUuid || inputQueues.has(uuid)) {
             return encoded;
         }
         const ownerMovement = lastMovementWireState.get(uuid);
@@ -1105,6 +1229,10 @@ export function multiplayer(communicator: Communicator,
     const hashMismatchSince = new Map<string, number>();
 
     function movementTimestamp(uuid: string, now: number): number {
+        const input = inputQueues.get(uuid);
+        if (input) {
+            return input.queue.stateTime(now);
+        }
         const ownerTime = lastOwnerMovementTime.get(uuid);
         return ownerTime ? Math.min(now, ownerTime.at + networkTiming.clock(ownerTime.source).offset) : now;
     }
@@ -1295,6 +1423,9 @@ export function multiplayer(communicator: Communicator,
                 sourceTime: number | undefined,
             ): void {
                 if (isAdmin && source === owner) {
+                    // An owner pose means it left input mode (for example a
+                    // scripted jump, or a client without prediction).
+                    endServerInputMode(uuid);
                     const clock = networkTiming.clock(source);
                     const at = sourceTime ?? localTime - clock.offset;
                     lastOwnerMovementTime.set(uuid, { source, at });
@@ -1868,7 +1999,76 @@ export function multiplayer(communicator: Communicator,
                         console.warn(e);
                     }
                 }
+
+                if (isAdmin && !peerIsAdmin && message.inputs) {
+                    for (const [uuid, commands] of message.inputs) {
+                        const entry = entityMap.get(uuid);
+                        if (!entry || entry.data.owner !== source
+                            || commands.length === 0
+                            || !entry.entity.components.has(MovementStateComponent)
+                            || !entry.entity.components.has(MovementPhysicsComponent)) {
+                            continue;
+                        }
+                        let record = inputQueues.get(uuid);
+                        if (!record || record.entity !== entry.entity) {
+                            endServerInputMode(uuid);
+                            record = startServerInputMode(
+                                uuid, entry.entity, commands[0].seq);
+                        }
+                        record.queue.push(commands);
+                    }
+                }
+
+                if (!isAdmin && peerIsAdmin && message.inputAcks) {
+                    for (const [uuid, ack] of message.inputAcks) {
+                        const record = predictions.get(uuid);
+                        const entity = entityMap.get(uuid)?.entity;
+                        if (!record || record.entity !== entity) continue;
+                        const movement = entity.components.get(MovementStateComponent);
+                        const physics = entity.components.get(MovementPhysicsComponent);
+                        if (movement && physics) {
+                            record.prediction.reconcile(ack, movement, physics, entities);
+                        }
+                    }
+                }
             }
+            // Choose, per owned ship, between input prediction and the
+            // owner-authored pose path. This runs before MovementSystem.
+            if (!isAdmin) {
+                const peers = communicator.peers.current.value;
+                const serverPresent = [...comms.admins].some(admin =>
+                    admin !== comms.uuid && peers.has(admin));
+                for (const [uuid, { entity, data }] of entityMap) {
+                    const want = options.inputPrediction === true
+                        && serverPresent
+                        && data.owner === comms.uuid
+                        && entity.components.has(MovementStateComponent)
+                        && entity.components.has(MovementPhysicsComponent)
+                        && !entity.components.has(RemoteMovementPresentationComponent)
+                        && !inputPredictionSuspended(entity)
+                        && localTime >= (predictionFallbackUntil.get(uuid) ?? -Infinity);
+                    const record = predictions.get(uuid);
+                    if (record && (record.entity !== entity || !want)) {
+                        stopPrediction(uuid);
+                        // Make the pose path publish a full snapshot now.
+                        lastMovementWireState.delete(uuid);
+                    } else if (record?.prediction.starved) {
+                        warn(`No input acknowledgements for ${uuid}; `
+                            + 'using owner-authored movement for a while');
+                        stopPrediction(uuid);
+                        lastMovementWireState.delete(uuid);
+                        predictionFallbackUntil.set(uuid, localTime + PREDICTION_FALLBACK_MS);
+                        continue;
+                    }
+                    if (want && !predictions.has(uuid)) {
+                        startPrediction(uuid, entity);
+                    }
+                }
+                for (const uuid of [...predictions.keys()]) {
+                    if (!entityMap.has(uuid)) stopPrediction(uuid);
+                }
+            }
+
             // Compare server state hashes with what this client now holds.
             // Every delta sent before a hash was in the same or an earlier
             // packet on this ordered channel, so a persisting mismatch means
@@ -2044,6 +2244,7 @@ export function multiplayer(communicator: Communicator,
 
             // Get deltas and create drafts 
             const ownedEntities = new Set<Entity>();
+            const inputs = new Map<string, MovementCommand[]>();
             for (const [uuid, { entity, data: multiplayerData }] of entityMap) {
                 if (entityMap.get(uuid)?.entity !== entity) {
                     // A full-state replacement may have untracked and
@@ -2104,6 +2305,21 @@ export function multiplayer(communicator: Communicator,
                         };
                     }
                 }
+                const predicted = predictions.get(uuid)?.entity === entity
+                    ? predictions.get(uuid)!.prediction
+                    : undefined;
+                if (predicted) {
+                    // The server authors this pose from our commands.
+                    entityDelta = entityDelta && withoutMovement(entityDelta);
+                    if (localTime - lastInputSendAt >= INPUT_SEND_INTERVAL_MS) {
+                        const commands = predicted.takeOutbox();
+                        if (commands.length > 0) {
+                            inputs.set(uuid, commands);
+                        }
+                    }
+                }
+                const inputDriven = isAdmin
+                    && inputQueues.get(uuid)?.entity === entity;
                 const movement = entity.components.get(MovementStateComponent);
                 if (entityDelta && containsMovementState(entityDelta)) {
                     markMovement(uuid, localTime);
@@ -2115,16 +2331,22 @@ export function multiplayer(communicator: Communicator,
                 }
 
                 const lastSnapshot = lastMovementSnapshotAt.get(uuid);
+                const lastWire = lastMovementWireState.get(uuid);
+                // Relay input-driven control edges at once, as the owner
+                // itself does on the pose path.
+                const controlEdge = inputDriven && movement !== undefined
+                    && lastWire !== undefined && controlsDiffer(lastWire, movement);
                 // A final stop/teleport also needs a snapshot. Testing only the
                 // new velocity would leave observers extrapolating the old one.
                 const periodicSnapshotDue = movement !== undefined
-                    && canSendOutbound(
+                    && !predicted
+                    && (inputDriven || canSendOutbound(
                         MovementStateComponent.name,
                         comms.uuid,
                         isAdmin,
                         owner,
-                    )
-                    && (lastSnapshot === undefined
+                    ))
+                    && (lastSnapshot === undefined || controlEdge
                         || localTime - lastSnapshot >= movementSnapshotIntervalMs - 0.001);
                 if (periodicSnapshotDue && movement) {
                     const snapshot = quantizeMovementState(movement);
@@ -2145,7 +2367,8 @@ export function multiplayer(communicator: Communicator,
                         entityDelta = entityDelta
                             ? mergeEntityDeltas(entityDelta, snapshotDelta)
                             : snapshotDelta;
-                        markMovement(uuid, localTime);
+                        markMovement(uuid, inputDriven
+                            ? movementTimestamp(uuid, localTime) : localTime);
                         lastMovementWireState.set(uuid, snapshot);
                     }
                     lastMovementSnapshotAt.set(uuid, localTime);
@@ -2161,6 +2384,30 @@ export function multiplayer(communicator: Communicator,
             }
             // Also release entities removed outside the multiplayer system.
             deltaMaker.untrackExcept(ownedEntities);
+
+            const inputAcksByOwner = new DefaultMap<string, Map<string, InputAck>>(
+                () => new Map());
+            for (const [uuid, record] of [...inputQueues]) {
+                const entry = entityMap.get(uuid);
+                if (!isAdmin || !entry || entry.entity !== record.entity) {
+                    endServerInputMode(uuid);
+                    continue;
+                }
+                if (!record.queue.processedAny
+                    || localTime - record.lastAckAt < INPUT_ACK_INTERVAL_MS - 0.001) {
+                    continue;
+                }
+                const movement = entry.entity.components.get(MovementStateComponent);
+                if (!movement) continue;
+                const owner = ownerOf(entry.entity);
+                if (!owner) continue;
+                record.lastAckAt = localTime;
+                inputAcksByOwner.get(owner).set(uuid, {
+                    seq: record.queue.lastProcessedSeq,
+                    state: copyMovementState(
+                        isDraft(movement) ? current(movement) : movement),
+                });
+            }
 
             const outboundChat = [...(comms.outboundChat ?? []), ...relayedChat];
             comms.outboundChat = [];
@@ -2192,6 +2439,11 @@ export function multiplayer(communicator: Communicator,
             }
             if (ownedUuids.length > 0) {
                 changes.ownedUuids = ownedUuids;
+                send = true;
+            }
+            if (inputs.size > 0) {
+                changes.inputs = inputs;
+                lastInputSendAt = localTime;
                 send = true;
             }
 
@@ -2228,8 +2480,17 @@ export function multiplayer(communicator: Communicator,
                     }
                     peerState.set(uuid, encoded);
                 }
-                const peerDelta = new Map([...delta].filter(([uuid]) =>
-                    interested.has(uuid) && !entering.has(uuid)));
+                const peerDelta = new Map([...delta]
+                    .filter(([uuid]) => interested.has(uuid) && !entering.has(uuid))
+                    .flatMap(([uuid, entityDelta]): [string, EntityDelta][] => {
+                        // The owner reconciles to its input acks instead.
+                        if (inputQueues.has(uuid)
+                            && ownerOf(entityMap.get(uuid)!.entity) === peer) {
+                            const stripped = withoutMovement(entityDelta);
+                            return stripped ? [[uuid, stripped]] : [];
+                        }
+                        return [[uuid, entityDelta]];
+                    }));
                 const peerRemove = new Set([
                     ...remove.filter(uuid => previous.has(uuid)),
                     ...leaving,
@@ -2278,6 +2539,10 @@ export function multiplayer(communicator: Communicator,
                 }
                 if (ownedUuids.length > 0) {
                     peerChanges.ownedUuids = ownedUuids;
+                    peerSend = true;
+                }
+                if (inputAcksByOwner.has(peer)) {
+                    peerChanges.inputAcks = inputAcksByOwner.get(peer);
                     peerSend = true;
                 }
                 const peerChat = outboundChat.filter(c => c.to === 'all' || c.to === peer || c.from === peer);
@@ -2378,6 +2643,7 @@ export function multiplayer(communicator: Communicator,
 
         connectionSubscription = communicator.connected.subscribe(connected => {
             if (connected) return;
+            for (const uuid of [...predictions.keys()]) stopPrediction(uuid);
             for (const peer of [...networkTiming.clocks.keys()]) networkTiming.resetPeer(peer);
             lastClockReplyAt.clear();
             const comms = world.singletonEntity.components.get(Comms);

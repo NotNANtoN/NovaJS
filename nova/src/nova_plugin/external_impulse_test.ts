@@ -333,3 +333,47 @@ describe('external movement impulses', () => {
         expect(server.velocity()).toEqual(new Vector(120, 0));
     });
 });
+
+describe('external impulses with input prediction', () => {
+    it('reaches a predicting owner once, through reconciliation only', async () => {
+        const { DeterministicDelayedNetwork } = await import('nova_ecs/plugins/delayed_network');
+        const { MovementPhysicsComponent, MovementPlugin, MovementType } =
+            await import('nova_ecs/plugins/movement_plugin');
+        const { Comms } = await import('nova_ecs/plugins/multiplayer_plugin');
+        const { TimePlugin } = await import('nova_ecs/plugins/time_plugin');
+        const network = new DeterministicDelayedNetwork({ delays: [50] });
+        const make = async (uuid: string, prediction: boolean) => {
+            const world = new World(uuid);
+            world.resources.set(PlatformResource, uuid === 'server' ? 'node' : 'browser');
+            await world.addPlugin(TimePlugin);
+            await world.addPlugin(MovementPlugin);
+            await world.addPlugin(ExternalImpulsePlugin);
+            await world.addPlugin(multiplayer(network.connect(uuid), undefined,
+                { inputPrediction: prediction }));
+            world.resources.get(TimeResource)!.fixedDelta_ms = 1000 / 60;
+            world.singletonEntity.components.get(Comms)!.admins = new Set(['server']);
+            return world;
+        };
+        const server = await make('server', false);
+        const owner = await make('player', true);
+        owner.entities.set('ship', new Entity('ship')
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, {
+                position: new Position(0, 0), velocity: new Vector(0, 0),
+                rotation: new Angle(0), accelerating: 0, turning: 0, turnBack: false,
+            })
+            .addComponent(MovementPhysicsComponent, {
+                maxVelocity: 1000, turnRate: 1, acceleration: 0,
+                movementType: MovementType.INERTIAL,
+            }));
+        const step = () => { owner.step(); server.step(); network.advance(); };
+        for (let i = 0; i < 120; i++) step();
+        const serverShip = server.entities.get('ship')!;
+        authorExternalImpulse(serverShip, serverShip.components.get(MovementStateComponent)!,
+            'player', server.resources.get(TimeResource)!.time, 90, 0);
+        for (let i = 0; i < 120; i++) step();
+        const velocity = owner.entities.get('ship')!.components.get(MovementStateComponent)!.velocity;
+        expect(velocity.x).toBeCloseTo(90, 3);
+        expect(serverShip.components.get(MovementStateComponent)!.velocity.x).toBeCloseTo(90, 3);
+    });
+});

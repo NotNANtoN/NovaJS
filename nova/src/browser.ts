@@ -382,7 +382,11 @@ async function transitionTo(
 
         updateProgress(87, 'Connecting to star system...');
         const room = multiRoom.join(to);
-        await newSystem.addPlugin(multiplayer(room));
+        await newSystem.addPlugin(multiplayer(room, undefined, {
+            // `?movement=legacy` restores owner-authored ship movement.
+            inputPrediction: new URLSearchParams(window.location.search)
+                .get('movement') !== 'legacy',
+        }));
 
         const failedTransition = async (error: unknown) => {
             console.error('Failed to enter system', error);

@@ -6,7 +6,8 @@ import { Entity } from 'nova_ecs/entity';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
-import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { MovementDriverComponent, MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { suspendInputPredictionWhen } from 'nova_ecs/plugins/input_prediction';
 import {
     Communicator, CommunicatorResource, InboundMultiplayerPhase, MultiplayerData,
     MultiplayerPhase, replicationPolicies, ServerClockOffsetResource,
@@ -16,7 +17,7 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { PlatformResource } from './platform_plugin';
-import { PlayerDeathComponent } from './death_plugin';
+import { DisabledComponent, PlayerDeathComponent } from './death_plugin';
 import { DestructionStartedComponent } from './destruction_state';
 import { JumpStateComponent } from './jump_plugin';
 import { PlayerStateComponent } from './player_state';
@@ -24,6 +25,11 @@ import { ShipComponent } from './ship_plugin';
 import { SystemIdResource } from './system_id_resource';
 
 export const EXTERNAL_IMPULSE_LIFETIME_MS = 2_000;
+
+// Scripted client-side flight (jumps end in a client-side system transfer)
+// and disabled drift (client-side decay) keep the owner-authored pose path.
+suspendInputPredictionWhen(entity => entity.components.has(JumpStateComponent)
+    || entity.components.get(DisabledComponent) === true);
 const Impulse = t.type({
     sequence: t.number,
     owner: t.string,
@@ -147,7 +153,10 @@ export const ExternalImpulseSystem = new System({
                 // Clock-offset smoothing can briefly put a fresh impulse ahead
                 // of the browser's server-time estimate. Defer, don't lose it.
                 if (impulse.issuedAt > now) break;
+                // Input-predicted ships receive knockback inside the server
+                // state they reconcile to; applying it here would double it.
                 if (owner === communicator.uuid && impulse.owner === owner
+                    && !entity.components.has(MovementDriverComponent)
                     && impulse.issuedAt > Math.max(connectedAt, cursor.acceptAfter)
                     && now < impulse.expiresAt) {
                     movement.velocity = movement.velocity.add(

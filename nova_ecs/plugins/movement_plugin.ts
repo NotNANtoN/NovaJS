@@ -208,6 +208,19 @@ export interface GuidanceTargetTrack {
 export const GuidanceTargetTrackComponent =
     new Component<GuidanceTargetTrack>('GuidanceTargetTrack');
 
+/**
+ * Replaces MovementSystem's own integration for one entity. Input prediction
+ * uses this so the owning client and the server integrate that ship from the
+ * same command stream. Local-only: never serialized.
+ */
+export interface MovementDriver {
+    integrate(state: MovementState, physics: MovementPhysics, time: Time,
+        entities: EntityMap): void;
+}
+
+export const MovementDriverComponent =
+    new Component<MovementDriver>('MovementDriver');
+
 export const REMOTE_INTERPOLATION_DELAY_MS = DEFAULT_PRESENTATION_DELAY_MS;
 export const REMOTE_MAX_EXTRAPOLATION_MS = MAX_MOVEMENT_EXTRAPOLATION_MS;
 const MOVEMENT_CORRECTION_HALF_LIFE_MS = 30;
@@ -459,11 +472,16 @@ export const MovementSystem = new System({
     name: 'movement',
     args: [MovementStateComponent, MovementPhysicsComponent,
         Optional(RemoteMovementPresentationComponent),
-        TimeResource, Entities, Optional(MovementPlaybackComponent)] as const,
-    step(state, physics, presentation, time, entities, playback) {
+        TimeResource, Entities, Optional(MovementPlaybackComponent),
+        Optional(MovementDriverComponent)] as const,
+    step(state, physics, presentation, time, entities, playback, driver) {
         if (presentation) {
             // Remote movement is sampled by the presentation system below.
             // Do not integrate it once and then overwrite it again.
+            return;
+        }
+        if (driver) {
+            driver.integrate(state, physics, time, entities);
             return;
         }
         if (playback) {
@@ -698,6 +716,7 @@ export const MovementPlugin: Plugin = {
         world.addComponent(MovementStateComponent);
         world.addComponent(RemoteMovementPresentationComponent);
         world.addComponent(GuidanceTargetTrackComponent);
+        world.addComponent(MovementDriverComponent);
         world.addSystem(AdvanceNetworkPlaybackSystem);
         world.addSystem(MovementSystem);
         world.addSystem(RemoteMovementPresentationSystem);
