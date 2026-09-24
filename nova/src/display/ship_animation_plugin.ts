@@ -8,11 +8,18 @@ import { IonizationColorComponent, ShieldComponent } from "../nova_plugin/health
 import { IsIonizedComponent } from "../nova_plugin/ionization_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
 import { WeaponsStateComponent } from "../nova_plugin/weapons_state";
-import { AnimationGraphicComponent } from "./animation_graphic_plugin";
+import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin";
 
+
+const ENGINE_GLOW_HOLD_MS = 350;
+const ENGINE_GLOW_FADE_MS = 250;
+const engineGlow = new WeakMap<object, { lastThrustAt: number }>();
 
 export const ShipAnimationSystem = new System({
     name: "ShipAnimationSystem",
+    // ObjectDrawSystem writes a raw glow alpha each frame; this system owns
+    // the ship engine glow and must have the final word.
+    after: [ObjectDrawSystem],
     args: [
         ShipComponent,
         WeaponsStateComponent,
@@ -47,14 +54,26 @@ export const ShipAnimationSystem = new System({
             }
         }
 
-        // Engine glow animation while accelerating
+        // Engine glow while accelerating. AI pilots feather the throttle
+        // (short on/off pulses while matching a target), and remote ships only
+        // report thrust at snapshot rate, so the glow is held briefly after the
+        // last thrust and faded rather than strobing on and off.
         const glow = animation.sprites.get('glowImage');
         if (glow) {
             glow.pixiSprite.blendMode = 'add';
+            const state = engineGlow.get(animation) ?? { lastThrustAt: -Infinity };
+            engineGlow.set(animation, state);
             if (movement && movement.accelerating > 0) {
+                state.lastThrustAt = time.time;
+            }
+            const sinceThrust = time.time - state.lastThrustAt;
+            if (sinceThrust <= ENGINE_GLOW_HOLD_MS + ENGINE_GLOW_FADE_MS) {
+                const fade = sinceThrust <= ENGINE_GLOW_HOLD_MS ? 1
+                    : 1 - (sinceThrust - ENGINE_GLOW_HOLD_MS) / ENGINE_GLOW_FADE_MS;
                 glow.pixiSprite.visible = true;
                 // Subtle engine exhaust flicker
-                glow.pixiSprite.alpha = 0.85 + Math.sin(time.time * 0.04) * 0.15;
+                glow.pixiSprite.alpha = fade
+                    * (0.85 + Math.sin(time.time * 0.04) * 0.15);
             } else {
                 glow.pixiSprite.visible = false;
             }

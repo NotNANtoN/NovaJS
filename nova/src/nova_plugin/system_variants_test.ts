@@ -1,6 +1,43 @@
 import 'jasmine';
-import { areSystemsSameOrVariants, isPlanetInSystem } from './system_variants';
+import { areSystemsSameOrVariants, isPlanetInSystem, isSystemVisible, visibleJumpTarget } from './system_variants';
 import { getDefaultSystemData } from 'novadatainterface/SystemData';
+import { createDraft, finishDraft } from 'immer';
+import { SystemGraph } from '../spaceport/starmap';
+
+describe('storyline clone visibility', () => {
+    // Retail Kerella links both Sol 130 and its hidden clone Sol 531.
+    const sol = { ...getDefaultSystemData(), id: 'nova:130', name: 'Sol', position: [0, 0] as [number, number],
+        links: ['nova:134'], visibility: '!(b147 | b305)' };
+    const solClone = { ...sol, id: 'nova:531', visibility: '(b147 | b305)' };
+    const kerella = { ...getDefaultSystemData(), id: 'nova:134', name: 'Kerella', position: [-120, -60] as [number, number],
+        links: ['nova:531', 'nova:130'] };
+    const byId = new Map([sol, solClone, kerella].map(s => [s.id, s]));
+
+    it('jumps to the visible Sol, not its hidden clone listed first', () => {
+        const bits: boolean[] = [];
+        expect(visibleJumpTarget('nova:531', kerella.links, bits, id => byId.get(id))).toBe('nova:130');
+        expect(visibleJumpTarget('nova:130', kerella.links, bits, id => byId.get(id))).toBe('nova:130');
+        bits[147] = true;
+        expect(visibleJumpTarget('nova:130', kerella.links, bits, id => byId.get(id))).toBe('nova:531');
+    });
+
+    it('treats unreadable bits as hidden rather than visible', () => {
+        const draft = createDraft({ bits: [] as boolean[] });
+        const revoked = draft.bits;
+        finishDraft(draft);
+        expect(isSystemVisible(solClone, revoked)).toBeFalse();
+    });
+
+    it('routes the starmap to the visible Sol even with a revoked bit list', () => {
+        const draft = createDraft({ bits: [] as boolean[] });
+        const revoked = draft.bits;
+        finishDraft(draft);
+        const graph = new SystemGraph([sol, solClone, kerella], 'nova:134', undefined,
+            () => {}, () => true, undefined, revoked);
+        (graph as unknown as { onClickSystem(id: string): void }).onClickSystem('nova:531');
+        expect(graph.route).toEqual(['nova:130']);
+    });
+});
 
 describe('system_variants', () => {
     describe('areSystemsSameOrVariants', () => {

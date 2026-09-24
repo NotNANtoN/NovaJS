@@ -31,19 +31,33 @@ export const AnimationGraphicComponent = new Component<AnimationGraphic>('Animat
 export const AnimationGraphicLoadedComponent = new Component<AnimationGraphic>('AnimationGraphicLoaded');
 replicationPolicies.register(AnimationGraphicComponent, { codec: t.any, authority: 'local-only' });
 replicationPolicies.register(AnimationGraphicLoadedComponent, { codec: t.any, authority: 'local-only' });
+/** The animation a graphic was built from, to notice a hull change. */
+const builtFrom = new WeakMap<AnimationGraphic, string>();
+
+function animationKey(animation: { id?: string, images?: unknown }): string {
+    return `${animation.id ?? ''}|${JSON.stringify(animation.images ?? {})}`;
+}
+
 const AnimationGraphicLoader = ProvideAsync({
     name: "AnimationGraphicLoader",
     provided: AnimationGraphicLoadedComponent,
     args: [AnimationComponent, GameDataResource, GetEntity, Optional(AnimationGraphicComponent)] as const,
+    // A new hull (shipyard purchase, commandeered ship) swaps the animation
+    // in flight; the sprite must follow instead of waiting for a relanding.
+    update: [AnimationComponent],
     dispose: graphic => graphic.dispose(),
     async factory(animation, gameData, entity, existingGraphic) {
-        if (existingGraphic && !existingGraphic.managed.disposed) {
+        const key = animationKey(currentIfDraft(animation)!);
+        if (existingGraphic && !existingGraphic.managed.disposed
+            && (builtFrom.get(existingGraphic) ?? key) === key) {
+            builtFrom.set(existingGraphic, key);
             return existingGraphic;
         }
         const graphic = new AnimationGraphic({
             gameData: currentIfDraft(gameData)!,
             animation: currentIfDraft(animation)!,
         });
+        builtFrom.set(graphic, key);
         await graphic.buildPromise;
 
         // Order sprites
@@ -192,6 +206,7 @@ const SyncAnimationGraphicInsert = new System({
             graphic.container.zIndex = -10;
         }
 
+        builtFrom.set(graphic, animationKey(currentIfDraft(animation)!));
         graphic.attachTo(space);
         if (movementState) {
             graphic.container.position.x = movementState.position.x;

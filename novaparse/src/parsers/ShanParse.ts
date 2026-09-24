@@ -6,6 +6,18 @@ import { BLEND_MODES } from "novadatainterface/BlendModes";
 import { ShanResource } from "../resource_parsers/ShanResource";
 import { BaseParse } from "./BaseParse";
 
+/**
+ * Hulls whose frames must not be rotated in-plane between pre-rendered
+ * headings. Measured from the retail sprites: the Pegasus is a lit saucer
+ * (in-plane rotation turns its lighting, which snaps back each frame) and the
+ * Leviathan's 64 perspective frames are unevenly spaced by up to 23 degrees,
+ * so interpolating between them overshoots and jumps back.
+ */
+const SNAP_ROTATION_SHANS = new Set([
+    131, 190, 192, // Leviathan
+    132, 193, 194, // Pegasus
+]);
+
 export async function ShanParse(shan: ShanResource, notFoundFunction: (message: string) => void): Promise<Animation> {
     var base: BaseData = await BaseParse(shan, notFoundFunction);
 
@@ -70,6 +82,7 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
             dataType: NovaDataType.SpriteSheetImage,
             blendMode,
             frames,
+            ...(SNAP_ROTATION_SHANS.has(shan.id) ? { snapRotation: true } : {}),
         };
     }
 

@@ -5,6 +5,7 @@ import { SystemData } from 'novadatainterface/SystemData';
 import { Gettable } from 'novadatainterface/Gettable';
 import { SpriteSheetFramesData } from 'novadatainterface/SpriteSheetData';
 import { texturesFromFrames } from './textures_from_frames';
+import { COCKPIT_SOUND_IDS } from '../nova_plugin/sound_event';
 
 export interface WarmFlightProgress {
     loaded: number;
@@ -73,7 +74,7 @@ export async function warmFlightAssets({
     const weapons = new Set<string>();
     const explosions = new Set<string>();
     const sheets = new Set<string>();
-    const sounds = new Set<string>();
+    const sounds = new Set<string>(COCKPIT_SOUND_IDS);
 
     onProgress?.({
         loaded: 0,

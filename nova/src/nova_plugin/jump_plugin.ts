@@ -39,7 +39,7 @@ import { SystemIdResource } from "./system_id_resource";
 import { NpcAIComponent, NpcDepartureComponent } from "./npc_components";
 import { PlatformResource } from "./platform_plugin";
 import { AppliedDamageEvent } from "./damage_events";
-import { areSystemsSameOrVariants, type SystemLookup } from "./system_variants";
+import { areSystemsSameOrVariants, visibleJumpTarget, type SystemLookup } from "./system_variants";
 export { areSystemsSameOrVariants, type SystemLookup };
 
 export const JUMP_SPOOL_MS = 1_200;
@@ -507,7 +507,7 @@ const PlayerJumpControl = new System({
             }
             return;
         }
-        const nextSystem = jumpRoute.route[0];
+        let nextSystem = jumpRoute.route[0];
         if (!nextSystem) {
             emit(JumpRefusedEvent, { reason: 'destination' });
             emit(SoundEvent, { id: 'nova:153' });
@@ -532,6 +532,13 @@ const PlayerJumpControl = new System({
             emit(JumpRefusedEvent, { reason: 'destination' });
             emit(SoundEvent, { id: 'nova:153' });
             return;
+        }
+        // Never arrive in a hidden storyline clone of the destination.
+        const visibleTarget = visibleJumpTarget(nextSystem, currentSystem.links,
+            playerState?.missionBits, id => gameData.data.System.getCached(id));
+        if (visibleTarget !== nextSystem) {
+            jumpRoute.route = [visibleTarget, ...jumpRoute.route.slice(1)];
+            nextSystem = visibleTarget;
         }
         if (!isValidNextHop(currentSystem, nextSystem, gameData.data.System)) {
             console.warn(`[JUMP REFUSED] Not a valid next hop. Current system: ${systemId} (${currentSystem.name ?? 'unknown'}), links: [${currentSystem.links.join(', ')}], nextSystem: ${nextSystem}`);

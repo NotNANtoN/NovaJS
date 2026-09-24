@@ -1,4 +1,54 @@
 import { SystemData } from 'novadatainterface/SystemData';
+import { evaluateTestExpression } from './ncb';
+
+/**
+ * Whether a sÿst is visible for these control bits. Retail keeps storyline
+ * clones (Sol 130/531, Glimmer 193/759/760/761) at the same place and shows
+ * exactly one of them according to its visibility expression.
+ */
+export function isSystemVisible(
+    system: Pick<SystemData, 'visibility'> | undefined,
+    missionBits: ReadonlySet<number> | readonly boolean[] | undefined,
+): boolean {
+    if (!system?.visibility) {
+        return true;
+    }
+    try {
+        return evaluateTestExpression(system.visibility,
+            { missionBits: missionBits ?? new Set() });
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * The visible system a hyperjump to `target` should really arrive in. A hidden
+ * clone is swapped for the visible variant among the current system's links.
+ */
+export function visibleJumpTarget(
+    target: string,
+    links: readonly string[],
+    missionBits: ReadonlySet<number> | readonly boolean[] | undefined,
+    getSystem: (id: string) => Pick<SystemData, 'name' | 'position' | 'visibility'> | undefined,
+): string {
+    const data = getSystem(target);
+    if (!data || isSystemVisible(data, missionBits)) {
+        return target;
+    }
+    for (const link of links) {
+        const candidate = getSystem(link);
+        if (!candidate || link === target) continue;
+        const samePlace = candidate.position && data.position
+            && candidate.position[0] === data.position[0]
+            && candidate.position[1] === data.position[1];
+        const sameName = candidate.name && data.name
+            && candidate.name.trim().toLowerCase() === data.name.trim().toLowerCase();
+        if ((samePlace || sameName) && isSystemVisible(candidate, missionBits)) {
+            return link;
+        }
+    }
+    return target;
+}
 
 export type SystemLookup = {
     readonly getCached?: (id: string) => Pick<SystemData, 'name' | 'position'> | undefined;

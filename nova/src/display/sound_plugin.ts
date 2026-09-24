@@ -200,6 +200,13 @@ const SoundSystem = new System({
     step({ id, loop = false, stop = false, position }, gameData, loopingSounds, loadedSounds,
         pendingSounds, failedSounds, {volume: masterVolume}, players, _singleton, loopingRefs) {
         if (stop) {
+            // A stop that lands while the sound is still downloading must
+            // also cancel that pending playback.
+            if (id) {
+                pendingSounds.delete(id);
+            } else {
+                pendingSounds.clear();
+            }
             if (id) {
                 const count = (loopingRefs.get(id) ?? 1) - 1;
                 if (count <= 0) {
@@ -250,9 +257,14 @@ const SoundSystem = new System({
             pendingSounds.set(id, pending);
         }
 
+        const request = pending;
         void pending.then(sound => {
             if (!sound) {
                 failedSounds.add(id);
+                return;
+            }
+            if (pendingSounds.get(id) !== request) {
+                // Stopped (or superseded) before it finished loading.
                 return;
             }
             loadedSounds.set(id, sound);
@@ -262,7 +274,7 @@ const SoundSystem = new System({
             failedSounds.add(id);
             // Missing or empty sound files fail silently without polluting console
         }).finally(() => {
-            if (pendingSounds.get(id) === pending) {
+            if (pendingSounds.get(id) === request) {
                 pendingSounds.delete(id);
             }
         });

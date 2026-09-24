@@ -128,7 +128,7 @@ export class SpriteSheetSprite {
         let r = getFrameAndAngle(angle, count);
         const textureSetLocalIndex = r.frame;
         this.frame = textureSetLocalIndex + this.textureSet.start;
-        this.pixiSprite.rotation = r.angle;
+        this.pixiSprite.rotation = this.image.snapRotation ? 0 : r.angle;
         this.wrappedRotation = angle;
     }
 

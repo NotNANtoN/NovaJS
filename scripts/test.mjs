@@ -31,7 +31,10 @@ const skipReasons = new Map([
 ]);
 const skippedTests = discoveredTests.filter(file =>
     [...skipReasons.keys()].some(suffix => file.endsWith(suffix)));
-const tests = discoveredTests.filter(file => !skippedTests.includes(file));
+// Optional substring filters: `npm test -- jump_plugin sound_plugin`.
+const filters = process.argv.slice(2);
+const tests = discoveredTests.filter(file => !skippedTests.includes(file)
+    && (filters.length === 0 || filters.some(filter => file.includes(filter))));
 if (tests.length === 0) {
     throw new Error('No *_test.ts files found');
 }

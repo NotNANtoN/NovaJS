@@ -27,10 +27,31 @@ export const CAPTURE_SOUND_ID = 'nova:390';
 /** Another ship has just locked onto the player: three-pulse alert. */
 export const TARGETED_WARNING_SOUND_ID = 'nova:154';
 
+/** Retail snd 128 "Warp up": the hyperdrive winding up before departure. */
+export const HYPERSPACE_WINDUP_SOUND_ID = 'nova:128';
+/** Retail snd 130 "Warp out": the arrival flash. */
+export const HYPERSPACE_ARRIVAL_SOUND_ID = 'nova:130';
+
 // Retail snd 390 is named "Airlock", which is the evidenced one-shot sound for
 // entering or leaving a docked stellar.
 export const STELLAR_DOCKING_SOUND_ID = 'nova:390';
 export const STELLAR_DEPARTURE_SOUND_ID = STELLAR_DOCKING_SOUND_ID;
+
+/**
+ * Sounds tied to the player's own actions rather than to anything in the
+ * system. They are preloaded with every system so a time-critical cue such as
+ * the hyperdrive wind-up is never still downloading when it should play.
+ */
+export const COCKPIT_SOUND_IDS: readonly string[] = [
+    HYPERSPACE_WINDUP_SOUND_ID,
+    HYPERSPACE_ARRIVAL_SOUND_ID,
+    TARGET_SELECTION_SOUND_ID,
+    SELECT_STELLAR_SOUND_ID,
+    'nova:153',
+    TARGETED_WARNING_SOUND_ID,
+    INCOMING_MISSILE_SOUND_ID,
+    STELLAR_DOCKING_SOUND_ID,
+];
 
 /**
  * `position` places the sound in the system, so it can be attenuated by how

@@ -38,6 +38,12 @@ export interface AnimationImage {
      * False if the sprite sheet is a pre-rendered 3D tumble/flip animation.
      */
     rotateInPlane?: boolean;
+    /**
+     * Show only the pre-rendered rotation frames, without rotating the sprite
+     * in-plane between them (retail behaviour). Needed where frames are lit
+     * or drawn in perspective, so in-plane rotation visibly wobbles.
+     */
+    snapRotation?: boolean;
 }
 
 export function getDefaultAnimationImage(): AnimationImage {

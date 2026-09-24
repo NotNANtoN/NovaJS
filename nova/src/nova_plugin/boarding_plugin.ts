@@ -59,7 +59,7 @@ import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 import { CombatAuthorityComponent } from './combat_resources';
-import { transferFlagship } from './flagship_swap';
+import { AdoptServerHullSystem, RefreshChangedHullSystem, transferFlagship } from './flagship_swap';
 import { DerelictComponent } from './derelict_component';
 
 export const BOARDING_STANDOFF = 80;
@@ -810,6 +810,8 @@ export const BoardingPlugin: Plugin = {
         world.addSystem(PlayerBoardingInputSystem);
         world.addSystem(PlayerBoardingSystem);
         world.addSystem(PirateBoardingSystem);
+        world.addSystem(AdoptServerHullSystem);
+        world.addSystem(RefreshChangedHullSystem);
     },
     remove(world) {
         world.removeSystem(DudeBootyProvider);
@@ -817,5 +819,7 @@ export const BoardingPlugin: Plugin = {
         world.removeSystem(PlayerBoardingInputSystem);
         world.removeSystem(PlayerBoardingSystem);
         world.removeSystem(PirateBoardingSystem);
+        world.removeSystem(AdoptServerHullSystem);
+        world.removeSystem(RefreshChangedHullSystem);
     },
 };

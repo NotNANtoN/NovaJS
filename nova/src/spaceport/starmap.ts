@@ -42,7 +42,7 @@ import {
     TerritoryField,
     TerritoryPoint,
 } from "./territory_field";
-import { evaluateTestExpression } from "../nova_plugin/ncb";
+import { evaluateTestExpression, parseTestExpression } from "../nova_plugin/ncb";
 
 export { shortestRoute, shortestRoutes } from "./route_planning";
 
@@ -106,13 +106,21 @@ export function isSystemActive(
     if (!system.visibility) {
         return true;
     }
+    let expression: ReturnType<typeof parseTestExpression>;
+    try {
+        expression = parseTestExpression(system.visibility);
+    } catch {
+        // An unparseable expression is ignored, as retail does.
+        return true;
+    }
     try {
         return evaluateTestExpression(
-            system.visibility,
+            expression,
             { missionBits: missionBits ?? new Set() },
         );
     } catch {
-        return true;
+        // Unreadable bits must not reveal every storyline clone at once.
+        return evaluateTestExpression(expression, { missionBits: new Set() });
     }
 }
 
@@ -1107,8 +1115,11 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         }
         const currentSystem = this.currentSystemId();
         this.systemGraph?.setCurrentSystem(currentSystem, false);
-        this.systemGraph?.setMissionBits(playerState?.missionBits, false);
-        this.systemGraph?.setMissionMarkers(playerState?.activeMissions, false);
+        // Use the copies: the caller's arrays may be drafts that are revoked
+        // while the map is open, and an unreadable bit list would make every
+        // hidden storyline clone look visible.
+        this.systemGraph?.setMissionBits(this.playerState?.missionBits, false);
+        this.systemGraph?.setMissionMarkers(this.playerState?.activeMissions, false);
         if (this.container.visible && this.selectedSystemId) {
             void this.renderPanel(this.selectedSystemId);
         }
