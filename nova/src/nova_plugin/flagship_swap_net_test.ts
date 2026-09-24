@@ -55,5 +55,6 @@ describe('networked flagship swap', () => {
         expect(me.components.get(ShipDataComponent)?.name).toBe('Pegasus');
         expect(me.components.get(PlayerStateComponent)?.cargoCapacity).toBe(60);
         expect(serverShip.components.get(ShipDataComponent)?.name).toBe('Pegasus');
-    });
+    // 120 simulated network steps; slower CI runners exceed the 5 s default.
+    }, 60_000);
 });

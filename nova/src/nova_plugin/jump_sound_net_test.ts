@@ -81,6 +81,7 @@ describe('networked hyperjump audio', () => {
             // re-send its departing copy after the client drops the ship.
             expect(phases.slice(0, 4)).toEqual(['braking', 'spooling', 'departing', 'none']);
             expect(sounds.filter(s => s === HYPERSPACE_WINDUP_SOUND_ID).length).toBe(1);
-        });
+        // ~470 simulated network steps: well over the 5 s default on CI runners.
+        }, 60_000);
     }
 });
