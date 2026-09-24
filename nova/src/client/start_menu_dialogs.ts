@@ -99,7 +99,7 @@ const DEFAULT_CONTROL_CODES: Readonly<Record<string, unknown>> = {
     volumeUp: 'Equal',
     volumeDown: 'Minus',
     attack: 'KeyF',
-    defend: 'KeyE',
+    defend: ['KeyD', 'KeyE'],
     formation: 'KeyK',
     holdPosition: 'KeyV',
 };

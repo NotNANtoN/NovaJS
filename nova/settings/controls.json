@@ -30,7 +30,7 @@
   "escorts": "KeyE",
   "holdPosition": "KeyV",
   "attack": "KeyF",
-  "defend": "KeyE",
+  "defend": ["KeyD", "KeyE"],
   "formation": "KeyK",
   "cloak": "KeyC",
   "map": "KeyM",
