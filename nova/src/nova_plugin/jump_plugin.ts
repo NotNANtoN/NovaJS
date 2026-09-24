@@ -745,7 +745,6 @@ export const JumpLifecycleSystem = new System({
             entity.components.delete(RemoteMovementPresentationComponent);
 
             emit(SoundEvent, { id: 'nova:128', stop: true });
-            emit(SoundEvent, { id: 'nova:123', stop: true });
             entities.delete(uuid);
             deImmerify(entity);
             emit(FinishJumpEvent, {
@@ -865,7 +864,6 @@ export const CancelJumpOnDamageSystem = new System({
             cancelJumpFlight(entity, movement, physics);
             emit(JumpRefusedEvent, { reason: 'damage' });
             emit(SoundEvent, { id: 'nova:128', stop: true });
-            emit(SoundEvent, { id: 'nova:123', stop: true });
             emit(SoundEvent, { id: 'nova:130', stop: true });
         }
     },

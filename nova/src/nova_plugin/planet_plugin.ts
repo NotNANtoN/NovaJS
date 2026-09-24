@@ -17,7 +17,7 @@ import { ControlStateEvent } from './control_state_event';
 import { GameDataResource } from './game_data_resource';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { ShipComponent } from './ship_plugin';
-import { SoundEvent } from './sound_event';
+import { SELECT_STELLAR_SOUND_ID, SoundEvent } from './sound_event';
 import { Target } from './target_component';
 import { ArmorComponent } from './health_plugin';
 import { DestructionStartedComponent } from './destruction_state';
@@ -384,7 +384,7 @@ const StellarSelectionSystem = new System({
         const candidate = orderedPlanets[requestedIndex];
         if (candidate) {
             planetTarget.target = candidate[0];
-            emit(SoundEvent, { id: 'nova:142' });
+            emit(SoundEvent, { id: SELECT_STELLAR_SOUND_ID });
         }
     }
 });

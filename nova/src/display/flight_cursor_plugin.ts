@@ -18,7 +18,9 @@ import {
 } from '../nova_plugin/planet_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { ShipComponent } from '../nova_plugin/ship_plugin';
-import { SoundEvent } from '../nova_plugin/sound_event';
+import {
+    CLICK_TARGET_SHIP_SOUND_ID, SELECT_STELLAR_SOUND_ID, SoundEvent,
+} from '../nova_plugin/sound_event';
 import { TargetComponent } from '../nova_plugin/target_component';
 import { Space } from './space_resource';
 import { Stage } from './stage_resource';
@@ -359,7 +361,7 @@ export const FlightCursorSystem = new System({
 
             if (clickShip && playerTarget) {
                 playerTarget.target = clickShip[0];
-                emit(SoundEvent, { id: 'nova:141' });
+                emit(SoundEvent, { id: CLICK_TARGET_SHIP_SOUND_ID });
                 return;
             }
 
@@ -382,7 +384,7 @@ export const FlightCursorSystem = new System({
                 // Click strictly targets the planet. Only pressing 'L' lands.
                 const [planetUuid] = clickPlanet;
                 playerPlanetTarget.target = planetUuid;
-                emit(SoundEvent, { id: 'nova:142' });
+                emit(SoundEvent, { id: SELECT_STELLAR_SOUND_ID });
             }
         }
     },

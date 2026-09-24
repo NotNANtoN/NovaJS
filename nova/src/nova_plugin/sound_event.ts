@@ -11,6 +11,22 @@ export const TARGET_SELECTION_SOUND_ID = 'nova:150';
 // data because no missile-lock-specific sound field is documented.
 export const INCOMING_MISSILE_SOUND_ID = 'nova:371';
 
+/*
+ * Retail Nova Sounds.ndat has only five interface tones, snd 150-154
+ * ("Beep1"-"Beep5"). Measured: 150 is a short 1.2 kHz double blip, 151 a
+ * bright 4 kHz ping, 152 a very short 2 kHz tick, 153 a 2.4 kHz buzz (the
+ * refusal tone used throughout), 154 a three-pulse 2.1 kHz alert.
+ */
+
+/** Clicking a ship to target it. */
+export const CLICK_TARGET_SHIP_SOUND_ID = 'nova:150';
+/** Clicking or number-key selecting a stellar. */
+export const SELECT_STELLAR_SOUND_ID = 'nova:152';
+/** A ship was captured or commandeered; the airlock cycling on board. */
+export const CAPTURE_SOUND_ID = 'nova:390';
+/** Another ship has just locked onto the player: three-pulse alert. */
+export const TARGETED_WARNING_SOUND_ID = 'nova:154';
+
 // Retail snd 390 is named "Airlock", which is the evidenced one-shot sound for
 // entering or leaving a docked stellar.
 export const STELLAR_DOCKING_SOUND_ID = 'nova:390';

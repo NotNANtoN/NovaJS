@@ -2,7 +2,7 @@ import { Resource } from 'nova_ecs/resource';
 import * as t from 'io-ts';
 import { STANDARD_COMMODITIES } from 'novadatainterface/CommodityData';
 import { Emit, EmitNow, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
-import { SoundEvent } from './sound_event';
+import { CAPTURE_SOUND_ID, SoundEvent } from './sound_event';
 import { Component } from 'nova_ecs/component';
 import { consumeRequest } from 'nova_ecs/transient_request';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -556,7 +556,7 @@ export const PlayerBoardingSystem = new System({
                             transferFlagship(player, entity, victimShipId, uuid, maxEscorts);
                             capturedShip = shipName;
                             entities.delete(request.target);
-                            emitNow(SoundEvent, { id: 'nova:140' });
+                            emitNow(SoundEvent, { id: CAPTURE_SOUND_ID });
                         } else {
                             const dailyPay = isDerelict ? 10 : Math.max(10, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
                             const newContract = {
@@ -568,7 +568,7 @@ export const PlayerBoardingSystem = new System({
                             entity.components.set(PlayerStateComponent, player);
                             capturedShip = shipName;
                             entities.delete(request.target);
-                            emitNow(SoundEvent, { id: 'nova:140' });
+                            emitNow(SoundEvent, { id: CAPTURE_SOUND_ID });
                         }
                     } else if (isDerelict) {
                         selfDestruct = true;

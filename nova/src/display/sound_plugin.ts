@@ -30,6 +30,7 @@ import {
     STELLAR_DEPARTURE_SOUND_ID,
     STELLAR_DOCKING_SOUND_ID,
     TARGET_SELECTION_SOUND_ID,
+    TARGETED_WARNING_SOUND_ID,
 } from '../nova_plugin/sound_event';
 import { worldSoundVolume } from './sound_attenuation';
 import {
@@ -48,6 +49,46 @@ const IncomingMissileStateResource = new Resource<Set<string>>(
     'IncomingMissileState');
 const StellarSoundStateResource = new Resource<StellarSoundState>(
     'StellarSoundState');
+const TargetedByStateResource = new Resource<TargetedByState>('TargetedByState');
+
+interface TargetedByState {
+    /** Ships currently targeting the player's ship. */
+    targeters: Set<string>;
+    player?: string;
+    lastWarnAt: number;
+}
+
+/** One warning per burst of new lock-ons, however many ships lock at once. */
+export const TARGETED_WARNING_COOLDOWN_MS = 1500;
+
+const TargetingShipsQuery = new Query([
+    UUID,
+    TargetComponent,
+    ShipComponent,
+] as const);
+
+/**
+ * The ships in `targeting` that newly target `player`, given the set that
+ * targeted it last step. Pure for testing.
+ */
+export function newTargeters(
+    player: string,
+    targeting: ReadonlyArray<readonly [string, string | undefined]>,
+    previous: ReadonlySet<string>,
+): { current: Set<string>, added: string[] } {
+    const current = new Set<string>();
+    const added: string[] = [];
+    for (const [uuid, target] of targeting) {
+        if (target !== player || uuid === player) {
+            continue;
+        }
+        current.add(uuid);
+        if (!previous.has(uuid)) {
+            added.push(uuid);
+        }
+    }
+    return { current, added };
+}
 
 export interface IncomingMissileSnapshot {
     target: string | undefined;
@@ -95,6 +136,10 @@ const PlayerMovementQuery = new Query([
     MovementStateComponent,
 ] as const);
 const PlayerPresenceQuery = new Query([
+    PlayerShipSelector,
+] as const);
+const PlayerPresenceUuidQuery = new Query([
+    UUID,
     PlayerShipSelector,
 ] as const);
 const IncomingProjectileQuery = new Query([
@@ -284,6 +329,37 @@ export const IncomingMissileWarningSystem = new System({
     },
 });
 
+/**
+ * Warn the pilot when another ship (NPC or player) locks onto them. Target
+ * selections replicate from the server, so this works for every targeter.
+ */
+export const TargetedWarningSystem = new System({
+    name: 'TargetedWarningSystem',
+    args: [TargetingShipsQuery, PlayerPresenceUuidQuery, TargetedByStateResource,
+        Optional(TimeResource), Emit, SingletonComponent] as const,
+    step(ships, players, state, time, emit) {
+        const player = players[0]?.[0];
+        if (!player) {
+            state.targeters.clear();
+            state.player = undefined;
+            return;
+        }
+        const { current, added } = newTargeters(player,
+            ships.map(([uuid, target]) => [uuid, target.target] as const),
+            state.player === player ? state.targeters : new Set(ships
+                .filter(([, target]) => target.target === player)
+                .map(([uuid]) => uuid)));
+        state.targeters = current;
+        state.player = player;
+        const now = time?.time ?? 0;
+        if (added.length > 0
+            && now - state.lastWarnAt >= TARGETED_WARNING_COOLDOWN_MS) {
+            state.lastWarnAt = now;
+            emit(SoundEvent, { id: TARGETED_WARNING_SOUND_ID });
+        }
+    },
+});
+
 export const LowShieldWarningSystem = new System({
     name: 'LowShieldWarningSystem',
     args: [PlayerShipSelector, ShieldComponent, Optional(TimeResource), Emit] as const,
@@ -447,7 +523,7 @@ const VolumeControlSystem = new System({
 export function stopHyperjumpSounds(world?: { resources: { get: (res: any) => any } }): void {
     const loaded = world?.resources?.get(LoadedSounds);
     const looping = world?.resources?.get(LoopingSounds);
-    for (const id of ['nova:128', 'nova:123', 'nova:130']) {
+    for (const id of ['nova:128', 'nova:130']) {
         loaded?.get(id)?.stop();
         looping?.get(id)?.stop();
         looping?.delete(id);
@@ -464,6 +540,9 @@ export const SoundPlugin: Plugin = {
         world.resources.set(FailedSounds, new Set());
         world.resources.set(VolumeResource, {volume: getMasterVolume()});
         world.resources.set(IncomingMissileStateResource, new Set());
+        world.resources.set(TargetedByStateResource, {
+            targeters: new Set<string>(), lastWarnAt: -Infinity,
+        });
         world.resources.set(StellarSoundStateResource, {
             pendingLanding: false,
             awaitingDeparture: false,
@@ -473,6 +552,7 @@ export const SoundPlugin: Plugin = {
         world.addSystem(VolumeControlSystem);
         world.addSystem(TargetSelectionSoundSystem);
         world.addSystem(IncomingMissileWarningSystem);
+        world.addSystem(TargetedWarningSystem);
         world.addSystem(LowShieldWarningSystem);
         world.addSystem(CriticalHullWarningSystem);
         world.addSystem(MissileLockToneSystem);
@@ -491,6 +571,7 @@ export const SoundPlugin: Plugin = {
         world.removeSystem(VolumeControlSystem);
         world.removeSystem(TargetSelectionSoundSystem);
         world.removeSystem(IncomingMissileWarningSystem);
+        world.removeSystem(TargetedWarningSystem);
         world.removeSystem(LowShieldWarningSystem);
         world.removeSystem(CriticalHullWarningSystem);
         world.removeSystem(MissileLockToneSystem);
@@ -500,6 +581,7 @@ export const SoundPlugin: Plugin = {
         world.resources.delete(VolumeResource);
         world.resources.delete(StellarSoundStateResource);
         world.resources.delete(IncomingMissileStateResource);
+        world.resources.delete(TargetedByStateResource);
         world.resources.delete(FailedSounds);
         world.resources.delete(PendingSounds);
         world.resources.delete(LoadedSounds);

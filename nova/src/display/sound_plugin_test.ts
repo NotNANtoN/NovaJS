@@ -19,6 +19,7 @@ import {
     LandingSoundRequestSystem,
     StellarSoundSystem,
     TargetSelectionSoundSystem,
+    newTargeters,
 } from './sound_plugin';
 import {
     INCOMING_MISSILE_SOUND_ID,
@@ -26,6 +27,7 @@ import {
     STELLAR_DOCKING_SOUND_ID,
     STELLAR_DEPARTURE_SOUND_ID,
     TARGET_SELECTION_SOUND_ID,
+    TARGETED_WARNING_SOUND_ID,
 } from '../nova_plugin/sound_event';
 import {
     distanceAttenuation,
@@ -296,5 +298,52 @@ describe('world sound attenuation', () => {
         // Two points either side of the seam are neighbours, not 20000 apart.
         expect(distanceAttenuation(soundDistance(
             { x: -9_900, y: 0 }, { x: 9_900, y: 0 }))).toBe(1);
+    });
+});
+
+describe('targeted warning', () => {
+    it('reports only ships that newly lock onto the player', () => {
+        const first = newTargeters('me', [
+            ['pirate', 'me'], ['trader', 'asteroid'], ['me', 'pirate'],
+        ], new Set());
+        expect(first.added).toEqual(['pirate']);
+        const again = newTargeters('me', [
+            ['pirate', 'me'], ['viper', 'me'],
+        ], first.current);
+        expect(again.added).toEqual(['viper']);
+        const dropped = newTargeters('me', [['viper', 'me']], again.current);
+        expect(dropped.added).toEqual([]);
+        const relock = newTargeters('me', [['viper', 'me'], ['pirate', 'me']], dropped.current);
+        expect(relock.added).toEqual(['pirate']);
+    });
+
+    it('plays the warning when a replicated ship targets the player', async () => {
+        const { ShipComponent } = await import('../nova_plugin/ship_plugin');
+        const { TargetComponent } = await import('../nova_plugin/target_component');
+        const { TimeResource } = await import('nova_ecs/plugins/time_plugin');
+        const world = new World('targeted-warning');
+        world.resources.set(TimeResource, { time: 10_000, delta_ms: 16, delta_s: 0.016, frame: 0 });
+        world.resources.set(GameDataResource, {
+            data: { Sound: { getCached: () => undefined, get: () => new Promise(() => undefined) } },
+        } as never);
+        const sounds: string[] = [];
+        world.events.get(SoundEvent).subscribe(data => sounds.push(data.id));
+        world.addPlugin(SoundPlugin);
+        world.removeSystem(IncomingMissileWarningSystem);
+        world.entities.set('me', new Entity()
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(ShipComponent, { id: 'nova:128' })
+            .addComponent(TargetComponent, { target: undefined }));
+        const pirate = new Entity()
+            .addComponent(ShipComponent, { id: 'nova:132' })
+            .addComponent(TargetComponent, { target: undefined });
+        world.entities.set('pirate', pirate);
+        world.step();
+        expect(sounds.filter(id => id === TARGETED_WARNING_SOUND_ID)).toEqual([]);
+        pirate.components.get(TargetComponent)!.target = 'me';
+        world.step();
+        expect(sounds.filter(id => id === TARGETED_WARNING_SOUND_ID).length).toBe(1);
+        world.step();
+        expect(sounds.filter(id => id === TARGETED_WARNING_SOUND_ID).length).toBe(1);
     });
 });
