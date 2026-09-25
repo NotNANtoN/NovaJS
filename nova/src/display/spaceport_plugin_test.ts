@@ -179,5 +179,19 @@ describe('spaceport landing recovery', () => {
         const spaceport = new Spaceport(data as any, trusaPlanet, controlEvents);
         await expectAsync(spaceport.buildPromise).toBeResolved();
         expect(spaceport.built).toBeTrue();
+
+        // The concourse offer check, auto-recharge and the service buttons
+        // all read the landed ship before Menu.show() runs. On the first
+        // landing there was no previous ship, so the Trade Center step of the
+        // tutorial was never offered.
+        const offers: unknown[] = [];
+        (spaceport as any).presentServiceMissionOffers = async () => {
+            offers.push((spaceport as any).input);
+        };
+        const ship = new Entity().addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(OutfitsStateComponent, new Map());
+        void spaceport.show(ship, [], true);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(offers).toEqual([ship]);
     });
 });

@@ -52,6 +52,7 @@ import {
 } from './player_data_projection';
 
 import { SystemIdResource } from './system_id_resource';
+import { variantIndexForCatalog } from './system_variants';
 
 // Kept exported here for compatibility with code that used the original
 // server-plugin stub. The codec itself is browser-safe and lives with state.
@@ -226,6 +227,15 @@ export const InitializeCombatResourcesSystem = new System({
         entity.components.set(CombatInitializing, true);
         const arrivalState = toPersistentPlayerState(_state) as PlayerState;
         const owner = multiplayerData.owner;
+        const roomSystem = world.resources.get(SystemIdResource);
+        const live = roomSystem && variantIndexForCatalog(gameData.data.System)
+            ?.visibleVariant(roomSystem, arrivalState.missionBits);
+        if (roomSystem && live && live !== roomSystem) {
+            // Storyline copies must never be entered while hidden (see
+            // system_variants.ts). This names the pilot so it can be traced.
+            console.warn(`[VARIANT] Pilot ${token.slice(0, 8)} entered hidden copy `
+                + `${roomSystem}; the live copy for their bits is ${live}.`);
+        }
         const applyAuthority = (auth: CombatAuthority, target: Entity) => {
             if (auth.retired) return;
             auth.landed = undefined;

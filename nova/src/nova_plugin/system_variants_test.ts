@@ -60,6 +60,15 @@ describe('SystemVariantIndex', () => {
         expect(galaxy.planets.find(p => p.id === 'nova:159')!.systemId).toBe('nova:130');
     });
 
+    it('moves a saved stellar to its live copy (Earth 426 -> Earth 128)', () => {
+        const names: Record<string, string> = { 'nova:128': 'Earth', 'nova:426': 'Earth', 'nova:159': 'Jupiter' };
+        const getPlanet = (id: string) => ({ name: names[id] });
+        expect(index.livePlanetCopy('nova:426', bits(), getPlanet)).toBe('nova:128');
+        expect(index.livePlanetCopy('nova:128', bits(), getPlanet)).toBe('nova:128');
+        expect(index.livePlanetCopy('nova:128', bits(147), getPlanet)).toBe('nova:426');
+        expect(index.livePlanetCopy('nova:159', bits(147), getPlanet)).toBe('nova:159');
+    });
+
     it('redirects any jump, not just ones through the current links', () => {
         expect(visibleJumpTarget('nova:531', [], bits(), () => undefined, index)).toBe('nova:130');
     });

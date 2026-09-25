@@ -13,9 +13,9 @@ import { BaseParse } from "./BaseParse";
  * Leviathan's 64 perspective frames are unevenly spaced by up to 23 degrees,
  * so interpolating between them overshoots and jumps back.
  */
-const SNAP_ROTATION_SHANS = new Set([
-    131, 190, 192, // Leviathan
-    132, 193, 194, // Pegasus
+const SNAP_ROTATION_BASE_SPRITES = new Set([
+    1006, // Leviathan (shän 131, 190, 192)
+    1008, // Pegasus (shän 132, 193, 194, 365, 366, 377)
 ]);
 
 export async function ShanParse(shan: ShanResource, notFoundFunction: (message: string) => void): Promise<Animation> {
@@ -24,6 +24,9 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
     var images: AnimationImages = {
         baseImage: getDefaultAnimationImage()
     };
+
+    // Keyed on the artwork, not the hull: several shäns reuse one sprite.
+    const snapRotation = SNAP_ROTATION_BASE_SPRITES.has(shan.images.baseImage?.ID ?? -1);
 
     for (const [imageName, imageInfo] of Object.entries(shan.images)) {
         if (!imageInfo) {
@@ -82,7 +85,7 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
             dataType: NovaDataType.SpriteSheetImage,
             blendMode,
             frames,
-            ...(SNAP_ROTATION_SHANS.has(shan.id) ? { snapRotation: true } : {}),
+            ...(snapRotation ? { snapRotation: true } : {}),
         };
     }
 

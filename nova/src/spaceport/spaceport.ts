@@ -787,6 +787,9 @@ export class Spaceport extends Menu<Entity> {
     ): Promise<Entity> {
         if (!authorized) await this.authorizeLanding(input);
         await this.buildPromise;
+        // Everything below (auto-recharge, concourse offers, service buttons)
+        // reads this.input; Menu.show() would only set it at the very end.
+        this.setInput(input);
         this.container.visible = true;
 
         try {

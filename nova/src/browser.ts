@@ -570,6 +570,11 @@ async function startGame(
             playerState.lastLandedSystem = variants.visibleVariant(
                 playerState.lastLandedSystem, playerState.missionBits);
         }
+        if (playerState.lastLandedPlanet) {
+            playerState.lastLandedPlanet = variants.livePlanetCopy(
+                playerState.lastLandedPlanet, playerState.missionBits,
+                id => gameData.data.Planet.getCached(id));
+        }
     }
     const systemId = ids.System.includes(requestedSystem)
         ? requestedSystem : INITIAL_PLAYER_STATE.currentSystem;

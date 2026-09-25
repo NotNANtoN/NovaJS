@@ -162,6 +162,26 @@ export class SystemVariantIndex {
             ?? (owners[0] ? this.visibleVariant(owners[0], missionBits) : undefined);
     }
 
+    /**
+     * The copy of a stellar that exists for these bits: the same-named
+     * stellar listed by the live copy of its system (Earth 426 -> Earth 128
+     * while Sol 130 is live). Returns the stellar itself when it exists or no
+     * copy is found.
+     */
+    livePlanetCopy(
+        planetId: string,
+        missionBits: MissionBitsLike,
+        getPlanet: (id: string) => { name?: string } | undefined,
+    ): string {
+        if (this.isPlanetVisible(planetId, missionBits)) return planetId;
+        const name = getPlanet(planetId)?.name?.trim().toLowerCase();
+        const owner = this.systemsOfPlanet(planetId)[0];
+        if (!name || !owner) return planetId;
+        const live = this.get(this.visibleVariant(owner, missionBits));
+        return live?.planets?.find(candidate =>
+            getPlanet(candidate)?.name?.trim().toLowerCase() === name) ?? planetId;
+    }
+
     /** Whether the stellar is in this place (in any copy of the system). */
     planetInPlace(planetId: string, systemId: string): boolean {
         return this.systemsOfPlanet(planetId).some(owner => this.same(owner, systemId));
