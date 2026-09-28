@@ -157,7 +157,7 @@ function preparedMission(
 const worldCache = new WeakMap<GameData, Promise<MissionBoardWorld>>();
 const catalogCache = new WeakMap<GameData, Promise<Map<string, MissionData>>>();
 
-async function loadMissionWorld(gameData: GameData): Promise<MissionBoardWorld> {
+export async function loadMissionWorld(gameData: GameData): Promise<MissionBoardWorld> {
     const cached = worldCache.get(gameData);
     if (cached) {
         return cached;

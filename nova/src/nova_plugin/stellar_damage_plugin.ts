@@ -32,7 +32,7 @@ import { resolveDamageSource } from './npc_hostility';
 import { PlanetComponent, PlanetDataComponent } from './planet_plugin';
 import { PlatformResource } from './platform_plugin';
 import { decodePlayerState, isStellarDestroyed, PlayerState, PlayerStateComponent } from './player_state';
-import { DestroyableStellar, recordStellarDestroyed } from './stellar_destruction';
+import { DestroyableStellar, recordStellarDestroyed, recordStellarRegenerated } from './stellar_destruction';
 import { StellarBlastCodec, StellarBlastComponent, StellarHealthComponent } from './stellar_blast';
 import { sameResourceId } from '../common/resource_id';
 
@@ -138,6 +138,32 @@ export function recordPilotStellarDestruction(entities: EntityMap, pilot: string
     if (queued.length > 0) {
         void startQueuedMissions(gameData, entities, pilot, queued).catch(error =>
             console.error(`Could not start OnDestroy missions for ${planet.id}`, error));
+    }
+    return true;
+}
+
+/**
+ * Server-side counterpart of {@link recordPilotStellarDestruction} for a
+ * regeneration the server decides on (the debug menu). The change is noted as
+ * server-authored so a stale owner write cannot re-destroy the stellar.
+ */
+export function recordPilotStellarRegeneration(entities: EntityMap, pilot: string,
+    planet: Pick<PlanetData, 'id' | 'onRegen'>, gameData: GameDataInterface,
+    ncbRuntime?: NcbRuntime): boolean {
+    const entity = entities.get(pilot);
+    const live = entity?.components.get(PlayerStateComponent);
+    const before = live && decodedCopy(live);
+    const working = live && decodedCopy(live);
+    if (!entity || !before || !working) return false;
+    const context = ncbRuntime?.setContext(entity, working)
+        ?? { stellar: (id: string) => gameData.data.Planet.getCached(id) };
+    if (!recordStellarRegenerated(working, planet, context)) return false;
+    const queued = takePendingMissionStarts(working);
+    entity.components.set(PlayerStateComponent, working);
+    noteServerChanges(entity, before, working);
+    if (queued.length > 0) {
+        void startQueuedMissions(gameData, entities, pilot, queued).catch(error =>
+            console.error(`Could not start OnRegen missions for ${planet.id}`, error));
     }
     return true;
 }

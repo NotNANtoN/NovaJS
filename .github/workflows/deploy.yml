@@ -106,8 +106,17 @@ jobs:
           LINODE_BUCKET_KEY: ${{ secrets.LINODE_BUCKET_KEY }}
           LINODE_SECRET_KEY: ${{ secrets.LINODE_SECRET_KEY }}
           LINODE_SSH_KEY: ${{ secrets.LINODE_SSH_KEY }}
+          # Optional. Unset (the default) keeps the in-game debug menu off.
+          NOVA_DEBUG_TOKEN: ${{ secrets.NOVA_DEBUG_TOKEN }}
         run: |
           set -Eeuo pipefail
+
+          if [[ -n "${NOVA_DEBUG_TOKEN:-}" \
+              && ! "$NOVA_DEBUG_TOKEN" =~ ^[A-Za-z0-9._-]{16,128}$ ]]; then
+            printf '%s\n' \
+              'NOVA_DEBUG_TOKEN must be 16-128 characters of A-Z a-z 0-9 . _ -' >&2
+            exit 1
+          fi
 
           if [[ -z "$LINODE_API_TOKEN" ]]; then
             printf '%s\n' 'LINODE_API_TOKEN is required.' >&2
@@ -415,6 +424,13 @@ jobs:
             chmod 700 ~/.ssh
             printf '%s\n' "$LINODE_SSH_KEY" > ~/.ssh/id_linode
             chmod 600 ~/.ssh/id_linode
+            # The secret is the only source of NOVA_DEBUG_TOKEN on the host:
+            # it is written to .env when set and removed when unset. It goes
+            # over stdin so it never appears in a remote command line.
+            printf '%s' "${NOVA_DEBUG_TOKEN:-}" | \
+              ssh -i ~/.ssh/id_linode -o StrictHostKeyChecking=no -o ConnectTimeout=15 "root@${ipv4}" \
+              'set -eu; umask 077; token="$(cat)"; env=/opt/novajs/.env; [ -f "$env" ] || exit 0; tmp="$(mktemp)"; grep -v "^NOVA_DEBUG_TOKEN=" "$env" > "$tmp" || true; if [ -n "$token" ]; then printf "NOVA_DEBUG_TOKEN=%s\n" "$token" >> "$tmp"; fi; cat "$tmp" > "$env"; rm -f "$tmp"' \
+              || printf '%s\n' 'Could not sync NOVA_DEBUG_TOKEN to the host .env.' >&2
             ssh -i ~/.ssh/id_linode -o StrictHostKeyChecking=no -o ConnectTimeout=15 "root@${ipv4}" \
               "/opt/novajs/scripts/novajs-updater.sh" || true
             rm -f ~/.ssh/id_linode

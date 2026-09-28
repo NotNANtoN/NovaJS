@@ -1,0 +1,93 @@
+{
+  "id": "debug:planetbuster",
+  "name": "Planet Buster",
+  "prefix": "debug",
+  "accuracy": 0,
+  "ammoType": "unlimited",
+  "burstCount": 0,
+  "burstReload": 0,
+  "destroyShipWhenFiring": false,
+  "exitType": "center",
+  "fireGroup": "secondary",
+  "reload": 600,
+  "fireSimultaneously": false,
+  "shotSpeed": 900,
+  "sound": "nova:203",
+  "loopSound": false,
+  "useFiringAnimation": false,
+  "planetType": true,
+  "submunitions": [],
+  "damage": {
+    "shield": 1500,
+    "armor": 1500,
+    "ionization": 0,
+    "ionizationColor": 4278190080,
+    "passThroughShield": 0,
+    "knockback": 0
+  },
+  "oneAmmoPerBurst": false,
+  "shotDuration": 4000,
+  "primaryExplosion": "nova:129",
+  "secondaryExplosion": null,
+  "blastRadius": 0,
+  "blastHurtsFiringShip": false,
+  "detonateWhenShotExpires": false,
+  "damageType": "planetBuster",
+  "type": "ProjectileWeaponData",
+  "guidance": "unguided",
+  "proxRadius": 8,
+  "proxSafety": 0,
+  "trailParticles": {
+    "count": 6,
+    "velocity": 35,
+    "lifeMin": 60,
+    "lifeMax": 90,
+    "color": 16737792
+  },
+  "hitParticles": {
+    "count": 40,
+    "lifeMin": 20,
+    "lifeMax": 30,
+    "velocity": 900,
+    "color": 16760576
+  },
+  "animation": {
+    "exitPoints": {
+      "gun": [],
+      "turret": [],
+      "guided": [],
+      "beam": [],
+      "upCompress": [0, 0],
+      "downCompress": [0, 0]
+    },
+    "id": "debug:planetbuster",
+    "name": "Planet Buster",
+    "prefix": "debug",
+    "images": {
+      "baseImage": {
+        "id": "nova:210",
+        "dataType": "SpriteSheetImage",
+        "blendMode": 0,
+        "frames": {
+          "normal": { "start": 0, "length": 36 }
+        }
+      }
+    }
+  },
+  "vulnerableTo": [],
+  "physics": {
+    "acceleration": 0,
+    "armorRecharge": 0,
+    "deionize": 0,
+    "energy": 0,
+    "energyRecharge": 0,
+    "ionization": 0,
+    "mass": 0,
+    "shieldRecharge": 0,
+    "speed": 900,
+    "turnRate": 0,
+    "shield": 0,
+    "armor": 1,
+    "inertialess": true
+  }
+}

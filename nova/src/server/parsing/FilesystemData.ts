@@ -27,6 +27,24 @@ type PathInfo = {
     extension: string
 };
 
+/**
+ * Resource ids map to file names through URI encoding, so namespaced ids such
+ * as `debug:planetbuster` are stored as `debug%3Aplanetbuster.json` (a colon
+ * is not a valid file name character everywhere). Encoding also keeps an id
+ * taken from a request URL from escaping its directory (`../`).
+ */
+export function filenameForId(id: string): string {
+    return encodeURIComponent(id);
+}
+
+export function idForFilename(name: string): string | undefined {
+    try {
+        return decodeURIComponent(name);
+    } catch {
+        return undefined;
+    }
+}
+
 const Paths = {
     Ship: { path: "Ship", extension: "json" } as PathInfo,
     Outfit: { path: "Outfit", extension: "json" } as PathInfo,
@@ -47,11 +65,21 @@ const Paths = {
     SoundFile: { path: "SoundFile", extension: "mp3" } as PathInfo,
 };
 
+export interface FilesystemDataOptions {
+    /**
+     * Ids with these prefixes are neither listed nor served, as if their
+     * files did not exist. Used to withhold debug-only content.
+     */
+    excludeIdPrefixes?: readonly string[];
+}
+
 class FilesystemData implements GameDataInterface {
     public ids: Promise<NovaIDs>;
     public data: NovaDataInterface;
+    private readonly excludeIdPrefixes: readonly string[];
 
-    constructor(private rootPath: string) {
+    constructor(private rootPath: string, options: FilesystemDataOptions = {}) {
+        this.excludeIdPrefixes = options.excludeIdPrefixes ?? [];
         this.data = {
             Ship: this.getFunction<ShipData>(Paths.Ship),
             Outfit: this.getFunction<OutfitData>(Paths.Outfit),
@@ -78,7 +106,11 @@ class FilesystemData implements GameDataInterface {
         // Returns a gettable that loads the resource from a file
         return new Gettable<T>((id: string) => {
             return new Promise<T>((fulfill, reject) => {
-                fs.readFile(path.join(this.rootPath, p.path, id + "." + p.extension),
+                if (this.isExcluded(id)) {
+                    reject(new Error(`${id} is not served`));
+                    return;
+                }
+                fs.readFile(path.join(this.rootPath, p.path, filenameForId(id) + "." + p.extension),
                     function(err, contents) {
                         if (err) {
                             reject(err);
@@ -125,7 +157,12 @@ class FilesystemData implements GameDataInterface {
         }
     }
 
+    private isExcluded(id: string): boolean {
+        return this.excludeIdPrefixes.some(prefix => id.startsWith(prefix));
+    }
+
     buildIDsForPath(p: PathInfo): Promise<string[]> {
+        const isExcluded = this.isExcluded.bind(this);
         return new Promise((fulfill, reject) => {
             fs.readdir(path.join(this.rootPath, p.path), function(error, files) {
                 if (error) {
@@ -140,8 +177,8 @@ class FilesystemData implements GameDataInterface {
                     fulfill(files.filter(function(name) {
                         return name.slice(name.length - (p.extension.length + 1), name.length) === ("." + p.extension);
                     }).map(function(name) {
-                        return name.slice(0, name.length - (p.extension.length + 1));
-                    }));
+                        return idForFilename(name.slice(0, name.length - (p.extension.length + 1)));
+                    }).filter((id): id is string => id !== undefined && !isExcluded(id)));
                 }
             });
         });

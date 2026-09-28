@@ -12,6 +12,7 @@ import { combatLedger, CombatShopRequest, isShipGrantSource,
     makePlayerDataWithCombatResources as makePlayerData } from '../nova_plugin/combat_resources';
 import { createInitialPlayerState, decodePlayerState, PlayerState, PlayerStateCodec } from '../nova_plugin/player_state';
 import { setupHttpLimiter } from './http_limiter';
+import { DebugRouteOptions, setupDebugRoutes } from './debug_routes';
 import { LosslessWebPCache } from './lossless_webp';
 import {
     summarizeSnapshot,
@@ -32,8 +33,8 @@ export function gameDataCacheControl(requestPath: string): string {
  * Serves GameData to the client
  * Maybe consider https://github.com/RioloGiuseppe/byte-serializer in the future?
  */
-export function setupRoutes(gameData: GameDataInterface, app: Express, htmlPath: string, bundlePath: string, bundleMapPath: string, settingsPath: string, novaDataPath?: string, playerStore?: PlayerStore) {
-    return new GameDataServer(gameData, app, htmlPath, bundlePath, bundleMapPath, settingsPath, novaDataPath, playerStore);
+export function setupRoutes(gameData: GameDataInterface, app: Express, htmlPath: string, bundlePath: string, bundleMapPath: string, settingsPath: string, novaDataPath?: string, playerStore?: PlayerStore, debug: DebugRouteOptions = {}) {
+    return new GameDataServer(gameData, app, htmlPath, bundlePath, bundleMapPath, settingsPath, novaDataPath, playerStore, debug);
 }
 
 function gzipMiddleware(req: express.Request, res: express.Response,
@@ -131,7 +132,8 @@ class GameDataServer {
         private readonly bundleMapPath: string,
         private readonly settingsPath: string,
         private readonly novaDataPath?: string,
-        private readonly playerStore?: PlayerStore) {
+        private readonly playerStore?: PlayerStore,
+        private readonly debug: DebugRouteOptions = {}) {
         this.setupRoutes();
     }
 
@@ -148,8 +150,10 @@ class GameDataServer {
                 const duration = Date.now() - start;
                 // Log non-200 responses, API endpoints, error posts, or slow requests (> 150ms)
                 if (res.statusCode >= 400 || req.path.startsWith('/player') || req.path.startsWith('/api') || req.path === '/client-error' || duration > 150) {
+                    // Never write debug or player tokens to the access log.
+                    const url = (req.originalUrl || req.url).replace(/([?&](?:token|playerToken)=)[^&]*/g, '$1***');
                     const level = res.statusCode >= 500 ? 'ERROR' : res.statusCode >= 400 ? 'WARN' : 'INFO';
-                    console.log(`[${new Date().toISOString()}] [${level}] [HTTP] ${req.method} ${req.originalUrl || req.url} ${res.statusCode} (${duration}ms)`);
+                    console.log(`[${new Date().toISOString()}] [${level}] [HTTP] ${req.method} ${url} ${res.statusCode} (${duration}ms)`);
                 }
             });
             next();
@@ -414,6 +418,9 @@ class GameDataServer {
                 }
             });
         }
+        // Registered before the index.html catch-all so a disabled menu 404s.
+        if (!this.playerStore) this.app.use(express.json({ limit: '64kb' }));
+        setupDebugRoutes(this.app, this.gameData, this.playerStore, this.debug);
 
         //        // This has to be here or else sourcemaps don't work!
         //        const staticPath = path.join(this.appRoot, "build", "static");

@@ -41,6 +41,8 @@ import {
     PendingMissionSoundComponent,
 } from './ncb_runtime';
 import { SystemVariantIndex, variantIndexForCatalog } from './system_variants';
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
+import { OutfitsStateComponent } from './outfit_plugin';
 import { dueRegenerations, recordStellarRegenerated } from './stellar_destruction';
 import { FUEL_PER_JUMP } from './fuel';
 import { advanceCrons, activeCronIds } from './cron_plugin';
@@ -632,6 +634,39 @@ export function acceptMission(
         });
     }
     return activeMission;
+}
+
+/**
+ * Complete an active mission right now, wherever the pilot is: the success
+ * path of {@link MissionRuntime.processLanding} without its destination and
+ * goal checks (OnShipDone if not yet applied, OnSuccess, PayVal, DatePostInc,
+ * CompReward, cargo release). NCB `S` starts stay queued on the state for
+ * the caller. Used by the debug menu.
+ */
+export function forceCompleteMission(
+    state: PlayerState,
+    entry: ActiveMission,
+    mission: MissionData,
+    context: MissionSetContext = {},
+    governments?: readonly GovernmentRelation[],
+    logger: (message: string) => void = console.warn,
+): boolean {
+    const index = state.activeMissions.indexOf(entry);
+    if (index < 0) {
+        return false;
+    }
+    if (entry.shipGoalProgress && !entry.shipGoalProgress.shipDoneApplied) {
+        entry.shipGoalProgress.shipDoneApplied = true;
+        runMissionSetExpression(mission.onShipDone, state, logger, context, mission);
+    }
+    runMissionSetExpression(mission.onSuccess, state, logger, context, mission);
+    applyMissionCompletionRewards(state, mission, governments);
+    releaseMissionCargo(state, entry.missionId);
+    const current = state.activeMissions.indexOf(entry);
+    if (current >= 0) {
+        state.activeMissions.splice(current, 1);
+    }
+    return true;
 }
 
 export function refuseMission(
@@ -1346,10 +1381,29 @@ const MissionExpirationSystem = new AsyncSystem({
         if (!playerShip || !state) {
             return;
         }
+        // The state is a fresh draft every step, so the runtime's own
+        // per-state cache never hit and this ran every frame.
+        if (lastCheckedDate.get(playerShip) === state.gameDate) {
+            return;
+        }
+        lastCheckedDate.set(playerShip, state.gameDate);
         const context = ncbRuntime.setContext(playerShip, state);
+        // The outfit map is a component draft revoked at the end of this
+        // step, but cröns and regeneration read and change it after awaits.
+        // Work on a plain copy and write it back if NCB changed it.
+        const outfits = new Map(
+            [...(plainSnapshot(context.outfits) ?? new Map())].map(
+                ([id, value]) => [id, { count: value.count }] as const));
+        const before = JSON.stringify([...outfits]);
+        context.outfits = outfits;
         await missionRuntime.checkDate(state, context);
+        if (JSON.stringify([...outfits]) !== before) {
+            playerShip.components.set(OutfitsStateComponent, outfits);
+        }
     },
 });
+
+const lastCheckedDate = new WeakMap<object, number>();
 
 export const MissionPlugin: Plugin = {
     name: 'MissionPlugin',

@@ -1,0 +1,28 @@
+{
+  "id": "debug:planetbuster",
+  "name": "Planet Buster (debug)",
+  "prefix": "debug",
+  "weapons": {
+    "debug:planetbuster": 1
+  },
+  "repairSystem": false,
+  "cloak": false,
+  "cargoScoop": false,
+  "physics": {
+    "freeMass": 0
+  },
+  "pict": "nova:6010",
+  "price": 0,
+  "desc": "Debug-only planet-type launcher (wëap Flags2 0x0400). Its shots only hit destroyable stellars. Granted exclusively through the server-gated debug menu; no spaceport ever stocks it.",
+  "displayWeight": 1,
+  "flags": 0,
+  "max": 1,
+  "techLevel": 9999,
+  "availabilityNCB": "b9999 & !b9999",
+  "onPurchase": "",
+  "onSell": "",
+  "contribute": [0, 0],
+  "require": [0, 0],
+  "isEscapePod": false,
+  "isAutoRecharger": false
+}

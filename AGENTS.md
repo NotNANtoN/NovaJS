@@ -73,3 +73,11 @@ In NovaECS, queries match entities based on required components:
 
 ### Cache Busting
 `setupRoutes.ts` dynamically appends the bundle file mtime query string (`browser_bundle.js?v=<mtime>`) into `index.html`. When new builds are deployed, a browser hard-refresh picks up the new bundle immediately.
+
+### Debug Menu (server-gated)
+- Enabled only when the server has `NOVA_DEBUG_TOKEN` (or `debugToken` in `nova/settings/server.json`; env wins). Unset: `/debug/*` is 404 and `debug:*` resources in `nova/objects` are withheld. Full enable/usage steps: `docs/DEPLOY.md` → "Debug menu (opt-in)".
+- Open the game with `?debug=<token>` (kept in `localStorage.novaDebugToken`, `?debug=off` forgets it); a red `DEBUG` button appears at the bottom of the right sidebar in flight.
+- Enabling it: production = GitHub secret `NOVA_DEBUG_TOKEN` (the deploy workflow syncs it into `/opt/novajs/.env`, compose passes it through); abakus = export it for the node process restarted by `/home/anton/deploy-novajs-from-git.sh` (do not edit remote hosts from here without being asked).
+- Code: server `nova/src/server/debug_routes.ts` (token check, `[DEBUG]` audit log, ledger-backed actions), client `nova/src/client/debug_menu.ts` (DOM panel) + `debug_client.ts` (actions) + `debug_menu_model.ts` (pure helpers).
+- Server-owned values (hull, fuel, ammo, credits, health, stellar destruction) must go through `/debug/action` so the combat ledger / server PlayerState agree; owner-authored ones (bits, missions, outfits, date, legal records, jumps) are applied on the client and only logged.
+- Planet Buster: `nova/objects/{Weapon,Outfit}/debug%3Aplanetbuster.json` (id `debug:planetbuster`; FilesystemData URI-encodes ids into file names). Never use a numeric name after `debug:` — `sameResourceId` compares the part after the colon and would alias `nova:<n>`.

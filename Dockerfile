@@ -33,6 +33,10 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/nova/src/index.html ./nova/src/index.html
 COPY --from=build /app/nova/settings ./nova/settings
+# Debug-only resources (Planet Buster). The server withholds every `debug:` id
+# unless NOVA_DEBUG_TOKEN is set, so these are inert on a normal deploy.
+COPY --from=build /app/nova/objects/Weapon ./nova/objects/Weapon
+COPY --from=build /app/nova/objects/Outfit ./nova/objects/Outfit
 COPY docker-compose.yml Caddyfile /usr/local/share/novajs/deploy/
 COPY scripts/fetch_nova_data.sh deploy/render_caddyfile.sh \
     deploy/novajs-updater.sh deploy/backup_player_data.sh \

@@ -19,6 +19,10 @@ services:
         "${NOVA_HTTP_LIMIT_CLIENT_TTL_MS:-3900000}"
       NOVA_HTTP_LIMIT_MAX_CLIENTS:
         "${NOVA_HTTP_LIMIT_MAX_CLIENTS:-4096}"
+      # Opt-in debug menu. Empty (the default) keeps it disabled: /debug/*
+      # answers 404 and debug-only content is not served. Set it in
+      # /opt/novajs/.env (the updater sources that file).
+      NOVA_DEBUG_TOKEN: "${NOVA_DEBUG_TOKEN:-}"
     volumes:
       - type: bind
         source: ${NOVA_DATA_DIR:-/var/lib/novajs/Nova_Data}

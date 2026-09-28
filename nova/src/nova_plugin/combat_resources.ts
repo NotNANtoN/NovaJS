@@ -50,6 +50,15 @@ export function bindCombatOwner(owner: string, authority: CombatAuthority): void
 export function registerCombatAmmoIds(ids: Iterable<string>): void {
     for (const id of ids) ammoIds.add(id);
 }
+/** Whether the server ledger (not the owner) holds this outfit's count. */
+export function isCombatAmmoId(id: string): boolean {
+    return ammoIds.has(id);
+}
+/** Hull stock for every ledger ammo id, as a ship purchase resets it. */
+export function resetAmmoToHullDefaults(balance: CombatResources,
+    ship: { outfits: Record<string, number> }): void {
+    for (const id of ammoIds) balance.ammo[id] = Math.max(0, Math.floor(ship.outfits[id] ?? 0));
+}
 function ownerWrite(context: ReplicationMergeContext): boolean {
     return context.localIsAdmin && !context.peerIsAdmin && context.source === context.owner;
 }

@@ -83,6 +83,9 @@ import {
 import { SystemIdResource } from "./nova_plugin/system_id_resource";
 import { ShipComponent } from "./nova_plugin/ship_plugin";
 import { fetchNewPilotState } from "./client/new_pilot_state";
+import { DebugMenu, installDebugMenu } from "./client/debug_menu";
+import { liveMissionWorld, loadMissionWorld } from "./spaceport/mission_bbs";
+import { StatusBarResource } from "./display/status_bar";
 import {
     EscapeMenu,
     StartMenu,
@@ -861,12 +864,18 @@ const escapeMenu = new EscapeMenu(
     returnToMainMenu,
 );
 
+let debugMenu: DebugMenu | undefined;
+
 window.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !gameRunning) {
         return;
     }
     event.preventDefault();
     event.stopPropagation();
+    if (debugMenu?.visible) {
+        debugMenu.hide();
+        return;
+    }
     if (escapeMenu.visible) {
         escapeMenu.hide();
         resumeGameplay();
@@ -932,6 +941,20 @@ async function bootstrap() {
     ]);
     const initialPlayerData = await loadPersistedPlayerData()
         ?? await playerDataPromise;
+    // Only when the server has NOVA_DEBUG_TOKEN set and this browser holds it
+    // (`?debug=<token>`, remembered in localStorage).
+    void installDebugMenu({
+        gameData,
+        player: () => {
+            const entity = gameRunning && playerShipUuid
+                ? system?.entities.get(playerShipUuid) : undefined;
+            return entity && system && entity.components.has(PlayerShipSelector)
+                ? { entity, world: system } : undefined;
+        },
+        statusBarWidth: () => system?.resources.get(StatusBarResource)?.width ?? 0,
+        missionWorld: async state => liveMissionWorld(
+            await loadMissionWorld(gameData), state.missionBits),
+    }, channel.playerToken).then(menu => { debugMenu = menu; });
     await showMainMenu(initialPlayerData);
 }
 

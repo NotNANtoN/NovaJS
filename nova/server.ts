@@ -24,6 +24,7 @@ import { FilesystemData } from "./src/server/parsing/FilesystemData";
 import { GameDataAggregator } from "./src/server/parsing/GameDataAggregator";
 import { NovaParseWorkerApi } from "./src/server/parsing/nova_parse_worker";
 import { setupRoutes } from "./src/server/setupRoutes";
+import { pilotLocatorForWorld, resolveDebugToken } from './src/server/debug_routes';
 import { PlayerStore } from './src/server/player_store';
 import { createStartingPlayerState } from './src/nova_plugin/new_pilot';
 import {
@@ -49,6 +50,9 @@ const Settings = t.partial({
         t.literal('classic'),
         t.literal('modern'),
     ]),
+    // Enables the debug menu like NOVA_DEBUG_TOKEN (the environment wins).
+    // Leave unset on public servers unless you mean to open it.
+    debugToken: t.string,
 });
 type Settings = t.TypeOf<typeof Settings>;
 
@@ -73,8 +77,12 @@ const novaDataPath = path.join(sourceRoot, settings.relativeDataPath ?? "Nova_Da
 const app = express();
 const httpServer = http.createServer(app);
 
+const debugToken = resolveDebugToken(process.env, settings.debugToken);
 const filesystemDataPath = path.join(sourceRoot, "objects");
-const filesystemData = new FilesystemData(filesystemDataPath);
+// Debug-only content (the Planet Buster) is withheld unless debugging is on.
+const filesystemData = new FilesystemData(filesystemDataPath, {
+    excludeIdPrefixes: debugToken ? [] : ['debug:'],
+});
 
 const htmlPath = resolveAsset("nova/src/index.html");
 const bundlePath = resolveAsset("dist/browser_bundle.js");
@@ -149,7 +157,13 @@ async function startGame() {
     }
 
     setupRoutes(gameData, app, htmlPath, bundlePath, bundleMapPath,
-        clientSettingsPath, novaDataPath, playerStore);
+        clientSettingsPath, novaDataPath, playerStore, {
+            token: debugToken,
+            locatePilot: pilotLocatorForWorld(() => world, playerStore),
+        });
+    log.info(debugToken
+        ? '[DEBUG] Debug menu ENABLED (NOVA_DEBUG_TOKEN is set)'
+        : 'Debug menu disabled (NOVA_DEBUG_TOKEN unset)');
 
     httpServer.listen(port, function() {
         log.info(`NovaJS server listening on port ${port} (compatibilityProfile: ${compatibilityProfile})`);

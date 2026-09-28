@@ -214,6 +214,42 @@ The public readiness path at `/__novajs_health` and WebSocket upgrades are
 not limited. The readiness response is produced by Caddy without reaching the
 Express process.
 
+## Debug menu (opt-in)
+
+The in-game debug menu (switch hull, give outfits and the Planet Buster, set
+credits, bits, missions, date, legal records, jump anywhere, destroy or
+regenerate stellars) is **off unless `NOVA_DEBUG_TOKEN` is set** for the
+server process. While it is unset, `/debug/*` answers `404`, the `DEBUG`
+button never appears, and the debug-only `debug:*` resources in
+`nova/objects` (the Planet Buster weapon and outfit) are not listed or served.
+
+Use a long random token (16-128 characters of `A-Z a-z 0-9 . _ -`), e.g.
+`openssl rand -hex 24`. Anyone holding it can edit any pilot whose player
+token they also have, so treat it like a password and unset it when done.
+
+- **Production (Linode):** add the GitHub Actions secret `NOVA_DEBUG_TOKEN`.
+  On the next deploy the workflow writes it to `/opt/novajs/.env` (over SSH
+  stdin; needs `LINODE_SSH_KEY`) and `docker-compose.yml` passes it to the
+  container. Deleting the secret removes the line from `.env` on the next
+  deploy. Without `LINODE_SSH_KEY`, set or remove
+  `NOVA_DEBUG_TOKEN=...` in `/opt/novajs/.env` by hand and run
+  `/opt/novajs/scripts/novajs-updater.sh`.
+- **Dev host (abakus):** export `NOVA_DEBUG_TOKEN` in the environment of the
+  `node dist/server.js` process that `/home/anton/deploy-novajs-from-git.sh`
+  restarts (for example in that script or the service it launches).
+- **Local:** `NOVA_DEBUG_TOKEN=local-debug-token npm run dev`, or set
+  `"debugToken"` in `nova/settings/server.json` (the environment wins; never
+  commit a token there).
+
+To use it, open the game once with `?debug=<token>`
+(e.g. `https://69.164.217.141/?debug=<token>`). The browser checks it with
+`GET /debug/status`, stores it in `localStorage` (`novaDebugToken`) and removes
+it from the address bar; `?debug=off` forgets it. In flight a red `DEBUG`
+button sits at the bottom of the right sidebar. Every debug action is logged by
+the server with a `[DEBUG]` prefix (`docker compose logs novajs | grep
+'\[DEBUG\]'`); tokens are redacted from the HTTP access log, and repeated bad
+tokens from one address are throttled with `429`.
+
 ## First bootstrap
 
 The API request supplies a random root password and the workflow deliberately
