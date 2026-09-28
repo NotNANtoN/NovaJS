@@ -13,6 +13,7 @@ import { JumpRouteComponent } from "../nova_plugin/jump_plugin";
 import { PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { PlayerStateComponent } from "../nova_plugin/player_state";
+import { targetableStellars } from "../nova_plugin/stellar_visibility";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
 import { SystemIdResource } from "../nova_plugin/system_id_resource";
@@ -342,8 +343,10 @@ export const DrawSmallMapSystem = new System({
         Optional(GameDataResource),
         Optional(TimeResource),
         Optional(PlanetTargetComponent),
+        Optional(PlayerStateComponent),
     ] as const,
-    step(smallMap, screenSize, playerMovement, _selector, playerUuid, playerTarget, jumpRoute, ships, planets, ores, systemId, gameData, time, planetTarget) {
+    step(smallMap, screenSize, playerMovement, _selector, playerUuid, playerTarget, jumpRoute, ships, allPlanets, ores, systemId, gameData, time, planetTarget, localState) {
+        const planets = targetableStellars(allPlanets, row => row[2].id, localState);
         const interference = (systemId && gameData)
             ? (gameData.data.System.getCached(systemId)?.interference ?? 0)
             : 0;

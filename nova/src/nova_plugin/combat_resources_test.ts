@@ -15,7 +15,7 @@ import { GameDataResource } from './game_data_resource';
 import { PersistentPlayerStateCodec, PlayerStateComponent, PlayerStateCodec, PlayerStatePlugin, PlayerStorePort, createInitialPlayerState } from './player_state';
 import { CombatAuthority, CombatAuthorityComponent, CombatLedger, bindCombatOwner, canPay, consumeShot,
     copyCombatResources, mergeCombatPlayerState, mergeCombatOutfits, withCost, fetchCombatShop, combatShopTransaction,
-    grantedShipChange, noteServerMissionBits, requestShipGrant } from './combat_resources';
+    grantedShipChange, noteServerMissionBits, noteServerStellarChanges, requestShipGrant } from './combat_resources';
 import { getDefaultMissionData } from 'novadatainterface/MissionData';
 
 function deferred<T>() {
@@ -282,6 +282,21 @@ describe('authoritative combat resources', () => {
         expect(await delayed).toEqual(receipt);
         expect(authority.landed).toBeUndefined();
         expect(authority.balance.revision).toBe(closedRevision);
+    });
+
+    it('refuses to open a spaceport on a stellar this pilot destroyed', async () => {
+        const { ledger, authority, entity } = await setup();
+        const state = entity.components.get(PlayerStateComponent)!;
+        const open = () => ({ action: 'open' as const, planet: 'port',
+            revision: authority.balance.revision, state });
+        state.destroyedStellars = ['port'];
+        await expectAsync(ledger.transact('pilot', open())).toBeRejectedWithError(/destroyed/);
+        // A server-recorded destruction the owner has not seen yet also counts.
+        state.destroyedStellars = [];
+        noteServerStellarChanges('player', [{ id: 'port', destroyed: true }]);
+        await expectAsync(ledger.transact('pilot', open())).toBeRejectedWithError(/destroyed/);
+        noteServerStellarChanges('player', [{ id: 'port', destroyed: false }]);
+        await expectAsync(ledger.transact('pilot', open())).toBeResolved();
     });
 
     it('fences an unresolved open before flight recovery, including late delivery', async () => {

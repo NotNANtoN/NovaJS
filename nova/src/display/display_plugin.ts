@@ -45,6 +45,7 @@ import { ChatFeedPlugin } from "./chat_feed_plugin";
 import { RadialMenuPlugin } from "./radial_menu_plugin";
 import { SmallMapPlugin } from "./small_map_plugin";
 import { FlightCursorPlugin } from "./flight_cursor_plugin";
+import { StellarPresentationPlugin } from "./stellar_presentation_plugin";
 
 
 const CenterShipSystem = new System({
@@ -234,6 +235,7 @@ export const Display: Plugin = {
         await world.addPlugin(ParticlesPlugin);
         await world.addPlugin(FullscreenPlugin);
         await world.addPlugin(ExplosionPlugin);
+        await world.addPlugin(StellarPresentationPlugin);
         await world.addPlugin(BeamDisplayPlugin);
         await world.addPlugin(PlanetCornersPlugin);
         await world.addPlugin(SpaceportPlugin);
@@ -254,6 +256,7 @@ export const Display: Plugin = {
         await world.removePlugin(SpaceportPlugin);
         await world.removePlugin(PlanetCornersPlugin);
         await world.removePlugin(BeamDisplayPlugin);
+        await world.removePlugin(StellarPresentationPlugin);
         await world.removePlugin(ExplosionPlugin);
         await world.removePlugin(FullscreenPlugin);
         await world.removePlugin(ParticlesPlugin);

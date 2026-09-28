@@ -205,6 +205,13 @@ const PlayerStateFields = t.intersection([
         crons: t.array(CronStateEntry),
         /** Last gameDate whose crön day was processed. */
         cronDate: t.number,
+        /**
+         * gameDate on which each destroyed stellar regenerates for this
+         * pilot (spöb DeadTime). Stellars without an entry never regenerate
+         * on their own. Destruction is per pilot: other pilots in the same
+         * room still see the stellar.
+         */
+        stellarRegen: t.record(t.string, t.number),
     }),
 ]);
 type PlayerStateFields = t.TypeOf<typeof PlayerStateFields>;

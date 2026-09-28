@@ -47,6 +47,7 @@ import { Stat } from "../nova_plugin/stat";
 import { CloakStateComponent } from "../nova_plugin/cloaking_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
 import { PlanetComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin";
+import { targetableStellars } from "../nova_plugin/stellar_visibility";
 import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin";
 import { AnimationGraphic } from "./animation_graphic";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin";
@@ -759,9 +760,13 @@ const DrawRadar = new System({
     new Query([UUID, MovementStateComponent, PlanetDataComponent] as const),
         GetEntity, UUID, PlayerShipSelector,
         SystemIdResource, GameDataResource,
-        Optional(TargetComponent), Optional(PlanetTargetComponent)] as const,
-    step(radarTime, { time }, statusBar, { position }, ships, planets, entity,
-        playerUuid, _selector, systemId, gameData, playerTarget, planetTarget) {
+        Optional(TargetComponent), Optional(PlanetTargetComponent),
+        Optional(PlayerStateComponent)] as const,
+    step(radarTime, { time }, statusBar, { position }, ships, allPlanets, entity,
+        playerUuid, _selector, systemId, gameData, playerTarget, planetTarget,
+        localState) {
+        // Stellars this pilot destroyed are gone from their radar only.
+        const planets = targetableStellars(allPlanets, row => row[2].id, localState);
         const interference = gameData.data.System.getCached(systemId)?.interference ?? 0;
         if (!radarTime) {
             radarTime = { lastTime: 0 };

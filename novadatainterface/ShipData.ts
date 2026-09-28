@@ -77,6 +77,11 @@ export interface ShipData extends SpaceObjectData {
      */
     buyRandom: number;
     flags3?: number;
+    /**
+     * shïp Flags2 0x0400: "Ship is a planet-type ship, and can only be hit
+     * by planet-type weapons" (the Wraiths in retail).
+     */
+    planetTypeShip?: boolean;
     shortName?: string;
     availabilityNCB: string;
     appearOn: string;

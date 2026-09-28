@@ -22,6 +22,8 @@ import {
     CLICK_TARGET_SHIP_SOUND_ID, SELECT_STELLAR_SOUND_ID, SoundEvent,
 } from '../nova_plugin/sound_event';
 import { TargetComponent } from '../nova_plugin/target_component';
+import { PlayerStateComponent } from '../nova_plugin/player_state';
+import { targetableStellars } from '../nova_plugin/stellar_visibility';
 import { Space } from './space_resource';
 import { Stage } from './stage_resource';
 import { StarmapResource } from './starmap_plugin';
@@ -191,6 +193,7 @@ const PlayerShipTargetQuery = new Query([
     PlanetTargetComponent,
     MovementStateComponent,
     Optional(GovtComponent),
+    Optional(PlayerStateComponent),
 ] as const);
 
 export const FlightCursorSystem = new System({
@@ -262,6 +265,7 @@ export const FlightCursorSystem = new System({
         const playerTarget = playerShip ? playerShip[2] : undefined;
         const playerPlanetTarget = playerShip ? playerShip[3] : undefined;
         const playerGovt = playerShip ? playerShip[5] : undefined;
+        const localState = playerShip ? playerShip[6] : undefined;
 
         // Hover detection
         let hoveredColor = CURSOR_COLOR_DEFAULT;
@@ -288,7 +292,9 @@ export const FlightCursorSystem = new System({
         }
 
         // 2. Check planet under cursor
-        const allPlanets = runQuery(PlanetsQuery);
+        // Stellars this pilot destroyed cannot be hovered or clicked.
+        const allPlanets = targetableStellars(runQuery(PlanetsQuery),
+            row => row[2].id, localState);
         let closestPlanet: (typeof allPlanets)[number] | undefined;
         let closestPlanetDistSq = Infinity;
 

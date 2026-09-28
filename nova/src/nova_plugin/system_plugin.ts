@@ -44,6 +44,7 @@ import { ShipPlugin } from "./ship_plugin";
 import { TargetPlugin } from "./target_plugin";
 import { CloakingPlugin } from "./cloaking_plugin";
 import { WeaponPlugin } from "./weapon_plugin";
+import { StellarDamagePlugin } from "./stellar_damage_plugin";
 
 // Users must add the multiplayer plugin and a display plugin.
 // Users must also add the NovaData resource.
@@ -63,6 +64,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(PlanetPlugin);
         world.addPlugin(MovementPlugin);
         world.addPlugin(DeathPlugin);
+        world.addPlugin(StellarDamagePlugin);
         world.addPlugin(FireWeaponPlugin);
         world.addPlugin(ProjectilePlugin);
         world.addPlugin(WeaponPlugin);

@@ -19,6 +19,8 @@ import { applyOutfitPhysics, OutfitsStateComponent } from './outfit_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { Stat } from './stat';
 import { TargetComponent } from './target_component';
+import { System } from 'nova_ecs/system';
+import { PLANET_BUSTER, shipHitLayer } from './hit_types';
 
 export const ShipType = t.type({
     id: t.string // Not a UUID. A nova id.
@@ -123,6 +125,24 @@ const ShipCollisionInteractionProvider = Provide({
     }),
 });
 
+/**
+ * Planet-type ships (shïp Flags2 0x0400) are only hit by planet-type
+ * weapons. ShipData loads asynchronously, so swap the layer once it is known
+ * (and again after a hull change), keeping extra tags such as bay recalls.
+ */
+const ShipHitLayerSystem = new System({
+    name: 'ShipHitLayerSystem',
+    args: [ShipDataComponent, CollisionVulnerabilityComponent] as const,
+    step(shipData, vulnerability) {
+        const layer = shipHitLayer(shipData);
+        if (vulnerability.vulnerableTo.has(layer)) {
+            return;
+        }
+        vulnerability.vulnerableTo.delete(layer === PLANET_BUSTER ? 'normal' : PLANET_BUSTER);
+        vulnerability.vulnerableTo.add(layer);
+    },
+});
+
 const ShipShieldProvider = Provide({
     name: "ShipShieldProvider",
     provided: ShieldComponent,
@@ -214,6 +234,7 @@ export const ShipPlugin: Plugin = {
         world.addComponent(ShipDataComponent);
 
         world.addSystem(ShipCollisionInteractionProvider);
+        world.addSystem(ShipHitLayerSystem);
         world.addSystem(ShipDataProvider);
         world.addSystem(ShipAnimationProvider);
         world.addSystem(ShipOutfitsProvider);

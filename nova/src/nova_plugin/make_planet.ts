@@ -6,6 +6,9 @@ import { Entity } from "nova_ecs/entity";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { PlanetComponent } from "./planet_plugin";
 import { AlwaysRelevantComponent } from 'nova_ecs/plugins/multiplayer_plugin';
+import { CollisionVulnerabilityComponent } from "./collision_interaction";
+import { planetVulnerableTo } from "./hit_types";
+import { StellarBlastComponent, StellarHealthComponent } from "./stellar_blast";
 
 export function makePlanet(planetData: PlanetData): Entity {
     const planet = new Entity(planetData.name)
@@ -19,6 +22,8 @@ export function makePlanet(planetData: PlanetData): Entity {
         specialTech: [...(planetData.specialTech ?? [])],
         canLand: planetData.canLand,
         inhabited: planetData.inhabited,
+        ...(planetData.strength !== undefined ? { strength: planetData.strength } : {}),
+        ...(planetData.deadType !== undefined ? { deadType: planetData.deadType } : {}),
     });
 
     planet.components.set(MovementStateComponent, {
@@ -30,6 +35,20 @@ export function makePlanet(planetData: PlanetData): Entity {
         turning: 0,
         velocity: new Vector(0, 0),
     });
+
+    // Only destroyable stellars (spöb Strength > 0) can be hit at all, and
+    // then only by planet-type weapons. The hit shape comes from the
+    // stellar's sprite hull (HitboxHullProvider).
+    const vulnerableTo = planetVulnerableTo(planetData);
+    if (vulnerableTo) {
+        planet.components.set(CollisionVulnerabilityComponent, { vulnerableTo });
+        planet.components.set(StellarHealthComponent, {
+            current: planetData.strength!,
+            max: planetData.strength!,
+            attackers: [],
+        });
+        planet.components.set(StellarBlastComponent, { seq: 0 });
+    }
 
     return planet;
 }

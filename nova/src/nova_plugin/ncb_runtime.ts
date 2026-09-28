@@ -125,6 +125,7 @@ export class NcbRuntime {
             ?? new Map();
         return {
             outfits,
+            stellar: id => this.gameData.data.Planet.getCached(id),
             onMoveToSystem: (systemId, relative) => {
                 entity.components.set(PendingMissionJumpComponent, {
                     systemId,

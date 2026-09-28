@@ -6,8 +6,10 @@ import { relation } from './govt_relations';
 import { recordFor } from './legal_record';
 import { executeSetOperations, parseSetExpression } from './ncb';
 import { createNcbHandlers } from './ncb_handlers';
+import { regenerationDate, startsDestroyed } from './stellar_destruction';
 import {
     createInitialPlayerState,
+    destroyStellar,
     PlayerState,
     setCargoCapacity,
     START_DATE_MS,
@@ -184,6 +186,19 @@ export async function createStartingPlayerState(
     if (gameDate !== undefined) {
         state.gameDate = gameDate;
         state.cronDate = gameDate - 1;
+    }
+
+    // spöb Flags2 0x0040: "Stellar starts the game destroyed" (per pilot).
+    const planets = await Promise.all((ids.Planet ?? []).map(id =>
+        gameData.data.Planet.get(id).catch(() => undefined)));
+    for (const planet of planets) {
+        if (planet && startsDestroyed(planet)) {
+            destroyStellar(state, planet.id);
+            const regen = regenerationDate(planet, state.gameDate);
+            if (regen !== undefined) {
+                state.stellarRegen = { ...(state.stellarRegen ?? {}), [planet.id]: regen };
+            }
+        }
     }
 
     if (char.onStart?.trim()) {

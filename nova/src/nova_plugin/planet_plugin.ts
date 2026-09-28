@@ -23,6 +23,8 @@ import { ArmorComponent } from './health_plugin';
 import { DestructionStartedComponent } from './destruction_state';
 import { ControlAction } from './controls';
 import { SystemIdResource } from './system_id_resource';
+import { PlayerStateComponent } from './player_state';
+import { isStellarTargetable, targetableStellars } from './stellar_visibility';
 
 export const PlanetType = t.intersection([
     t.type({
@@ -36,6 +38,10 @@ export const PlanetType = t.intersection([
         specialTech: t.array(t.number),
         canLand: t.boolean,
         inhabited: t.boolean,
+        /** spöb Strength; > 0 means planet-type weapons can destroy it. */
+        strength: t.number,
+        /** spöb DeadType; -1 hides the stellar once destroyed. */
+        deadType: t.number,
     }),
 ]);
 export type PlanetType = t.TypeOf<typeof PlanetType>;
@@ -49,7 +55,12 @@ export const PlanetDataProvider = ProvideAsync({
     provided: PlanetDataComponent,
     args: [GameDataResource, PlanetComponent] as const,
     factory: async (gameData, planet) => {
-        return await gameData.data.Planet.get(planet.id);
+        const data = await gameData.data.Planet.get(planet.id);
+        // Stellar destruction explosions are placed synchronously; warm them.
+        await Promise.all([data.explosion, data.secondaryExplosion]
+            .filter((id): id is string => Boolean(id))
+            .map(id => gameData.data.Explosion.get(id).catch(() => undefined)));
+        return data;
     }
 });
 
@@ -271,9 +282,11 @@ const AttemptLandingSystem = new System({
         MovementStateComponent, PlanetTargetComponent, LandingInputComponent,
         ControlStateEvent, Emit,
         Optional(DestructionStartedComponent), Optional(ArmorComponent),
-        PlayerShipSelector] as const,
-    step(planets, { position, velocity }, planetTarget, landingInput,
-        controls, emit, destructionStarted, armor) {
+        PlayerShipSelector, Optional(PlayerStateComponent)] as const,
+    step(allPlanets, { position, velocity }, planetTarget, landingInput,
+        controls, emit, destructionStarted, armor, _player, playerState) {
+        // Stellars this pilot destroyed are gone for them (not for others).
+        const planets = targetableStellars(allPlanets, row => row[2].id, playerState);
         const input = updateLandingInput(
             landingInput.held,
             controls.get('land'),
@@ -354,8 +367,11 @@ const StellarSelectionSystem = new System({
         PlayerShipSelector,
         Optional(SystemIdResource),
         GameDataResource,
+        Optional(PlayerStateComponent),
     ] as const,
-    step(planets, planetTarget, controls, emit, _playerShip, systemId, gameData) {
+    step(allPlanets, planetTarget, controls, emit, _playerShip, systemId, gameData,
+        playerState) {
+        const planets = targetableStellars(allPlanets, row => row[1].id, playerState);
         let requestedIndex: number | undefined;
         for (let i = 1; i <= 10; i++) {
             if (controls.get(`selectStellar${i}` as ControlAction) === 'start') {
@@ -397,6 +413,24 @@ const PlanetAnimationProvider = Provide({
     factory: planetData => planetData.animation,
 });
 
+/**
+ * Drop a nav target the local pilot can no longer see (they destroyed it).
+ * Other pilots' targets are untouched; destruction is per pilot.
+ */
+const DestroyedStellarTargetSystem = new System({
+    name: 'DestroyedStellarTargetSystem',
+    args: [PlanetTargetComponent, PlayerStateComponent, PlayerShipSelector,
+        new Query([UUID, PlanetComponent] as const)] as const,
+    step(planetTarget, playerState, _player, planets) {
+        const target = planetTarget.target;
+        if (!target) return;
+        const planet = planets.find(([uuid]) => uuid === target);
+        if (planet && !isStellarTargetable(playerState, planet[1].id)) {
+            planetTarget.target = undefined;
+        }
+    },
+});
+
 // TODO: Make planets multiplayer aware
 export const PlanetPlugin: Plugin = {
     name: 'PlanetPlugin',
@@ -420,5 +454,6 @@ export const PlanetPlugin: Plugin = {
         world.addSystem(PlanetDataProvider);
         world.addSystem(AttemptLandingSystem);
         world.addSystem(StellarSelectionSystem);
+        world.addSystem(DestroyedStellarTargetSystem);
     }
 };

@@ -7,6 +7,7 @@ import {
     ENGINE_WIRING,
     ReachabilityData,
     reachableMissions,
+    RETAIL_DATA_WIRING,
     RETAIL_WIRING,
 } from './storyline_reachability';
 
@@ -56,19 +57,28 @@ describe('retail storyline reachability', () => {
         if (skipWithoutRetailData()) return;
         const engine = reachableMissions(data, ENGINE_WIRING);
         // Tutorial, Vell-os, Polaris, Fed, Rebel, Auroran, Pirate, Wild Geese,
-        // Sigma bulk (Require), ship-offered (p\u00ebrs link), auto-abort helper.
+        // Sigma bulk (Require), ship-offered (përs link), auto-abort helper.
         const entries = [251, 129, 153, 430, 330, 660, 693, 634, 557, 132, 909, 905];
         expect(describeIds(entries.filter(id => !engine.has(id))))
             .withContext('entry missions').toEqual([]);
     });
 
-    it('only loses content that needs stellar destruction', () => {
+    it('executes every mechanic EV Nova does', () => {
         if (skipWithoutRetailData()) return;
         const engine = reachableMissions(data, ENGINE_WIRING);
         const retail = reachableMissions(data, RETAIL_WIRING);
         const lost = [...retail].filter(id => !engine.has(id)).sort((a, b) => a - b);
-        // 615-629 odd ids: "Avoid ..." task forces gated on sp\u00f6b OnDestroy bits.
-        expect(describeIds(lost)).toEqual(describeIds([615, 617, 620, 621, 623, 625, 627, 629]));
-        expect(engine.size).toBeGreaterThan(760);
+        expect(describeIds(lost)).toEqual([]);
+        expect(engine.size).toBeGreaterThan(780);
+    });
+
+    it('only needs plug-in planet weapons for the stellar-destruction missions', () => {
+        if (skipWithoutRetailData()) return;
+        const full = reachableMissions(data, ENGINE_WIRING);
+        const vanilla = reachableMissions(data, RETAIL_DATA_WIRING);
+        const pluginOnly = [...full].filter(id => !vanilla.has(id)).sort((a, b) => a - b);
+        // 615-629 odd ids: "Avoid ..." task forces gated on spöb OnDestroy bits.
+        expect(describeIds(pluginOnly))
+            .toEqual(describeIds([615, 617, 620, 621, 623, 625, 627, 629]));
     });
 });

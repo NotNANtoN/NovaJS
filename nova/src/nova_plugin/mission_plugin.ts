@@ -41,6 +41,7 @@ import {
     PendingMissionSoundComponent,
 } from './ncb_runtime';
 import { SystemVariantIndex, variantIndexForCatalog } from './system_variants';
+import { dueRegenerations, recordStellarRegenerated } from './stellar_destruction';
 import { FUEL_PER_JUMP } from './fuel';
 import { advanceCrons, activeCronIds } from './cron_plugin';
 import { loadPlayerContribute } from './player_contribute';
@@ -902,6 +903,30 @@ export class MissionRuntime {
         });
     }
 
+    /**
+     * Regenerate this pilot's destroyed stellars whose spöb DeadTime has
+     * elapsed, running OnRegen for each.
+     */
+    async regenerateStellars(
+        state: PlayerState,
+        context: MissionSetContext = {},
+    ): Promise<void> {
+        const due = dueRegenerations(state);
+        if (due.length === 0) return;
+        for (const id of due) {
+            const planet = await this.gameData.data.Planet.get(id)
+                .catch(() => undefined);
+            recordStellarRegenerated(state, planet ?? { id }, context);
+        }
+        await startPendingNcbMissions(this.gameData, state, {
+            initialPlanetId: state.lastLandedPlanet,
+            initialSystemId: state.currentSystem,
+            currentSystemId: state.currentSystem,
+            governments: await this.governments(),
+            ncb: context,
+        });
+    }
+
     /** Active crön ids, for callers computing the player's Contribute. */
     activeCronIds(state: PlayerState): string[] {
         return activeCronIds(state);
@@ -995,6 +1020,7 @@ export class MissionRuntime {
         }
         return this.failExpired(state, context)
             .then(() => this.advanceCrons(state, context))
+            .then(() => this.regenerateStellars(state, context))
             .catch(error => {
                 console.error('Mission expiration processing failed', error);
             });

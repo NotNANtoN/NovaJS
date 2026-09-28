@@ -69,6 +69,7 @@ async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string)
         sound,
         loopSound: weap.loopSound,
         useFiringAnimation: weap.useFiringAnimation,
+        planetType: weap.planetType,
     }
 }
 

@@ -58,6 +58,7 @@ import { ServerClockOffsetResource } from 'nova_ecs/plugins/multiplayer_plugin';
 // Gameplay guidance history must not change with a client's jitter buffer.
 export const GUIDANCE_HISTORY_DELAY_MS = 200;
 import { TargetComponent } from './target_component';
+import { weaponHitTypes } from './hit_types';
 
 const SourceOwnershipQuery = new Query([
     Optional(MultiplayerData),
@@ -100,10 +101,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
 
         const queueHolder = {} as { queue: FactoryQueue<Entity> };
 
-        let hitTypes = new Set(['normal']);
-        if (data.guidance === 'pointDefense') {
-            hitTypes = new Set(['pointDefense']);
-        }
+        const hitTypes = weaponHitTypes(data);
 
         this.factoryQueue = new FactoryQueue(() => {
             const projectile = new Entity(this.data.name)

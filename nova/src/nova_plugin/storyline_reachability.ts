@@ -50,10 +50,17 @@ export const RETAIL_WIRING: EngineWiring = {
 };
 
 /**
- * What this engine executes. Stellar destruction does not exist, so sp\u00f6b
- * OnDestroy/OnRegen never run.
+ * What this engine executes: everything EV Nova does, including per-pilot
+ * stellar destruction (stellar_destruction.ts).
  */
-export const ENGINE_WIRING: EngineWiring = {
+export const ENGINE_WIRING: EngineWiring = RETAIL_WIRING;
+
+/**
+ * What the unmodified retail data can trigger. No retail wëap is a
+ * planet-type weapon (Flags2 0x0400) and no mïsn uses NCB Y, so spöb
+ * OnDestroy only fires with plug-in content, in EV Nova as here.
+ */
+export const RETAIL_DATA_WIRING: EngineWiring = {
     ...RETAIL_WIRING,
     planetOnDestroy: false,
 };

@@ -123,6 +123,12 @@ export interface BaseWeaponData extends BaseData {
     destroyShipWhenFiring: boolean;
     sound?: string;
     loopSound: boolean;
+    /**
+     * wëap Flags2 0x0400: "planet-type weapon, and can only hit planet-type
+     * ships or destroyable stellars." None of the retail weapons set it;
+     * plug-ins use it to destroy stellars.
+     */
+    planetType?: boolean;
 }
 
 export function getDefaultBaseWeaponData(): BaseWeaponData {

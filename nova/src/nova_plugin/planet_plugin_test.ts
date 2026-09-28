@@ -31,6 +31,7 @@ import {
     updateLandingInput,
 } from './planet_plugin';
 import { makePlanet } from './make_planet';
+import { createInitialPlayerState, PlayerStateComponent } from './player_state';
 
 const earth = {
     uuid: 'planet nova:128',
@@ -264,6 +265,40 @@ describe('planet landing selection', () => {
         world.emit(ControlStateEvent, controlState as any);
         world.step();
 
+        expect(player.components.get(PlanetTargetComponent)?.target).toBe('mars');
+    });
+
+    it('skips and untargets stellars the local pilot destroyed', async () => {
+        const world = new World();
+        world.resources.set(GameDataResource, {
+            data: {
+                System: { getCached: () => ({ id: 'nova:sol', planets: ['nova:earth', 'nova:mars'] }) },
+                Planet: { get: async () => ({}) },
+            },
+        } as any);
+        world.resources.set(SystemIdResource, 'nova:sol');
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(PlanetPlugin);
+        const movement = () => ({ position: new Position(0, 0), velocity: new Vector(0, 0),
+            rotation: new Angle(0), turning: 0, turnBack: false, accelerating: 0 });
+        world.entities.set('earth', new Entity()
+            .addComponent(PlanetComponent, { id: 'nova:earth', name: 'Earth' })
+            .addComponent(MovementStateComponent, movement()));
+        world.entities.set('mars', new Entity()
+            .addComponent(PlanetComponent, { id: 'nova:mars', name: 'Mars' })
+            .addComponent(MovementStateComponent, movement()));
+        const state = createInitialPlayerState();
+        state.destroyedStellars = ['nova:earth'];
+        const player = new Entity()
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, state)
+            .addComponent(PlanetTargetComponent, { target: 'earth' });
+        world.entities.set('player', player);
+        world.step();
+        expect(player.components.get(PlanetTargetComponent)?.target).toBeUndefined();
+
+        world.emit(ControlStateEvent, new Map([['selectStellar1', 'start']]) as any);
+        world.step();
         expect(player.components.get(PlanetTargetComponent)?.target).toBe('mars');
     });
 });

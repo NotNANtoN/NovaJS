@@ -90,6 +90,40 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         }
     };
 
+    // DeadType is a stellär graphic index like spob.graphic (see
+    // SpobResource): rëD 2000+, skipping the missing 2058.
+    let deadAnimation: Animation | undefined;
+    if (spob.deadType >= 0) {
+        let deadGraphic = spob.deadType + 2000;
+        if (deadGraphic > 2058) deadGraphic -= 1;
+        const deadRled = spob.idSpace.rlëD[deadGraphic];
+        if (deadRled) {
+            deadAnimation = {
+                ...animation,
+                images: {
+                    baseImage: {
+                        ...animation.images.baseImage,
+                        id: deadRled.globalID,
+                    },
+                },
+            };
+        } else {
+            notFoundFunction("No matching rlëD id " + deadGraphic
+                + " for DeadType of spöb id " + base.id);
+        }
+    }
+
+    // ExplodType 0-63 names bööm 128-191; 1000+ adds type-0 explosions.
+    let explosion: string | undefined;
+    let secondaryExplosion: string | undefined;
+    if (spob.explodType >= 0) {
+        const boom = spob.idSpace.bööm?.[(spob.explodType % 1000) + 128];
+        explosion = boom?.globalID;
+        if (spob.explodType >= 1000) {
+            secondaryExplosion = spob.idSpace.bööm?.[128]?.globalID;
+        }
+    }
+
     return {
         ...base,
         landingDesc: desc,
@@ -114,6 +148,14 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         },
         position: [spob.position[0], spob.position[1]],
         flags: spob.flags,
+        flags2: spob.flags2,
+        strength: spob.strength,
+        deadType: spob.deadType,
+        deadTime: spob.deadTime,
+        explodType: spob.explodType,
+        ...(deadAnimation ? { deadAnimation } : {}),
+        ...(explosion ? { explosion } : {}),
+        ...(secondaryExplosion ? { secondaryExplosion } : {}),
         techLevel: spob.techLevel,
         tribute: spob.tribute,
         specialTech: [...spob.specialTech],

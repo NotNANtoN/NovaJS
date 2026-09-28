@@ -24,6 +24,14 @@ class SpobResource extends BaseResource {
     onRelease: string;
     onDestroy: string;
     onRegen: string;
+    /** Flags2 (e.g. 0x0040 "starts the game destroyed"). */
+    flags2: number;
+    /** Damage from planet-type weapons before destruction; <= 0 invincible. */
+    strength: number;
+    deadType: number;
+    /** Days destroyed; 0 = regenerate at the end of the day, -1 = never. */
+    deadTime: number;
+    explodType: number;
 
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
@@ -50,6 +58,11 @@ class SpobResource extends BaseResource {
         this.ambientSoundID = d.getInt16(26);
         this.landingDescID = this.id;
         this.tradeCommodities = getTradeCommodities(this.flags);
+        this.flags2 = d.getUint16(32);
+        this.strength = d.byteLength >= 576 ? d.getInt32(572) : 0;
+        this.deadType = d.byteLength >= 578 ? d.getInt16(576) : -1;
+        this.deadTime = d.byteLength >= 580 ? d.getInt16(578) : -1;
+        this.explodType = d.byteLength >= 582 ? d.getInt16(580) : -1;
 
         const getString = (start: number, length: number): string => {
             let s = "";

@@ -45,6 +45,7 @@ import { PlatformResource } from './platform_plugin';
 import { parseLoggedShotEntityId, recordShotImpact } from './fire_sync';
 import { BeamContactComponent } from './beam_contact';
 import { HitFeedbackEvent } from './damage_events';
+import { weaponHitType, weaponHitTypes } from './hit_types';
 
 
 export interface BeamState {
@@ -212,10 +213,7 @@ class BeamWeaponEntry extends WeaponEntry {
         super(data, runQuery);
         this.pointDefenseRangeSquared = data.beamAnimation.length ** 2;
 
-        this.hitTypes = new Set(['normal']);
-        if (data.guidance === 'pointDefenseBeam') {
-            this.hitTypes = new Set(['pointDefense']);
-        }
+        this.hitTypes = weaponHitTypes(data);
     }
 
     protected override guidance(exitPoint: Position, _movement: MovementState,
@@ -420,9 +418,7 @@ export const BeamClippingSystem = new System({
     step(beamData, beamState, movement, beamHull, owner, runQuery, uuid, entities,
         platform, communicator, contact) {
         const maxLength = Math.max(0, beamData.beamAnimation.length);
-        const hitType = beamData.guidance === 'pointDefenseBeam'
-            ? 'pointDefense'
-            : 'normal';
+        const hitType = weaponHitType(beamData);
         let effectiveLength = maxLength;
 
         // A server-reported contact clips the beam where the server says it

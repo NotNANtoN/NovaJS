@@ -83,6 +83,93 @@ export function noteServerMissionBits(owner: string,
     for (const [bit, value] of list) pending.set(bit, { value, revision });
 }
 
+type PendingStellar = { destroyed: boolean; regenAt?: number; revision?: number };
+// Stellar destructions the server recorded for a pilot (spöb Strength
+// broken by its weapons) that the owner has not yet acknowledged.
+const serverStellars = new Map<string, Map<string, PendingStellar>>();
+
+/**
+ * Remember a server-authored stellar destruction (or regeneration) until the
+ * owner has seen it, exactly like {@link noteServerMissionBits}: a stale full
+ * PlayerState from the owner must not resurrect a stellar it destroyed or
+ * drop its regeneration date.
+ */
+export function noteServerStellarChanges(owner: string,
+    changes: Iterable<{ id: string; destroyed: boolean; regenAt?: number }>): void {
+    const list = [...changes];
+    if (list.length === 0) return;
+    const authority = owners.get(owner);
+    let revision: number | undefined;
+    if (authority && !authority.retired) {
+        authority.commit();
+        revision = authority.balance.revision;
+    }
+    let pending = serverStellars.get(owner);
+    if (!pending) {
+        pending = new Map();
+        serverStellars.set(owner, pending);
+    }
+    for (const { id, destroyed, regenAt } of list) {
+        pending.set(resourceId(id), { destroyed, regenAt, revision });
+    }
+}
+
+/** A server-recorded destruction the owner has not acknowledged yet. */
+export function hasPendingServerDestruction(owner: string, planetId: string): boolean {
+    for (const [id, entry] of serverStellars.get(owner) ?? []) {
+        if (entry.destroyed && sameResourceId(id, planetId)) return true;
+    }
+    return false;
+}
+
+function ownerForAuthority(authority: CombatAuthority): string | undefined {
+    for (const [owner, candidate] of owners) {
+        if (candidate === authority) return owner;
+    }
+    return undefined;
+}
+
+function stellarMatches(state: PlayerState, id: string, entry: PendingStellar): boolean {
+    const destroyed = state.destroyedStellars.some(stellar => sameResourceId(stellar, id));
+    if (destroyed !== entry.destroyed) return false;
+    if (!entry.destroyed) return true;
+    const regenKey = Object.keys(state.stellarRegen ?? {})
+        .find(key => sameResourceId(key, id));
+    const regenAt = regenKey === undefined ? undefined : state.stellarRegen![regenKey];
+    return regenAt === entry.regenAt;
+}
+
+function mergeServerStellars(merged: PlayerState, owner: string,
+    remoteRevision: number | undefined): Pick<PlayerState, 'destroyedStellars' | 'stellarRegen'> | undefined {
+    const pending = serverStellars.get(owner);
+    if (!pending) return undefined;
+    let destroyedStellars = merged.destroyedStellars;
+    let stellarRegen = merged.stellarRegen;
+    let changed = false;
+    for (const [id, entry] of pending) {
+        const acknowledged = entry.revision !== undefined
+            ? (remoteRevision ?? -1) >= entry.revision
+            : stellarMatches(merged, id, entry);
+        if (acknowledged) {
+            pending.delete(id);
+            continue;
+        }
+        const current = { ...merged, destroyedStellars, stellarRegen } as PlayerState;
+        if (stellarMatches(current, id, entry)) continue;
+        changed = true;
+        destroyedStellars = destroyedStellars.filter(stellar => !sameResourceId(stellar, id));
+        const schedule = Object.fromEntries(Object.entries(stellarRegen ?? {})
+            .filter(([key]) => !sameResourceId(key, id)));
+        if (entry.destroyed) {
+            destroyedStellars = [...destroyedStellars, id];
+            if (entry.regenAt !== undefined) schedule[id] = entry.regenAt;
+        }
+        stellarRegen = schedule;
+    }
+    if (pending.size === 0) serverStellars.delete(owner);
+    return changed ? { destroyedStellars, stellarRegen } : undefined;
+}
+
 function missionEntryKey(entry: PlayerState['activeMissions'][number]): string {
     return entry.missionUuid ?? `${entry.missionId}:${entry.acceptedDate ?? 0}`;
 }
@@ -149,13 +236,15 @@ function mergeServerMissionProgress(local: PlayerState, merged: PlayerState,
         }
         if (pending.size === 0) serverMissionBits.delete(owner);
     }
-    if (activeMissions === merged.activeMissions && missionBits === merged.missionBits) {
+    const stellars = mergeServerStellars(merged, owner, remoteRevision);
+    if (activeMissions === merged.activeMissions && missionBits === merged.missionBits
+        && !stellars) {
         return merged;
     }
     // The merged value becomes the replication baseline without being sent,
     // so the owner would keep its stale copy. Ask the server to echo it.
     playerStateEchoes.add(owner);
-    return withState(merged, { activeMissions, missionBits });
+    return withState(merged, { activeMissions, missionBits, ...stellars });
 }
 
 const playerStateEchoes = new Set<string>();
@@ -655,6 +744,13 @@ export class CombatLedger {
             // No credits change: a control-bit hull change is not a sale.
             applyShipChange(authority.balance, item!, grant!);
         } else if (request.action === 'open') {
+            // Destruction is per pilot: the owner's own record, plus any
+            // destruction the server recorded that it has not seen yet.
+            const owner = ownerForAuthority(authority);
+            if (request.state.destroyedStellars?.some(id => sameResourceId(id, planet.id))
+                || (owner && hasPendingServerDestruction(owner, planet.id))) {
+                throw new Error(`${planet.name || planet.id} has been destroyed`);
+            }
             if (!planet.canLand || !planetInSystem) {
                 throw new Error(`Not at this spaceport (planet: ${planet.id} (${planet.name || 'unknown'}), current system: ${system?.id} (${system?.name || 'unknown'}))`);
             }

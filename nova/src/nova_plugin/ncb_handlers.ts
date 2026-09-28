@@ -10,6 +10,11 @@ import {
 } from './player_state';
 import { OutfitsState } from './outfit_plugin';
 import { resourceId } from '../common/resource_id';
+import {
+    DestroyableStellar,
+    recordStellarDestroyed,
+    recordStellarRegenerated,
+} from './stellar_destruction';
 
 export type NcbSetSource = { kind: 'mission' | 'outfit'; id: string };
 
@@ -38,6 +43,11 @@ export interface NcbHandlerContext {
     onPlaySound?: (soundId: number) => void;
     onLeaveStellar?: (messageId: number) => void;
     onRenameShip?: (namesId: number) => void;
+    /**
+     * Synchronous spöb lookup (cached planet data) so NCB Y/U can run the
+     * stellar's OnDestroy/OnRegen and schedule its regeneration.
+     */
+    stellar?: (id: string) => DestroyableStellar | undefined;
     logger?: (message: string) => void;
 }
 
@@ -139,6 +149,11 @@ function queueMissionStart(state: PlayerState, id: number) {
     pendingMissionStarts.set(state, queued);
 }
 
+/** Re-queue drained `S` ids on another (detached) copy of a pilot's state. */
+export function queuePendingMissionStarts(state: PlayerState, ids: Iterable<number>): void {
+    for (const id of ids) queueMissionStart(state, id);
+}
+
 /** Drain NCB `S` ids queued while a set expression ran on this pilot. */
 export function takePendingMissionStarts(state: PlayerState): number[] {
     const queued = pendingMissionStarts.get(state) ?? [];
@@ -174,9 +189,24 @@ export function createNcbHandlers(
         },
         activateRank: operation => activateRank(context.state, operation.id),
         deactivateRank: operation => deactivateRank(context.state, operation.id),
-        destroyStellar: operation => destroyStellar(context.state, operation.id),
-        regenerateStellar: operation =>
-            regenerateStellar(context.state, operation.id),
+        destroyStellar: operation => {
+            const planet = context.stellar?.(resourceId(operation.id));
+            if (planet) {
+                const { state, ...rest } = context;
+                recordStellarDestroyed(state, planet, rest, context.logger);
+            } else {
+                destroyStellar(context.state, operation.id);
+            }
+        },
+        regenerateStellar: operation => {
+            const planet = context.stellar?.(resourceId(operation.id));
+            if (planet) {
+                const { state, ...rest } = context;
+                recordStellarRegenerated(state, planet, rest, context.logger);
+            } else {
+                regenerateStellar(context.state, operation.id);
+            }
+        },
         exploreSystem: operation => exploreSystem(context.state, operation.id),
         startMission: operation => {
             context.onStartMission?.(operation.id);
