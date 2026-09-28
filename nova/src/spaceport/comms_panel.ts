@@ -53,6 +53,10 @@ import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
 import { executeSetOperations, parseSetExpression } from '../nova_plugin/ncb';
 import { createNcbHandlers } from '../nova_plugin/ncb_handlers';
+import { PersFlags } from '../nova_plugin/pers';
+
+/** STR# 7100: përs CommQuote lines. */
+const PERS_COMM_QUOTES = 'nova:7100';
 import {
     findPersLinkOffer,
     notifyPersLinkAccepted,
@@ -251,7 +255,30 @@ export class Comms extends Menu<Entity> {
         this.container.visible = true;
         this.controls.bind();
         this.reconcileAssistance();
+        void this.sayPersQuote(current);
         void this.offerPersLinkMission(input, current);
+    }
+
+    /** përs whose quote was shown this session (Flags 0x0080 "only once"). */
+    private readonly persQuotesShown = new Set<string>();
+
+    /**
+     * EV Nova Bible, përs CommQuote: "Index number of an entry in STR#
+     * resource 7100, to be displayed in the communications dialog."
+     */
+    private async sayPersQuote(current: () => boolean) {
+        const pers = this.target?.pers;
+        if (!pers || pers.commQuote === undefined || pers.commQuote < 1) return;
+        if ((pers.flags & PersFlags.hailOnce) !== 0
+            && this.persQuotesShown.has(pers.persId)) return;
+        const strings = await this.gameData.data.StringList?.get(PERS_COMM_QUOTES)
+            .then(list => list.strings)
+            .catch(() => undefined);
+        // STR# indexes in resources are one-based.
+        const quote = strings?.[pers.commQuote - 1];
+        if (!quote || !current()) return;
+        this.persQuotesShown.add(pers.persId);
+        this.message.text = `${this.message.text}\n\n"${quote}"`.trim();
     }
 
     /**
@@ -491,7 +518,8 @@ export class Comms extends Menu<Entity> {
             const options = this.pendingDestinationOptions
                 ? this.pendingDestinationOptions(offer.resolved)
                 : { initialPlanetId: '', resolved: offer.resolved };
-            if (!acceptMission(state, offer.mission, options)) {
+            const accepted = acceptMission(state, offer.mission, options);
+            if (!accepted) {
                 this.message.text = 'Contract could not be accepted. Check mission capacity, cargo space and destination.';
                 return;
             }
@@ -504,7 +532,8 @@ export class Comms extends Menu<Entity> {
             }
             input.components.set(PlayerStateComponent, state);
             if (this.target?.pers && this.hailedUuid) {
-                notifyPersLinkAccepted(input, this.hailedUuid, offer.mission.id);
+                notifyPersLinkAccepted(input, this.hailedUuid, offer.mission.id,
+                    accepted.missionUuid);
             }
             this.message.text = 'Contract confirmed!';
             this.buttons.assistance.setText('Request Assistance');

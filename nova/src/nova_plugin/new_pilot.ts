@@ -179,13 +179,11 @@ export async function createStartingPlayerState(
     }
 
     const gameDate = charStartGameDate(char);
-    if (gameDate !== undefined && gameDate > 0) {
+    // gameDate counts days from 18 Oct 1177 and may be negative: retail's
+    // default chär starts on 23 Jun 1177.
+    if (gameDate !== undefined) {
         state.gameDate = gameDate;
-    } else if (gameDate !== undefined && gameDate < 0) {
-        // gameDate counts days from 18 Oct 1177 and formatGameDate rejects
-        // negative values, so an earlier chär date cannot be represented yet.
-        logger(`chär ${char.id}: start date ${char.startDay}/${char.startMonth}/`
-            + `${char.startYear} precedes the engine epoch; starting on day 0`);
+        state.cronDate = gameDate - 1;
     }
 
     if (char.onStart?.trim()) {

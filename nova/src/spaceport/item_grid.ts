@@ -177,6 +177,18 @@ export class ItemGrid<I extends Item> {
         return this.items.length;
     }
 
+    get itemIds(): string[] {
+        return this.items.map(item => item.id);
+    }
+
+    /** Select by id; returns false when the item is not listed. */
+    selectId(id: string): boolean {
+        const index = this.items.findIndex(item => item.id === id);
+        if (index < 0) return false;
+        this.selectionIndex = index;
+        return true;
+    }
+
     tileClicked(tile: ItemTile<I>) {
         this.wrappedSelectionIndex = this.tiles.indexOf(tile);
         this.drawGrid();

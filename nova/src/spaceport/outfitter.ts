@@ -255,14 +255,14 @@ export class Outfitter extends Menu<OutfitsState> {
         return itemGrid;
     }
 
-    private async refreshGrid() {
+    private async refreshGrid(prebuilt?: ItemGrid<OutfitData>) {
         // The grid is built asynchronously, so the planet can arrive first.
         // Waiting keeps that case from leaving the unfiltered initial grid up.
         await this.buildPromise;
         if (!this.itemGrid || !this.planetData) {
             return;
         }
-        const itemGrid = await this.makeOutfitsGrid();
+        const itemGrid = prebuilt ?? await this.makeOutfitsGrid();
         this.container.removeChild(this.itemGrid.container);
         this.itemGrid = itemGrid;
         this.container.addChild(itemGrid.container);
@@ -386,7 +386,22 @@ export class Outfitter extends Menu<OutfitsState> {
             this.updateCreditsText();
             this.setFreeMassText();
             this.onUpdateOutfits?.(this.currentOutfitsState());
+            await this.refreshStockIfChanged(outfit.id);
         }
+    }
+
+    /**
+     * A license (Contribute) or an OnPurchase/OnSell bit can unlock or hide
+     * other items. Rebuild the stock list when that set changes, instead of
+     * waiting for the next visit, and keep the traded item selected.
+     */
+    private async refreshStockIfChanged(selectedId: string) {
+        if (!this.itemGrid || !this.planetData) return;
+        const before = this.itemGrid.itemIds.join(',');
+        const next = await this.makeOutfitsGrid();
+        if (next.itemIds.join(',') === before) return;
+        await this.refreshGrid(next);
+        this.itemGrid.selectId(selectedId);
     }
 
     private async sellOutfit(quantity = 1) {
@@ -440,6 +455,7 @@ export class Outfitter extends Menu<OutfitsState> {
             this.updateCreditsText();
             this.setFreeMassText();
             this.onUpdateOutfits?.(this.currentOutfitsState());
+            await this.refreshStockIfChanged(id);
         }
     }
 

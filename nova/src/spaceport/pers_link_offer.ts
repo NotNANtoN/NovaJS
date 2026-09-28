@@ -29,6 +29,9 @@ export interface PersLinkInfo {
     flags: number;
     activeOn: string;
     state: PersState;
+    /** Index into STR# 7100 / 7101, -1 when unused. */
+    commQuote?: number;
+    hailQuote?: number;
 }
 
 /** Plain copy of the ship's PersComponent (replicated to clients). */
@@ -43,6 +46,8 @@ export function persLinkInfo(ship: Entity | undefined): PersLinkInfo | undefined
         flags: instance.data.flags,
         activeOn: instance.data.activeOn,
         state: instance.state ?? {},
+        commQuote: instance.data.commQuote,
+        hailQuote: instance.data.hailQuote,
     };
 }
 
@@ -100,6 +105,7 @@ export function notifyPersLinkAccepted(
     player: Entity,
     shipUuid: string,
     missionId: string,
+    missionUuid?: string,
 ): void {
     // The server consumes (deletes) the request, so the previous sequence
     // may be gone; a clock-based floor keeps sequences strictly increasing.
@@ -107,6 +113,7 @@ export function notifyPersLinkAccepted(
     player.components.set(PersLinkAcceptedRequestComponent, {
         target: shipUuid,
         missionId,
+        ...(missionUuid ? { missionUuid } : {}),
         sequence: Math.max((previous?.sequence ?? 0) + 1, Date.now()),
     });
 }
@@ -128,11 +135,13 @@ export async function acceptPersLinkOffer(
         return false;
     }
     const options = link.destinationOptions(link.offer.resolved);
-    if (!acceptMission(state, link.offer.mission, options)) {
+    const accepted = acceptMission(state, link.offer.mission, options);
+    if (!accepted) {
         return false;
     }
     await startPendingNcbMissions(gameData, state, options);
     player.components.set(PlayerStateComponent, state);
-    notifyPersLinkAccepted(player, shipUuid, link.offer.mission.id);
+    notifyPersLinkAccepted(player, shipUuid, link.offer.mission.id,
+        accepted.missionUuid);
     return true;
 }

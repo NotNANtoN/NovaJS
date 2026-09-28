@@ -41,6 +41,7 @@ import {
     PlayerStorePort,
 } from './player_state';
 import { MissionGoalEvent } from './mission_goals';
+import { PersBecomesSpecialShipComponent, PersComponent } from './pers_plugin';
 import { noteServerMissionBits, takePlayerStateEcho } from './combat_resources';
 import { PlayerStoreResource } from './player_state';
 import { ShipComponent } from './ship_plugin';
@@ -415,6 +416,44 @@ function findPlayer(
         playerTokenFor(multiplayer, store) === token);
 }
 
+/**
+ * përs Flags 0x0040: the përs whose LinkMission was accepted becomes the
+ * mission's single special ship, keeping its hull, instead of a new ship
+ * appearing beside it (e.g. the Refuel Trader missions 141/650-652).
+ */
+export function adoptPersSpecialShip(
+    entities: Map<string, Entity>,
+    missionUuid: string,
+    token: string,
+    playerUuid: string,
+    mission: Pick<MissionData, 'shipGoal' | 'shipBehav' | 'shipStart'>,
+    now: number,
+): boolean {
+    for (const [, entity] of entities) {
+        const tag = entity.components.get(PersBecomesSpecialShipComponent);
+        if (!tag || tag.missionUuid !== missionUuid) continue;
+        entity.components.delete(PersBecomesSpecialShipComponent);
+        entity.components.delete(PersComponent);
+        entity.components
+            .set(MissionShipComponent, { missionUuid, playerToken: token })
+            .set(MissionShipBehaviorComponent, {
+                behavior: mission.shipBehav >= 0 ? mission.shipBehav : -1,
+                playerUuid,
+                activeAt: now,
+                cloaked: false,
+            })
+            .set(MissionShipStatusComponent, {
+                disabledRecorded: false,
+                observedRecorded: false,
+            });
+        if (mission.shipGoal === 1) {
+            entity.components.set(DisableOnZeroArmorComponent, undefined);
+        }
+        return true;
+    }
+    return false;
+}
+
 const MissionShipSpawnSystem = new AsyncSystem({
     name: 'MissionShipSpawn',
     args: [
@@ -462,6 +501,11 @@ const MissionShipSpawnSystem = new AsyncSystem({
                 const missionUuid = missionIdFor(entry);
                 if (entry.shipGoalProgress?.completed
                     || existing.has(`${token}:${missionUuid}`)) {
+                    continue;
+                }
+                if (mission.shipCount === 1 && adoptPersSpecialShip(
+                    entities, missionUuid, token, playerUuid, mission, time.time)) {
+                    existing.add(`${token}:${missionUuid}`);
                     continue;
                 }
                 const dude = await loadDude(gameData, mission.shipDude, systemId);

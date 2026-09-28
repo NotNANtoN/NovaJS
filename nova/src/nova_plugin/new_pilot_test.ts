@@ -75,7 +75,7 @@ describe('createStartingPlayerState', () => {
         expect(other.lastLandedPlanet).toBe('nova:203');
     });
 
-    it('uses system 128 when every starting system is -1 and keeps day 0 before the epoch', async () => {
+    it('uses system 128 when every starting system is -1 and starts on the chär date before the epoch', async () => {
         const gameData = fakeGameData();
         gameData.data.System.map.set('nova:128', { ...getDefaultSystemData(), id: 'nova:128', planets: ['nova:203'] });
         gameData.data.Char.map.set('nova:128', { ...getDefaultCharData(), id: 'nova:128',
@@ -84,8 +84,10 @@ describe('createStartingPlayerState', () => {
         const state = await createStartingPlayerState(gameData, () => 0, { logger: m => logs.push(m) });
         expect(state.currentSystem).toBe('nova:128');
         expect(state.lastLandedPlanet).toBe('nova:203');
-        expect(state.gameDate).toBe(0);
-        expect(logs.some(log => log.includes('precedes the engine epoch'))).toBeTrue();
+        expect(state.gameDate).toBe(-117);
+        expect(formatGameDate(state.gameDate)).toBe('23 June 1177 NC');
+        // Cröns start from the pilot's first day, not from the epoch.
+        expect(state.cronDate).toBe(-118);
     });
 
     it('measures chär dates from 18 Oct 1177', () => {

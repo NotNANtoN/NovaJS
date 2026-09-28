@@ -24,6 +24,7 @@ import { makeNpc } from "./npc_plugin";
 import { resolveDamageSource } from "./npc_hostility";
 import {
     applyPersShipData,
+    PersFlags,
     persLinkAcceptEffects,
     PersState,
     persShipOverrides,
@@ -77,11 +78,16 @@ export const PersAppearanceComponent = new Component<{
  * applies the përs side effects it owns (Flags 0x0800 leave, 0x0100
  * deactivate), the same one-shot request pattern as surrender/assistance.
  */
-const PersLinkAcceptedRequest = t.type({
-    target: t.string,
-    missionId: t.string,
-    sequence: t.number,
-});
+const PersLinkAcceptedRequest = t.intersection([
+    t.type({
+        target: t.string,
+        missionId: t.string,
+        sequence: t.number,
+    }),
+    // The accepted ActiveMission, so a Flags 0x0040 përs can become its
+    // special ship instead of a second copy spawning beside it.
+    t.partial({ missionUuid: t.string }),
+]);
 export type PersLinkAcceptedRequest = t.TypeOf<typeof PersLinkAcceptedRequest>;
 export const PersLinkAcceptedRequestComponent =
     new Component<PersLinkAcceptedRequest>("PersLinkAcceptedRequestComponent");
@@ -94,6 +100,15 @@ replicationPolicies.register(PersLinkAcceptedRequestComponent, {
 replicationPolicies.register(PersLinkSequenceComponent, {
     codec: t.number, authority: "local-only",
 });
+
+/**
+ * Set on a përs ship whose Flags 0x0040 LinkMission was accepted: the ship
+ * becomes that mission's single special ship. Server-only.
+ */
+export const PersBecomesSpecialShipComponent = new Component<{
+    missionUuid: string;
+    playerUuid: string;
+}>("PersBecomesSpecialShipComponent");
 
 export const PersStateResource =
     new Resource<Map<string, PersState>>("PersStateResource");
@@ -310,6 +325,19 @@ export const PersLinkAcceptedSystem = new System({
             return;
         }
         const effects = persLinkAcceptEffects(instance.data);
+        // përs Flags 0x0040: "When LinkMission is accepted with a single
+        // SpecialShip, replace it with this ship". The mission ship spawner
+        // adopts a tagged përs instead of creating a new ship.
+        if ((instance.data.flags & PersFlags.linkSpecialShip) !== 0
+            && request.missionUuid) {
+            target.components.set(PersBecomesSpecialShipComponent, {
+                missionUuid: request.missionUuid,
+                playerUuid: uuid,
+            });
+            instance.state = recordPersDeactivated(instance.state);
+            states.set(instance.data.id, instance.state);
+            return;
+        }
         if (effects.deactivate) {
             instance.state = recordPersDeactivated(instance.state);
             states.set(instance.data.id, instance.state);
@@ -343,6 +371,7 @@ export const PersPlugin: Plugin = {
         world.addComponent(PersWeaponsConfiguredComponent);
         world.addComponent(PersAppearanceComponent);
         world.addComponent(PersLinkAcceptedRequestComponent);
+        world.addComponent(PersBecomesSpecialShipComponent);
         world.addComponent(PersLinkSequenceComponent);
         deltaMaker.addComponent(PersLinkAcceptedRequestComponent, {
             componentType: PersLinkAcceptedRequest,

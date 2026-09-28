@@ -252,10 +252,23 @@ export const PlayerStateCodec = new t.Type<
         if (decoded._tag === 'Left') {
             return decoded;
         }
-        return t.success(withComputedFreeSpace(decoded.right));
+        return t.success(withComputedFreeSpace(
+            migrateDominatedStellars(decoded.right)));
     },
     state => encodePersistentPlayerState(state),
 );
+
+/**
+ * Domination used to be keyed by the planet's entity uuid
+ * (`planet nova:128`, see make_system.ts); it is now the spöb id. Rewrite
+ * old entries so they keep matching their planet.
+ */
+function migrateDominatedStellars<T extends PersistentPlayerState>(state: T): T {
+    const list = state.dominatedStellars;
+    if (!list?.some(entry => entry.startsWith('planet '))) return state;
+    const migrated = [...new Set(list.map(entry => entry.replace(/^planet /, '')))];
+    return { ...state, dominatedStellars: migrated };
+}
 
 export function decodePlayerState(
     raw: unknown,
@@ -697,8 +710,10 @@ export const START_DATE_MS = Date.UTC(
     EV_NOVA_START_YEAR, EV_NOVA_START_MONTH - 1, EV_NOVA_START_DAY);
 
 export function formatGameDate(gameDate: number): string {
-    if (!Number.isInteger(gameDate) || gameDate < 0) {
-        throw new Error('Game date must be a non-negative integer');
+    // Days before the engine epoch are valid: the retail chär starts pilots
+    // on 23 Jun 1177, which is before 18 Oct 1177.
+    if (!Number.isInteger(gameDate)) {
+        throw new Error('Game date must be an integer');
     }
     const date = new Date(START_DATE_MS + gameDate * DAY_MS);
     return `${date.getUTCDate()} ${MONTH_NAMES[date.getUTCMonth()]} `

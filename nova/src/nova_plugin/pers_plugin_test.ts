@@ -11,6 +11,7 @@ import {
     PersConfiguredComponent,
     PersInvincibleComponent,
     PersLinkAcceptedRequestComponent,
+    PersBecomesSpecialShipComponent,
     PersPlugin,
     PersStateResource,
     PersWeaponsConfiguredComponent,
@@ -169,6 +170,18 @@ describe("PersLinkAcceptedSystem", () => {
         });
         world.step();
         expect(jumps).toEqual([]);
+    });
+
+    it("hands a Flags 0x0040 përs to the accepted mission instead of leaving", async () => {
+        const { world, pers, player, jumps } = await setup(
+            PersFlags.linkSpecialShip | PersFlags.linkLeave);
+        player.components.set(PersLinkAcceptedRequestComponent, {
+            target: "pers", missionId: "nova:141", sequence: 1, missionUuid: "m-1",
+        });
+        world.step();
+        expect(jumps).toEqual([]);
+        expect(pers.components.get(PersBecomesSpecialShipComponent))
+            .toEqual({ missionUuid: "m-1", playerUuid: "player" });
     });
 
     it("leaves a përs without link flags in play", async () => {

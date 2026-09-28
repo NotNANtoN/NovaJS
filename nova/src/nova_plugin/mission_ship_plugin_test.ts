@@ -2,7 +2,8 @@ import 'jasmine';
 import { createDraft, finishDraft } from 'immer';
 import { Entity } from 'nova_ecs/entity';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
-import { MissionShipComponent, MissionShipBoardedSystem, applyGoalRecordingDelta,
+import { PersBecomesSpecialShipComponent } from './pers_plugin';
+import { MissionShipComponent, MissionShipBoardedSystem, applyGoalRecordingDelta, adoptPersSpecialShip,
     recordShipGoalDetached } from './mission_ship_plugin';
 import {
     collectMissionSpawnCandidates,
@@ -211,5 +212,26 @@ describe('MissionShipBoardedSystem', () => {
         expect(recorded.length).toBe(1);
         expect(recorded[0].uuid).toBe('uuid-mission-1');
         expect(recorded[0].event).toBe('boarded');
+    });
+});
+
+describe('përs Flags 0x0040 special ship', () => {
+    it('turns the tagged përs into the mission ship instead of spawning one', () => {
+        const pers = new Entity('trader')
+            .addComponent(PersBecomesSpecialShipComponent, {
+                missionUuid: 'm-1', playerUuid: 'player-1',
+            });
+        const other = new Entity('bystander');
+        const entities = new Map([['trader', pers], ['bystander', other]]);
+        const mission = { shipGoal: 5, shipBehav: -1, shipStart: 0 };
+
+        expect(adoptPersSpecialShip(entities, 'm-2', 'tok', 'player-1', mission, 0)).toBeFalse();
+        expect(adoptPersSpecialShip(entities, 'm-1', 'tok', 'player-1', mission, 0)).toBeTrue();
+        expect(pers.components.get(MissionShipComponent))
+            .toEqual({ missionUuid: 'm-1', playerToken: 'tok' });
+        expect(pers.components.has(PersBecomesSpecialShipComponent)).toBeFalse();
+        expect(other.components.has(MissionShipComponent)).toBeFalse();
+        // Adopted once: a second spawn pass must not find it again.
+        expect(adoptPersSpecialShip(entities, 'm-1', 'tok', 'player-1', mission, 0)).toBeFalse();
     });
 });
