@@ -8,8 +8,10 @@ import {
     MissionRuntime,
     abortMission,
     acceptMission,
+    applyMissionPay,
     startPendingNcbMissions,
 } from './mission_plugin';
+import { getDefaultCronData } from 'novadatainterface/CronData';
 import {
     createInitialPlayerState,
     getFreeSpace,
@@ -570,5 +572,304 @@ describe('mission runtime', () => {
             });
         expect(state.activeMissions.map(entry => entry.missionId))
             .toEqual(['nova:208']);
+    });
+});
+
+// Rebellion (141) allies classes 7 and 16; Federation (128) is class 7 and
+// Auroran (129) class 16; Pirate (137) shares class 10 with the Rebellion.
+const GOVERNMENTS = [
+    { id: 'nova:141', classes: [10], allies: [7, 16], enemies: [] },
+    { id: 'nova:128', classes: [7], allies: [], enemies: [] },
+    { id: 'nova:129', classes: [16], allies: [], enemies: [] },
+    { id: 'nova:137', classes: [10], allies: [], enemies: [] },
+    { id: 'nova:150', classes: [3], allies: [], enemies: [] },
+];
+
+function dirtyRecords() {
+    return {
+        'nova:141': -50, 'nova:128': -20, 'nova:129': -5,
+        'nova:137': -30, 'nova:150': -40,
+    };
+}
+
+function payMission(payVal: number): MissionData {
+    return {
+        ...getDefaultMissionData(),
+        id: 'nova:300',
+        travelStel: 131,
+        returnStel: 131,
+        dropOffMode: 0,
+        payVal,
+    };
+}
+
+async function completeWith(mission: MissionData, setup?: (state: ReturnType<typeof createInitialPlayerState>) => void) {
+    const state = createInitialPlayerState();
+    setup?.(state);
+    acceptMission(state, mission, {
+        initialPlanetId: 'nova:130',
+        planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        governments: GOVERNMENTS,
+    });
+    const notices = await new MissionRuntime(fakeGameData(mission))
+        .processLanding(state, 'nova:131', {});
+    return { state, notices };
+}
+
+describe('special PayVal', () => {
+    it('cleans only the named government for -10128..-10383', () => {
+        const state = createInitialPlayerState();
+        state.legalRecords = { ...dirtyRecords(), 'nova:142': 15 };
+        applyMissionPay(state, { payVal: -10141 }, GOVERNMENTS);
+        expect(state.legalRecords).toEqual({
+            ...dirtyRecords(), 'nova:141': 0, 'nova:142': 15,
+        });
+        // A positive record stays.
+        applyMissionPay(state, { payVal: -10142 }, GOVERNMENTS);
+        expect(state.legalRecords['nova:142']).toBe(15);
+    });
+
+    it('cleans the government and its allies for -20128..-20383', () => {
+        const state = createInitialPlayerState();
+        state.legalRecords = dirtyRecords();
+        applyMissionPay(state, { payVal: -20141 }, GOVERNMENTS);
+        expect(state.legalRecords).toEqual({
+            ...dirtyRecords(), 'nova:141': 0, 'nova:128': 0, 'nova:129': 0,
+        });
+    });
+
+    it('cleans the government and its classmates for -30128..-30383', () => {
+        const state = createInitialPlayerState();
+        state.legalRecords = dirtyRecords();
+        applyMissionPay(state, { payVal: -30141 }, GOVERNMENTS);
+        expect(state.legalRecords).toEqual({
+            ...dirtyRecords(), 'nova:141': 0, 'nova:137': 0,
+        });
+    });
+
+    it('cleans a record that only exists as a negative initial record', () => {
+        const state = createInitialPlayerState();
+        applyMissionPay(state, { payVal: -10150 }, [
+            { id: 'nova:150', classes: [], initialRecord: -10 } as never,
+        ]);
+        expect(state.legalRecords?.['nova:150']).toBe(0);
+    });
+
+    it('takes a percentage of cash for -40001..-40099', async () => {
+        const { state } = await completeWith(payMission(-40002));
+        expect(state.credits).toBe(9_800);
+    });
+
+    it('charges -50000 and down when the mission starts', async () => {
+        const mission = payMission(-50250);
+        const state = createInitialPlayerState();
+        acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+        expect(state.credits).toBe(9_750);
+        await new MissionRuntime(fakeGameData(mission)).processLanding(state, 'nova:131');
+        expect(state.credits).toBe(9_750);
+    });
+
+    it('applies clean-record pay on completion using runtime governments', async () => {
+        const mission = payMission(-20141);
+        const data = fakeGameData(mission) as unknown as {
+            data: Record<string, unknown>, ids: Promise<unknown>,
+        };
+        data.data.Govt = { get: async (id: string) => GOVERNMENTS.find(g => g.id === id) };
+        data.ids = Promise.resolve({ Govt: GOVERNMENTS.map(g => g.id) });
+        const state = createInitialPlayerState();
+        state.legalRecords = dirtyRecords();
+        acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+        await new MissionRuntime(data as unknown as GameDataInterface)
+            .processLanding(state, 'nova:131');
+        expect(state.legalRecords['nova:128']).toBe(0);
+        expect(state.legalRecords['nova:129']).toBe(0);
+        expect(state.legalRecords['nova:150']).toBe(-40);
+    });
+});
+
+describe('CompReward penalties', () => {
+    it('halves CompReward against the record when a mission fails', async () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:301',
+            returnStel: 131,
+            timeLimit: 1,
+            compGovt: 128,
+            compReward: 10,
+        };
+        const state = createInitialPlayerState();
+        state.legalRecords = { 'nova:128': 30 };
+        acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+        state.gameDate = 2;
+        await new MissionRuntime(fakeGameData(mission)).failExpired(state);
+        expect(state.legalRecords['nova:128']).toBe(25);
+    });
+
+    it('reverses -5x CompReward on abort with Flags 0x0040', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:302',
+            travelStel: -1,
+            returnStel: -1,
+            compGovt: 128,
+            compReward: 3,
+            flags: 0x0040,
+        };
+        const state = createInitialPlayerState();
+        const entry = acceptMission(state, mission, { initialPlanetId: 'nova:130' });
+        expect(abortMission(state, entry!, mission)).toBe(true);
+        expect(state.legalRecords?.['nova:128']).toBe(-15);
+
+        const plain = createInitialPlayerState();
+        const other = acceptMission(plain, { ...mission, flags: 0 }, { initialPlanetId: 'nova:130' });
+        abortMission(plain, other!, { ...mission, flags: 0 });
+        expect(plain.legalRecords?.['nova:128']).toBeUndefined();
+    });
+});
+
+describe('auto-abort missions (Flags 0x0001)', () => {
+    function silent(fields: Partial<MissionData>): MissionData {
+        return {
+            ...getDefaultMissionData(),
+            id: 'nova:905',
+            travelStel: -1,
+            returnStel: -1,
+            flags: 0x0001 | 0x0400,
+            ...fields,
+        };
+    }
+
+    it('pays and vanishes right after accept (retail 905)', () => {
+        const state = createInitialPlayerState();
+        const entry = acceptMission(state, silent({ flags2: 0x0002, payVal: 50000 }), {
+            initialPlanetId: 'nova:130',
+        });
+        expect(entry?.state).toBe('aborted');
+        expect(state.activeMissions).toEqual([]);
+        expect(state.credits).toBe(60_000);
+    });
+
+    it('does not pay without Flags2 0x0002', () => {
+        const state = createInitialPlayerState();
+        acceptMission(state, silent({ payVal: 50000 }), { initialPlanetId: 'nova:130' });
+        expect(state.credits).toBe(10_000);
+    });
+
+    it('runs OnAccept then OnAbort, advances the date and takes fuel', () => {
+        // Retail 609 drop bear: OnAccept b45, OnAbort !b45, DatePostInc 14,
+        // PayVal -40002 with Flags2 0x0002.
+        const state = createInitialPlayerState();
+        state.fuel = 300;
+        const mission = silent({
+            id: 'nova:609', onAccept: 'b45 b46', onAbort: '!b45',
+            datePostInc: 14, flags2: 0x0002, payVal: -40002,
+            flags: 0x0001 | 0x0008,
+        });
+        acceptMission(state, mission, { initialPlanetId: 'nova:130' });
+        expect(state.missionBits[45]).toBe(false);
+        expect(state.missionBits[46]).toBe(true);
+        expect(state.gameDate).toBe(14);
+        expect(state.credits).toBe(9_800);
+        expect(state.fuel).toBe(200);
+        expect(state.activeMissions).toEqual([]);
+    });
+
+    it('cleans a legal record on auto-abort (retail 896)', () => {
+        const state = createInitialPlayerState();
+        state.legalRecords = { 'nova:128': -100 };
+        acceptMission(state, silent({ id: 'nova:896', flags2: 0x0002, payVal: -10128 }), {
+            initialPlanetId: 'nova:130',
+        });
+        expect(state.legalRecords['nova:128']).toBe(0);
+    });
+
+    it('starts NCB missions queued by OnAccept/OnAbort afterwards', async () => {
+        const follow = { ...getDefaultMissionData(), id: 'nova:748', travelStel: -1, returnStel: -1 };
+        const mission = silent({ id: 'nova:747', onAccept: 'b166', onAbort: 'S748' });
+        const state = createInitialPlayerState();
+        acceptMission(state, mission, { initialPlanetId: 'nova:130' });
+        await startPendingNcbMissions(fakeGameData(mission, follow), state, {
+            initialPlanetId: 'nova:130',
+        });
+        expect(state.missionBits[166]).toBe(true);
+        expect(state.activeMissions.map(entry => entry.missionId)).toEqual(['nova:748']);
+    });
+
+    it('keeps special-ship missions alive until the next landing', async () => {
+        // Retail 614-629 "Avoid X": ShipCount 3-10, ShipGoal 0.
+        const mission = silent({
+            id: 'nova:614', shipCount: 4, shipGoal: 0, shipSyst: -6,
+            onAccept: 'G348 !b6100', onAbort: 'b6100',
+        });
+        const state = createInitialPlayerState();
+        acceptMission(state, mission, { initialPlanetId: 'nova:130' });
+        expect(state.activeMissions.length).toBe(1);
+        expect(state.missionBits[6100]).toBe(false);
+        await new MissionRuntime(fakeGameData(mission)).processLanding(state, 'nova:131');
+        expect(state.activeMissions).toEqual([]);
+        expect(state.missionBits[6100]).toBe(true);
+    });
+
+    it('aborts a board/rescue mission once its goal completes (retail 141)', async () => {
+        const mission = silent({
+            id: 'nova:141', shipCount: 1, shipGoal: 5, shipSyst: -6,
+            flags: 0x0001 | 0x0008 | 0x0400, flags2: 0x0002, payVal: 2000,
+        });
+        const state = createInitialPlayerState();
+        state.fuel = 300;
+        const entry = acceptMission(state, mission, { initialPlanetId: 'nova:130' });
+        expect(state.activeMissions.length).toBe(1);
+        const completed = await new MissionRuntime(fakeGameData(mission))
+            .recordShipGoal(state, entry!.missionUuid!, 'boarded');
+        expect(completed).toBe(true);
+        expect(state.activeMissions).toEqual([]);
+        expect(state.credits).toBe(12_000);
+        expect(state.fuel).toBe(200);
+    });
+
+    it('drops an unfinished board/rescue auto-abort at landing without pay', async () => {
+        const mission = silent({
+            id: 'nova:650', shipCount: 1, shipGoal: 5, shipSyst: -6,
+            flags2: 0x0002, payVal: 2000,
+        });
+        const state = createInitialPlayerState();
+        acceptMission(state, mission, { initialPlanetId: 'nova:130' });
+        await new MissionRuntime(fakeGameData(mission)).processLanding(state, 'nova:131');
+        expect(state.activeMissions).toEqual([]);
+        expect(state.credits).toBe(10_000);
+    });
+});
+
+describe('MissionRuntime crön processing', () => {
+    it('advances persistent cröns when the date changes and starts queued missions', async () => {
+        const follow = { ...getDefaultMissionData(), id: 'nova:700', travelStel: -1, returnStel: -1 };
+        const data = fakeGameData(follow) as unknown as {
+            data: Record<string, unknown>, ids: Promise<unknown>,
+        };
+        const cron = {
+            ...getDefaultCronData(), id: 'nova:500', duration: 2,
+            enableOn: '!b600', onStart: 'b601', onEnd: 'b600 S700',
+        };
+        data.data.Cron = { get: async () => cron };
+        data.data.Ship = { get: async () => ({ contribute: [0, 0] }) };
+        data.ids = Promise.resolve({ Cron: ['nova:500'] });
+        const runtime = new MissionRuntime(data as unknown as GameDataInterface);
+        const state = createInitialPlayerState();
+        await runtime.checkDate(state);
+        expect(state.missionBits[601]).toBe(true);
+        expect(runtime.activeCronIds(state)).toEqual(['nova:500']);
+        state.gameDate = 2;
+        await runtime.checkDate(state);
+        expect(state.missionBits[600]).toBe(true);
+        expect(state.activeMissions.map(entry => entry.missionId)).toEqual(['nova:700']);
     });
 });

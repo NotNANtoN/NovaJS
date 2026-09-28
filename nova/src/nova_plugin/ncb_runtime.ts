@@ -10,7 +10,13 @@ import {
 import {
     createNcbHandlers,
     NcbHandlerContext,
+    NcbSetSource,
 } from './ncb_handlers';
+import {
+    applyCombatReceipt,
+    CombatShopResult,
+    requestShipGrant,
+} from './combat_resources';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { Resource } from 'nova_ecs/resource';
 import {
@@ -71,9 +77,27 @@ export function ncbTestContext(
     };
 }
 
+export type ShipGrantRequester = (
+    state: PlayerState,
+    shipId: string,
+    source: NcbSetSource,
+    apply: (result: CombatShopResult) => void,
+) => Promise<unknown>;
+
 export interface NcbRuntimeOptions {
     readonly emit?: EmitFunction;
     readonly logger?: (message: string) => void;
+    /**
+     * Asks the authoritative server to apply a C/E/H hull change. Defaults to
+     * the HTTP combat ledger in a browser; worlds without one (the server,
+     * tests) keep the purely local change unless they inject a requester.
+     */
+    readonly requestShipGrant?: ShipGrantRequester;
+}
+
+function defaultShipGrantRequester(): ShipGrantRequester | undefined {
+    return typeof window !== 'undefined' && typeof fetch === 'function'
+        ? requestShipGrant : undefined;
 }
 
 /**
@@ -116,7 +140,9 @@ export class NcbRuntime {
                     });
                 }
             },
-            onChangeShip: (shipId, includeDefaults, resetNonPersistent) => {
+            onChangeShip: (shipId, includeDefaults, resetNonPersistent, source) => {
+                const previousShip = entity.components.get(ShipComponent)?.id;
+                this.requestGrant(entity, state, shipId, previousShip, source);
                 entity.components.set(ShipComponent, { id: shipId });
                 const generation = (this.shipGenerations.get(entity) ?? 0) + 1;
                 this.shipGenerations.set(entity, generation);
@@ -149,10 +175,56 @@ export class NcbRuntime {
         };
     }
 
+    /**
+     * PlayerState.shipId and the Ship component are server-authoritative: the
+     * combat ledger reprojects its own hull, which would undo a local change.
+     * Ask the server to validate the grant against the set expression's
+     * source; on rejection put the previous hull back so both sides agree.
+     */
+    private requestGrant(
+        entity: Entity,
+        state: PlayerState,
+        shipId: string,
+        previousShip: string | undefined,
+        source: NcbSetSource | undefined,
+    ): void {
+        const request = this.options.requestShipGrant
+            ?? defaultShipGrantRequester();
+        if (!request) {
+            return;
+        }
+        if (!source) {
+            this.options.logger?.(
+                `Ship change to ${shipId} has no NCB source; the server `
+                + 'will keep the current hull');
+            return;
+        }
+        const live = () => entity.components.get(PlayerStateComponent);
+        void request(state, shipId, source, result => {
+            const current = live();
+            if (current) {
+                applyCombatReceipt(current, result);
+            }
+        }).catch(error => {
+            this.options.logger?.(
+                `Server rejected ship grant ${shipId} from ${source.kind} `
+                + `${source.id}: ${error}`);
+            const current = live();
+            if (previousShip && current?.shipId === shipId) {
+                current.shipId = previousShip;
+            }
+            if (previousShip
+                && entity.components.get(ShipComponent)?.id === shipId) {
+                entity.components.set(ShipComponent, { id: previousShip });
+            }
+        });
+    }
+
     apply(
         expression: string | undefined,
         entity: Entity,
         state: PlayerState,
+        source?: NcbSetSource,
     ): void {
         if (!expression?.trim()) {
             return;
@@ -168,6 +240,7 @@ export class NcbRuntime {
                     handlers: createNcbHandlers({
                         ...this.setContext(entity, state),
                         state,
+                        source,
                         logger: this.options.logger,
                     }),
                     logger: this.options.logger,

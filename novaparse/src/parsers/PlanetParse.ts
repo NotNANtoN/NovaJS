@@ -125,6 +125,10 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         hasShipyard: (spob.flags & 0x00000008) !== 0,
         hasBar: (spob.flags & 0x00000040) !== 0,
         tradeCommodities: spob.tradeCommodities,
+        onDominate: spob.onDominate,
+        onRelease: spob.onRelease,
+        onDestroy: spob.onDestroy,
+        onRegen: spob.onRegen,
         ...(ambientSound ? { ambientSound } : {}),
     }
 }

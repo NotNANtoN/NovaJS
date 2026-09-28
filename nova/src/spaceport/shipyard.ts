@@ -22,7 +22,11 @@ import { isPurchaseAvailable } from './availability';
 import { PlanetData } from 'novadatainterface/PlanetData';
 import { ShipyardInfoDialog } from './shipyard_info_dialog';
 import { shipyardInfoPictId } from './shipyard_info_content';
-import { executeSetOperations, parseSetExpression } from '../nova_plugin/ncb';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
+import { Bits64 } from '../nova_plugin/contribute';
+import { contributeForPlayer } from './player_contribute_context';
+import { runShopSetExpression } from './shop_ncb';
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 
 
 export class Shipyard extends Menu<Entity> {
@@ -121,6 +125,14 @@ export class Shipyard extends Menu<Entity> {
         this.refreshPromise = this.refreshGrid();
     }
 
+    private contribute(): Promise<Bits64 | undefined> {
+        if (!this.playerState) {
+            return Promise.resolve(undefined);
+        }
+        return contributeForPlayer(this.gameData, this.playerState,
+            plainSnapshot(this.input?.components.get(OutfitsStateComponent)));
+    }
+
     override async show(input: Entity): Promise<Entity> {
         await this.buildPromise;
         await this.refreshPromise;
@@ -131,11 +143,14 @@ export class Shipyard extends Menu<Entity> {
         const ids = (await this.gameData.ids).Ship;
         let ships = await Promise.all(ids.map(id =>
             this.gameData.data.Ship.get(id, 100)));
+        const contribute = await this.contribute();
         if (this.planetData) {
             ships = ships.filter(ship => isPurchaseAvailable(
                 ship,
                 this.planetData!,
                 this.playerState,
+                undefined,
+                contribute,
             ));
             // Flags3 0x4000: When this ship is available for sale, it prevents
             // all higher-numbered ship types with equal DispWeight from being
@@ -258,10 +273,13 @@ export class Shipyard extends Menu<Entity> {
             selection,
             this.planetData,
             this.playerState,
+            undefined,
+            await this.contribute(),
         )) {
             console.warn(`Ship ${selection.id} is not available here.`);
             return;
         }
+        const previousShip = this.input.components.get(ShipDataComponent);
         const multiplayerData = this.input.components.get(MultiplayerData);
         if (!multiplayerData) {
             console.warn('Missing multiplayer data for prior ship.');
@@ -287,16 +305,28 @@ export class Shipyard extends Menu<Entity> {
         } else {
             this.playerState.credits -= netCost;
         }
-        this.playerState.shipId = selection.id;
-        setCargoCapacity(this.playerState, selection.cargoCapacity);
-        if (selection.onPurchase) {
-            try {
-                const ops = parseSetExpression(selection.onPurchase);
-                executeSetOperations(ops, this.playerState.missionBits);
-            } catch (e) {
-                console.warn('Failed to execute onPurchase expression', e);
-            }
-        }
+        this.combatBusy = true;
+        try {
+            // shïp OnRetire belongs to the hull being traded in; OnPurchase to
+            // the new one. Both run after the server approved the purchase,
+            // so neither asks for a hull grant.
+            await runShopSetExpression({
+                gameData: this.gameData,
+                state: this.playerState,
+                expression: previousShip?.onRetire,
+                destination: this.planetData
+                    ? { initialPlanetId: this.planetData.id } : undefined,
+            });
+            this.playerState.shipId = selection.id;
+            setCargoCapacity(this.playerState, selection.cargoCapacity);
+            await runShopSetExpression({
+                gameData: this.gameData,
+                state: this.playerState,
+                expression: selection.onPurchase,
+                destination: this.planetData
+                    ? { initialPlanetId: this.planetData.id } : undefined,
+            });
+        } finally { this.combatBusy = false; }
         this.input = makeShip(selection);
         this.input.components.set(PlayerShipSelector, undefined);
         this.input.components.set(MultiplayerData, multiplayerData);

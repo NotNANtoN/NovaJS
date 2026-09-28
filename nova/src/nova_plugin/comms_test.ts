@@ -9,6 +9,7 @@ import { getDefaultMissionData } from 'novadatainterface/MissionData';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { createInitialPlayerState, PlayerStateComponent } from './player_state';
 import { ShipDataComponent } from './ship_plugin';
+import { PersLinkAcceptedRequestComponent } from './pers_plugin';
 import {
     ASSISTANCE_FUEL,
     ASSISTANCE_PRICE,
@@ -748,5 +749,106 @@ describe('receiving fuel', () => {
 describe('receiving repairs', () => {
     it('restores the hull to its maximum armour', () => {
         expect(receiveAssistanceRepair(450)).toBe(450);
+    });
+});
+
+describe('comms planet domination', () => {
+    function panel(target: object) {
+        const comms = Object.create(Comms.prototype) as any;
+        comms.input = new Entity().addComponent(
+            PlayerStateComponent, createInitialPlayerState());
+        comms.target = { name: 'Earth', relation: 'neutral', isPlanet: true, ...target };
+        comms.hailedUuid = 'planet-entity-uuid';
+        comms.message = { text: '' };
+        return comms;
+    }
+
+    it('stores the spöb id and runs OnDominate once', () => {
+        const comms = panel({ planetId: 'nova:128', onDominate: 'b6100' });
+        comms.demandPlanetTribute();
+        const state = comms.input.components.get(PlayerStateComponent);
+        expect(state.dominatedStellars).toEqual(['nova:128']);
+        expect(state.missionBits[6100]).toBeTrue();
+        expect(state.credits).toBe(15_000);
+
+        state.missionBits[6100] = false;
+        comms.demandPlanetTribute();
+        expect(state.dominatedStellars).toEqual(['nova:128']);
+        expect(state.missionBits[6100]).toBeFalsy();
+        expect(state.credits).toBe(15_000);
+    });
+});
+
+describe('comms përs LinkMission offer', () => {
+    function panel() {
+        const comms = Object.create(Comms.prototype) as any;
+        comms.lifecycle = 0;
+        comms.input = new Entity().addComponent(
+            PlayerStateComponent, createInitialPlayerState());
+        comms.hailedUuid = 'terrapin';
+        comms.message = { text: 'Channel open.' };
+        comms.buttons = { assistance: { setText: jasmine.createSpy('setText') } };
+        comms.controls = { bind() {}, unbind() {} };
+        comms.container = { visible: true };
+        comms.gameData = {
+            preloadData: Promise.resolve({}),
+            ids: Promise.resolve({ Mission: ['nova:132'] }),
+            data: {
+                Mission: {
+                    gotten: {
+                        'nova:132': {
+                            ...getDefaultMissionData(),
+                            id: 'nova:132',
+                            name: 'Escort Merchant',
+                            availLoc: 2,
+                            availStel: 1234,
+                            availRandom: 100,
+                            offerText: 'The Terrapin captain hails you.',
+                        },
+                    },
+                    get: async () => { throw new Error('unused'); },
+                },
+            },
+        };
+        return comms;
+    }
+
+    it('populates the pending offer for a hailed përs and notifies the server on accept', async () => {
+        const comms = panel();
+        comms.target = {
+            name: 'Terrapin', relation: 'neutral', hostile: false,
+            pers: {
+                persId: 'nova:128', linkMission: 'nova:132',
+                flags: 0x0800, activeOn: '', state: {},
+            },
+        };
+        await comms.offerPersLinkMission(comms.input, () => true);
+        expect(comms.isOfferingContract).toBeTrue();
+        expect(comms.pendingShipboardOffer.mission.id).toBe('nova:132');
+        expect(comms.message.text).toContain('Terrapin captain hails you');
+        expect(comms.buttons.assistance.setText).toHaveBeenCalledWith('Accept');
+
+        await comms.acceptContract();
+        const state = comms.input.components.get(PlayerStateComponent);
+        expect(state.activeMissions.map((entry: any) => entry.missionId))
+            .toEqual(['nova:132']);
+        expect(comms.input.components.get(PersLinkAcceptedRequestComponent))
+            .toEqual(jasmine.objectContaining({
+                target: 'terrapin', missionId: 'nova:132',
+            }));
+    });
+
+    it('does not offer a board-only link on hail', async () => {
+        const comms = panel();
+        comms.target = {
+            name: 'Eamon', relation: 'neutral', hostile: false,
+            pers: {
+                persId: 'nova:443', linkMission: 'nova:132',
+                flags: 0x0200, activeOn: '', state: {},
+            },
+        };
+        await comms.offerPersLinkMission(comms.input, () => true);
+        expect(comms.isOfferingContract).toBeFalsy();
+        expect(comms.pendingShipboardOffer).toBeUndefined();
     });
 });

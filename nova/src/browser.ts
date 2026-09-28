@@ -82,13 +82,17 @@ import {
 } from "./nova_plugin/restore_stored_ship";
 import { SystemIdResource } from "./nova_plugin/system_id_resource";
 import { ShipComponent } from "./nova_plugin/ship_plugin";
+import { fetchNewPilotState } from "./client/new_pilot_state";
 import {
     EscapeMenu,
     StartMenu,
     StartMenuSelection,
 } from "./client/start_menu";
 
-const INITIAL_PLAYER_STATE = createInitialPlayerState();
+// Fallback hull/system for saves whose ids no longer exist. Replaced by the
+// server's New Pilot state (GET /player/new-pilot) during bootstrap, so the
+// fallback matches the chär start the server grants.
+let INITIAL_PLAYER_STATE = createInitialPlayerState();
 const gameData = new GameData();
 (window as any).gameData = gameData;
 (window as any).PIXI = PIXI;
@@ -921,9 +925,10 @@ async function bootstrap() {
     document.body.appendChild(app.canvas);
     startTitleMusicOnGesture();
 
-    [compatibilityProfile, controlSettings] = await Promise.all([
+    [compatibilityProfile, controlSettings, INITIAL_PLAYER_STATE] = await Promise.all([
         loadCompatibilityProfile(),
         loadControlSettings(),
+        fetchNewPilotState(),
     ]);
     const initialPlayerData = await loadPersistedPlayerData()
         ?? await playerDataPromise;

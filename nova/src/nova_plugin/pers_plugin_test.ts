@@ -10,11 +10,20 @@ import {
     PersComponent,
     PersConfiguredComponent,
     PersInvincibleComponent,
+    PersLinkAcceptedRequestComponent,
     PersPlugin,
     PersStateResource,
     PersWeaponsConfiguredComponent,
 } from "./pers_plugin";
-import { GovtComponent } from "./npc_components";
+import { GovtComponent, NpcDepartureComponent } from "./npc_components";
+import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { MockGameData } from "novadatainterface/MockGameData";
+import { getDefaultSystemData } from "novadatainterface/SystemData";
+import { GameDataResource } from "./game_data_resource";
+import { InitiateJumpEvent } from "./jump_plugin";
+import { PlatformResource } from "./platform_plugin";
+import { createInitialPlayerState, PlayerStateComponent } from "./player_state";
+import { SystemIdResource } from "./system_id_resource";
 import { PersFlags } from "./pers";
 import { PlayerShipSelector } from "./player_ship_plugin";
 import { ShipComponent, ShipDataComponent } from "./ship_plugin";
@@ -101,5 +110,74 @@ describe("PersPlugin", () => {
             ["pers"]);
         expect(world.resources.get(PersStateResource)?.get("nova:131")?.alive)
             .toBeFalse();
+    });
+});
+
+describe("PersLinkAcceptedSystem", () => {
+    async function setup(flags: number) {
+        const world = new World("pers-link-test");
+        world.resources.set(PlatformResource, "node");
+        world.resources.set(SystemIdResource, "nova:130");
+        const gameData = new MockGameData();
+        gameData.data.System.map.set("nova:130", {
+            ...getDefaultSystemData(), id: "nova:130", links: ["nova:131"],
+        });
+        world.resources.set(GameDataResource, gameData);
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(PersPlugin);
+        const data = { ...person(), linkMission: "nova:141", flags };
+        const pers = new Entity("pers")
+            .addComponent(PersComponent, { data, state: { alive: true } })
+            .addComponent(MultiplayerData, { owner: "server" });
+        const player = new Entity("player")
+            .addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(MultiplayerData, { owner: "player" });
+        world.entities.set("pers", pers);
+        world.entities.set("player", player);
+        const jumps: unknown[] = [];
+        world.events.get(InitiateJumpEvent).subscribe(event => jumps.push(event));
+        return { world, pers, player, jumps };
+    }
+
+    it("makes a linkLeave ship jump out and deactivates a linkDeactivate përs", async () => {
+        const { world, pers, player, jumps } = await setup(
+            PersFlags.linkLeave | PersFlags.linkDeactivate);
+        player.components.set(PersLinkAcceptedRequestComponent, {
+            target: "pers", missionId: "nova:141", sequence: 1,
+        });
+        world.step();
+        expect(player.components.has(PersLinkAcceptedRequestComponent)).toBeFalse();
+        expect(jumps).toEqual([{ to: "nova:131" }]);
+        expect(pers.components.has(NpcDepartureComponent)).toBeTrue();
+        expect(pers.components.get(PersComponent)!.state.alive).toBeFalse();
+        expect(world.resources.get(PersStateResource)?.get("nova:131")?.alive)
+            .toBeFalse();
+    });
+
+    it("ignores requests for another mission or a replayed sequence", async () => {
+        const { world, pers, player, jumps } = await setup(
+            PersFlags.linkLeave | PersFlags.linkDeactivate);
+        player.components.set(PersLinkAcceptedRequestComponent, {
+            target: "pers", missionId: "nova:999", sequence: 1,
+        });
+        world.step();
+        expect(jumps).toEqual([]);
+        expect(pers.components.get(PersComponent)!.state.alive).toBeTrue();
+
+        player.components.set(PersLinkAcceptedRequestComponent, {
+            target: "pers", missionId: "nova:141", sequence: 1,
+        });
+        world.step();
+        expect(jumps).toEqual([]);
+    });
+
+    it("leaves a përs without link flags in play", async () => {
+        const { world, pers, player, jumps } = await setup(0);
+        player.components.set(PersLinkAcceptedRequestComponent, {
+            target: "pers", missionId: "nova:141", sequence: 1,
+        });
+        world.step();
+        expect(jumps).toEqual([]);
+        expect(pers.components.get(PersComponent)!.state.alive).toBeTrue();
     });
 });

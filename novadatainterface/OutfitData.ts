@@ -24,6 +24,9 @@ export interface OutfitData extends BaseData {
     techLevel: number,
     availabilityNCB: string,
     onPurchase: string,
+    /** oütf OnSell set expression, evaluated when one is sold. */
+    onSell?: string,
+    /** [high word, low word] of the Bible's 64-bit Contribute / Require. */
     contribute: number[],
     require: number[],
     isEscapePod: boolean,
@@ -48,6 +51,7 @@ export function getDefaultOutfitData(): OutfitData {
         techLevel: 0,
         availabilityNCB: "",
         onPurchase: "",
+        onSell: "",
         contribute: [0, 0],
         require: [0, 0],
         isEscapePod: false,

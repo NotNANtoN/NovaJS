@@ -129,6 +129,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         techLevel: outf.techLevel,
         availabilityNCB: outf.availabilityNCB,
         onPurchase: outf.onPurchase,
+        onSell: outf.onSell,
         contribute: outf.contribute,
         require: outf.require,
         isEscapePod: outf.isEscapePod,

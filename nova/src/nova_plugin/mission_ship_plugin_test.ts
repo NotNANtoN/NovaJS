@@ -2,7 +2,8 @@ import 'jasmine';
 import { createDraft, finishDraft } from 'immer';
 import { Entity } from 'nova_ecs/entity';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
-import { MissionShipComponent, MissionShipBoardedSystem } from './mission_ship_plugin';
+import { MissionShipComponent, MissionShipBoardedSystem, applyGoalRecordingDelta,
+    recordShipGoalDetached } from './mission_ship_plugin';
 import {
     collectMissionSpawnCandidates,
     missionShipAppearsInSystem,
@@ -111,8 +112,52 @@ describe('mission ship spawn candidates', () => {
     });
 });
 
+describe('detached special-ship goal recording', () => {
+    it('writes only the recorded changes onto the current state', () => {
+        const before = createInitialPlayerState();
+        before.activeMissions = [{ missionId: 'nova:1', missionUuid: 'a', state: 'active' }];
+        const after = createInitialPlayerState();
+        after.activeMissions = [{ missionId: 'nova:1', missionUuid: 'a', state: 'active',
+            shipGoalProgress: { goal: 0, total: 1, destroyed: 1, disabled: 0, boarded: 0,
+                observed: 0, lost: 0, completed: true, shipDoneApplied: true } }];
+        after.missionBits[5] = true;
+        after.credits += 500;
+        const current = createInitialPlayerState();
+        current.activeMissions = [...before.activeMissions,
+            { missionId: 'nova:2', missionUuid: 'b', state: 'active' }];
+        current.credits = 3;
+        current.missionBits[9] = true;
+        const merged = applyGoalRecordingDelta(current, before, after);
+        expect(merged.missionBits[5]).toBeTrue();
+        expect(merged.missionBits[9]).toBeTrue();
+        expect(merged.credits).toBe(503);
+        expect(merged.activeMissions.map(entry => entry.missionUuid)).toEqual(['a', 'b']);
+        expect(merged.activeMissions[0].shipGoalProgress?.destroyed).toBe(1);
+        expect(merged.freeSpace).toBe(current.freeSpace);
+    });
+
+    it('does not touch a draft after it has been revoked', async () => {
+        const state = createInitialPlayerState();
+        const draft = createDraft(state);
+        const entity = new Entity('p').addComponent(PlayerStateComponent, draft);
+        const runtime = {
+            async recordShipGoal(working: PlayerState) {
+                await Promise.resolve();
+                working.missionBits[3] = true;
+                return true;
+            },
+        };
+        const pending = recordShipGoalDetached(runtime as never,
+            new Map([['p', entity]]), 'p', 'm', 'destroyed');
+        // The step ends: the draft is finished and replaced.
+        entity.components.set(PlayerStateComponent, finishDraft(draft));
+        await pending;
+        expect(entity.components.get(PlayerStateComponent)!.missionBits[3]).toBeTrue();
+    });
+});
+
 describe('MissionShipBoardedSystem', () => {
-    it('records boarded event when a mission ship is boarded', () => {
+    it('records boarded event when a mission ship is boarded', async () => {
         const playerState = createInitialPlayerState();
         playerState.activeMissions = [{
             missionId: 'nova:200',
@@ -161,6 +206,7 @@ describe('MissionShipBoardedSystem', () => {
             mockRuntime as never,
             'node',
         );
+        await new Promise(resolve => setTimeout(resolve, 0));
 
         expect(recorded.length).toBe(1);
         expect(recorded[0].uuid).toBe('uuid-mission-1');

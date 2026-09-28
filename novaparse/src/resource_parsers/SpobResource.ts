@@ -19,6 +19,11 @@ class SpobResource extends BaseResource {
     /** spöb CustSndID: ambient landscape sound, -1 for none. */
     ambientSoundID: number;
     tradeCommodities: TradeCommodity[];
+    /** Control-bit set expressions (EV Nova Bible, spöb OnDominate etc.). */
+    onDominate: string;
+    onRelease: string;
+    onDestroy: string;
+    onRegen: string;
 
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
@@ -45,6 +50,20 @@ class SpobResource extends BaseResource {
         this.ambientSoundID = d.getInt16(26);
         this.landingDescID = this.id;
         this.tradeCommodities = getTradeCommodities(this.flags);
+
+        const getString = (start: number, length: number): string => {
+            let s = "";
+            for (let i = start; i < Math.min(start + length, d.byteLength); i++) {
+                const value = d.getUint8(i);
+                if (value === 0) break;
+                s += String.fromCharCode(value);
+            }
+            return s;
+        };
+        this.onDominate = getString(54, 256);
+        this.onRelease = getString(310, 256);
+        this.onDestroy = getString(582, 256);
+        this.onRegen = getString(838, 256);
     }
 
 }

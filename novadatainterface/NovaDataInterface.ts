@@ -1,5 +1,6 @@
 import { RankData } from "./RankData";
 import { OopsData } from "./OopsData";
+import { CharData } from "./CharData";
 import { CronData } from "./CronData";
 import { AsteroidData } from "./AsteroidData";
 import { NebulaData } from "./NebulaData";
@@ -53,6 +54,7 @@ enum NovaDataType {
     Cron = "Cron",
     Rank = "Rank",
     Oops = "Oops",
+    Char = "Char",
     SoundFile = "SoundFile",
 };
 
@@ -90,6 +92,7 @@ type NovaDataInterface = {
     Cron?: Gettable<CronData>,
     Rank?: Gettable<RankData>,
     Oops?: Gettable<OopsData>,
+    Char?: Gettable<CharData>,
     SoundFile: Gettable<SoundFile>,
 }
 

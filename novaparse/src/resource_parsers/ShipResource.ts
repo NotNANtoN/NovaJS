@@ -55,8 +55,8 @@ class ShipResource extends BaseResource {
     deionize: number;
     ionization: number;
     keyCarried: number;
-    contribute: number[];
-    require: number[];
+    contribute: [number, number];
+    require: [number, number];
     buyRandom: number;
     hireRandom: number;
     onCapture: string;
@@ -195,8 +195,9 @@ class ShipResource extends BaseResource {
         this.ionization = d.getInt16(876);
         this.keyCarried = d.getInt16(878);
 
-        this.contribute = [d.getUint32(896), 0];
-        this.require = [d.getUint32(900), 0];
+        // [high, low] words of the 64-bit Contribute and Require flags.
+        this.contribute = [d.getUint32(100), d.getUint32(104)];
+        this.require = [d.getUint32(896), d.getUint32(900)];
         this.buyRandom = d.getInt16(904);
         this.hireRandom = d.getInt16(906);
 

@@ -143,6 +143,20 @@ export const EscortContractData = t.type({
 });
 export type EscortContract = t.TypeOf<typeof EscortContractData>;
 
+export const CronPhase = t.union([
+    t.literal('pending'),
+    t.literal('active'),
+    t.literal('post'),
+]);
+export type CronPhase = t.TypeOf<typeof CronPhase>;
+
+export const CronStateEntry = t.type({
+    id: t.string,
+    phase: CronPhase,
+    since: t.number,
+});
+export type CronStateEntry = t.TypeOf<typeof CronStateEntry>;
+
 const PlayerStateFields = t.intersection([
     t.type({
         credits: t.number,
@@ -182,6 +196,15 @@ const PlayerStateFields = t.intersection([
         escorts: t.array(EscortContractData),
         dominatedStellars: t.array(t.string),
         diedAt: t.number,
+        /**
+         * Crön events this pilot has activated and not yet deactivated
+         * (EV Nova Bible, crön): waiting through PreHoldoff, running for
+         * Duration, or held for PostHoldoff. `since` is the gameDate the
+         * current phase began.
+         */
+        crons: t.array(CronStateEntry),
+        /** Last gameDate whose crön day was processed. */
+        cronDate: t.number,
     }),
 ]);
 type PlayerStateFields = t.TypeOf<typeof PlayerStateFields>;
@@ -191,10 +214,16 @@ export type PlayerState = PlayerStateFields & {
     readonly freeSpace: number;
 };
 
+/** Strips fields the schema does not declare (store metadata, ship, ...). */
+const ExactPlayerStateFields = t.intersection([
+    t.exact(PlayerStateFields.types[0]),
+    t.exact(PlayerStateFields.types[1]),
+]);
+
 function encodePersistentPlayerState(
     state: PersistentPlayerState,
 ): PersistentPlayerState {
-    return PlayerStateFields.encode(state) as PersistentPlayerState;
+    return ExactPlayerStateFields.encode(state) as PersistentPlayerState;
 }
 
 /**

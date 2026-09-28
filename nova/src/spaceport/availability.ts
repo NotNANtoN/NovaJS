@@ -4,6 +4,7 @@ import { ShipData } from "novadatainterface/ShipData";
 import { evaluateTestExpression } from "../nova_plugin/ncb";
 import { ncbTestContext } from "../nova_plugin/ncb_runtime";
 import type { PlayerState } from "../nova_plugin/player_state";
+import { meetsRequire } from "../nova_plugin/contribute";
 
 type PurchaseData = Pick<ShipData | OutfitData, "techLevel" | "availabilityNCB">
     & {
@@ -11,7 +12,20 @@ type PurchaseData = Pick<ShipData | OutfitData, "techLevel" | "availabilityNCB">
         readonly displayWeight?: number;
         readonly buyRandom?: number;
         readonly flags3?: number;
+        readonly require?: readonly number[];
     };
+
+/**
+ * EV Nova Bible, oütf/shïp Require: every 1 bit of the item's Require must be
+ * present in the player's Contribute. Without a Contribute (callers that do
+ * not compute one) the check stays permissive.
+ */
+export function meetsPurchaseRequire(
+    item: Pick<PurchaseData, "require">,
+    contribute: readonly number[] | undefined,
+): boolean {
+    return contribute === undefined || meetsRequire(item.require, contribute);
+}
 
 export function hashSample(value: string): number {
     let hash = 2166136261;
@@ -108,6 +122,7 @@ export function isPurchaseAvailable(
         | ReadonlySet<number>
         | readonly boolean[] = new Set(),
     outfits?: ReadonlyMap<string, unknown>,
+    contribute?: readonly number[],
 ): boolean {
     // Retail orders a shipyard by display weight and never stocks an entry
     // whose weight is zero. Those entries are the NPC-only variant hulls.
@@ -121,6 +136,9 @@ export function isPurchaseAvailable(
         return false;
     }
     if (!hasRequiredTechnology(item.techLevel, planet)) {
+        return false;
+    }
+    if (!meetsPurchaseRequire(item, contribute)) {
         return false;
     }
     // Daily random stock roll: EV Nova Bible specifies BuyRandom is the
@@ -168,6 +186,7 @@ export function isPurchaseUnlocked(
         | ReadonlySet<number>
         | readonly boolean[] = new Set(),
     outfits?: ReadonlyMap<string, unknown>,
+    contribute?: readonly number[],
 ): boolean {
     if (item.displayWeight !== undefined && item.displayWeight <= 0) {
         return false;
@@ -176,6 +195,9 @@ export function isPurchaseUnlocked(
         return false;
     }
     if (!hasRequiredTechnology(item.techLevel, planet)) {
+        return false;
+    }
+    if (!meetsPurchaseRequire(item, contribute)) {
         return false;
     }
     if (!item.availabilityNCB) {

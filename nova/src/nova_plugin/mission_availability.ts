@@ -8,6 +8,8 @@ import { ncbTestContext } from './ncb_runtime';
 import type { OutfitsState } from './outfit_plugin';
 import { clampRandom } from '../common/random';
 import { combatRatingIndex, recordFor } from './legal_record';
+import { Bits64, meetsRequire, toBits64 } from './contribute';
+import { FUEL_PER_JUMP } from './fuel';
 import {
     GovernmentRelation,
     governmentIndex,
@@ -40,10 +42,19 @@ export interface MissionAvailabilityInput {
         'missionBits' | 'activeMissions' | 'gender' | 'exploredSystems'
     >
         & Partial<Pick<PlayerState,
-            'cargoCapacity' | 'holds' | 'shipId' | 'legalRecords' | 'kills'>>;
+            'cargoCapacity' | 'holds' | 'shipId' | 'legalRecords' | 'kills'
+            | 'fuel'>>;
     outfits?: OutfitsState;
     /** Inherent government of the ship the pilot is flying, when known. */
     playerShipGovt?: number;
+    /** InherentAI of the ship the pilot is flying (mïsn Flags 0x2000/0x4000). */
+    playerShipAI?: number;
+    /**
+     * The player's combined Contribute (ship, outfits, active ränks and
+     * cröns; see loadPlayerContribute). Missions with a nonzero Require are
+     * rejected when this is absent.
+     */
+    contribute?: Bits64;
     currentPlanet: MissionPlanetSelector;
     currentSystem: MissionSystemSelector;
     offerLocation: MissionOfferLocation;
@@ -260,33 +271,52 @@ function missionDataFor(
 }
 
 /**
+ * EV Nova Bible, mïsn/Require: the mission is available only when each 1 bit
+ * of its two Require words is present in the player's Contribute. An
+ * all-zero Require always passes.
+ */
+export function matchesRequire(
+    mission: Pick<MissionData, 'require'>,
+    contribute: Bits64 | undefined,
+): boolean {
+    const [high, low] = toBits64(mission.require);
+    if (high === 0 && low === 0) {
+        return true;
+    }
+    return contribute !== undefined && meetsRequire([high, low], contribute);
+}
+
+const MISSION_UNAVAILABLE_CARGO_SHIP = 0x2000;
+const MISSION_UNAVAILABLE_WARSHIP = 0x4000;
+const MISSION_TAKES_FUEL = 0x0008;
+
+/** mïsn Flags 0x2000 / 0x4000: excluded for inherentAI 1-2 / 3-4 hulls. */
+function matchesShipAI(mission: MissionData, ai: number | undefined): boolean {
+    if (ai === undefined) {
+        return true;
+    }
+    if ((mission.flags & MISSION_UNAVAILABLE_CARGO_SHIP) && (ai === 1 || ai === 2)) {
+        return false;
+    }
+    if ((mission.flags & MISSION_UNAVAILABLE_WARSHIP) && (ai === 3 || ai === 4)) {
+        return false;
+    }
+    return true;
+}
+
+/** mïsn Flags 0x0008: "mission won't be offered if player has less than 100 units of fuel". */
+function matchesFuel(mission: MissionData, fuel: number | undefined): boolean {
+    return (mission.flags & MISSION_TAKES_FUEL) === 0
+        || fuel === undefined
+        || fuel >= FUEL_PER_JUMP;
+}
+
+/**
  * Return missions that may be offered at the current stellar and menu.
  *
  * This covers the data-driven AvailStel selector ranges, including
  * government relations and adjacent-system availability.
  */
-export function matchesRequiredOutfits(
-    mission: MissionData,
-    outfits?: OutfitsState,
-): boolean {
-    if (!mission.require || mission.require.length === 0) {
-        return true;
-    }
-    for (const req of mission.require) {
-        if (req > 0) {
-            if (!outfits) {
-                return false;
-            }
-            const hasOutfit = (outfits.get(String(req))?.count ?? 0) > 0
-                || (outfits.get(novaResourceId(req))?.count ?? 0) > 0;
-            if (!hasOutfit) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 export function getOfferableMissions(
     input: MissionAvailabilityInput,
 ): MissionData[] {
@@ -304,7 +334,9 @@ export function getOfferableMissions(
             matchesAvailableShip(
                 mission, input.playerState.shipId, input.playerShipGovt))
         .filter(mission => matchesAvailRecord(mission, input))
-        .filter(mission => matchesRequiredOutfits(mission, input.outfits))
+        .filter(mission => matchesRequire(mission, input.contribute))
+        .filter(mission => matchesShipAI(mission, input.playerShipAI))
+        .filter(mission => matchesFuel(mission, input.playerState.fuel))
         .filter(mission =>
             matchesAvailRating(mission, input.playerState.kills))
         .filter(mission => {

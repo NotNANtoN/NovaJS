@@ -13,7 +13,10 @@ import { ShipData } from "novadatainterface/ShipData";
 import { ItemGrid, ItemTile } from "./item_grid";
 import { Menu } from "./menu";
 import { isPurchaseAvailable } from "./availability";
-import { executeSetOperations, parseSetExpression } from "../nova_plugin/ncb";
+import { Entity } from "nova_ecs/entity";
+import { Bits64 } from "../nova_plugin/contribute";
+import { contributeForPlayer } from "./player_contribute_context";
+import { runShopSetExpression } from "./shop_ncb";
 
 
 const descWidth = 190;
@@ -48,6 +51,7 @@ export class Outfitter extends Menu<OutfitsState> {
     private shipData?: ShipData;
     private refreshPromise?: Promise<void>;
     private combatBusy = false;
+    private ncbEntity?: Entity;
 
     private readonly outfitDataMap = new Map<string, OutfitData>();
     private text = {
@@ -157,6 +161,55 @@ export class Outfitter extends Menu<OutfitsState> {
         this.refreshPromise = this.refreshGrid();
     }
 
+    /**
+     * The player's ship entity, so OnPurchase/OnSell C/E/H hull changes swap
+     * the live hull (the server is asked to approve them).
+     */
+    setShipEntity(entity: Entity | undefined) {
+        this.ncbEntity = entity;
+    }
+
+    private contribute(): Promise<Bits64 | undefined> {
+        if (!this.playerState) {
+            return Promise.resolve(undefined);
+        }
+        return contributeForPlayer(
+            this.gameData, this.playerState, this.currentOutfitsState());
+    }
+
+    /**
+     * Run an oütf set expression with every NCB operator (G/D/H/S...), then
+     * pull the dialog's counts and hull from the result.
+     */
+    private async runOutfitSetExpression(
+        expression: string | undefined,
+        outfit: OutfitData,
+    ) {
+        if (!expression?.trim() || !this.playerState) {
+            return;
+        }
+        const outfits = this.currentOutfitsState();
+        const { ship } = await runShopSetExpression({
+            gameData: this.gameData,
+            state: this.playerState,
+            expression,
+            outfits,
+            source: { kind: 'outfit', id: outfit.id },
+            entity: this.ncbEntity,
+            onStateChanged: () => {
+                this.updateCreditsText();
+                this.onUpdateOutfits?.(this.currentOutfitsState());
+            },
+            destination: this.planetData
+                ? { initialPlanetId: this.planetData.id } : undefined,
+        });
+        this.outfits = new DefaultMap(() => 0,
+            [...outfits].map(([id, value]) => [id, value.count]));
+        if (ship) {
+            this.setShipData(ship);
+        }
+    }
+
     setShipData(shipData: ShipData | undefined) {
         this.shipData = shipData;
         this.setFreeMassText();
@@ -177,6 +230,7 @@ export class Outfitter extends Menu<OutfitsState> {
         const ids = (await this.gameData.ids).Outfit;
         let outfits = await Promise.all(ids.map(id =>
             this.gameData.data.Outfit.get(id, 100)));
+        const contribute = await this.contribute();
         if (this.planetData) {
             outfits = outfits.filter(outfit =>
                 (this.outfits.get(outfit.id) > 0)
@@ -185,6 +239,7 @@ export class Outfitter extends Menu<OutfitsState> {
                     this.planetData!,
                     this.playerState,
                     this.outfits,
+                    contribute,
                 )
             );
         }
@@ -257,6 +312,8 @@ export class Outfitter extends Menu<OutfitsState> {
             return;
         }
         let boughtCount = 0;
+        this.combatBusy = true;
+        try {
         for (let q = 0; q < quantity; q++) {
             const currentCount = this.outfits.get(outfit.id);
             if (outfit.max > 0 && currentCount >= outfit.max) {
@@ -288,6 +345,7 @@ export class Outfitter extends Menu<OutfitsState> {
                 this.planetData,
                 this.playerState,
                 this.outfits,
+                await this.contribute(),
             )) {
                 if (q === 0) console.warn(`Outfit ${outfit.id} is not available here.`);
                 break;
@@ -297,14 +355,13 @@ export class Outfitter extends Menu<OutfitsState> {
                 break;
             }
             if (this.playerState.combatResources?.ammo[outfit.id] !== undefined) {
-                this.combatBusy = true;
                 try {
                     await combatShopTransaction(this.playerState, this.planetData!.id, 'buy', outfit.id, this.outfits);
                 } catch (error) {
                     this.syncCombatAmmo();
                     console.warn('Ammo purchase rejected', error);
                     break;
-                } finally { this.combatBusy = false; }
+                }
             } else {
                 this.playerState.credits -= price;
             }
@@ -313,18 +370,14 @@ export class Outfitter extends Menu<OutfitsState> {
             if (!outfit.flags || (outfit.flags & 0x0010) === 0) {
                 this.outfits.set(outfit.id, this.playerState.combatResources?.ammo[outfit.id] ?? currentCount + 1);
             }
-            if (outfit.onPurchase) {
-                try {
-                    const ops = parseSetExpression(outfit.onPurchase);
-                    executeSetOperations(ops, this.playerState.missionBits);
-                } catch (e) {
-                    console.warn('Failed to execute onPurchase expression', e);
-                }
-            }
+            await this.runOutfitSetExpression(outfit.onPurchase, outfit);
             boughtCount++;
             if (outfit.flags && (outfit.flags & 0x0010) !== 0) {
                 break;
             }
+        }
+        } finally {
+            this.combatBusy = false;
         }
 
         if (boughtCount > 0) {
@@ -349,6 +402,8 @@ export class Outfitter extends Menu<OutfitsState> {
         }
         const id = outfit.id;
         let soldCount = 0;
+        this.combatBusy = true;
+        try {
         for (let q = 0; q < quantity; q++) {
             const currentCount = this.outfits.get(id);
             if (currentCount <= 0) {
@@ -359,14 +414,13 @@ export class Outfitter extends Menu<OutfitsState> {
                 break;
             }
             if (this.playerState.combatResources?.ammo[id] !== undefined) {
-                this.combatBusy = true;
                 try {
                     await combatShopTransaction(this.playerState, this.planetData!.id, 'sell', id, this.outfits);
                 } catch (error) {
                     this.syncCombatAmmo();
                     console.warn('Ammo sale rejected', error);
                     break;
-                } finally { this.combatBusy = false; }
+                }
             } else {
                 this.playerState.credits += Math.floor(Math.max(0, outfit.price) * 0.25);
             }
@@ -374,7 +428,11 @@ export class Outfitter extends Menu<OutfitsState> {
             if (this.outfits.get(id) === 0) {
                 this.outfits.delete(id);
             }
+            await this.runOutfitSetExpression(outfit.onSell, outfit);
             soldCount++;
+        }
+        } finally {
+            this.combatBusy = false;
         }
         if (soldCount > 0) {
             this.playUiSound('nova:151');
@@ -404,7 +462,8 @@ export class Outfitter extends Menu<OutfitsState> {
             const max = outfit.max ?? 1;
             let currentCount = this.outfits.get(ammoId) || count;
             if (max <= 0 || currentCount >= max) continue;
-            if (!isPurchaseAvailable(outfit, this.planetData, this.playerState, this.outfits)) continue;
+            if (!isPurchaseAvailable(outfit, this.planetData, this.playerState,
+                this.outfits, await this.contribute())) continue;
 
             const needed = max - currentCount;
             for (let i = 0; i < needed; i++) {

@@ -26,6 +26,10 @@ import { CicnData } from "novadatainterface/CicnData";
 import { SoundFile } from "novadatainterface/SoundFile";
 import { JunkData } from "novadatainterface/JunkData";
 import { PersData } from "novadatainterface/PersData";
+import { CronData } from "novadatainterface/CronData";
+import { RankData } from "novadatainterface/RankData";
+import { OopsData } from "novadatainterface/OopsData";
+import { CharData } from "novadatainterface/CharData";
 
 /**
  * Combines multiple GameDataInterface instances into a single GameDataInterface
@@ -68,6 +72,10 @@ class GameDataAggregator implements GameDataInterface {
                 NovaDataType.StringList),
             Junk: this.makeAggregator<JunkData>(NovaDataType.Junk),
             Pers: this.makeAggregator<PersData>(NovaDataType.Pers),
+            Cron: this.makeAggregator<CronData>(NovaDataType.Cron),
+            Rank: this.makeAggregator<RankData>(NovaDataType.Rank),
+            Oops: this.makeAggregator<OopsData>(NovaDataType.Oops),
+            Char: this.makeAggregator<CharData>(NovaDataType.Char),
             SoundFile: this.makeAggregator<SoundFile>(NovaDataType.SoundFile),
         };
 
@@ -155,6 +163,10 @@ class GameDataAggregator implements GameDataInterface {
         preloadData.StringList = await this.preloadResource(NovaDataType.StringList);
         preloadData.Junk = await this.preloadResource(NovaDataType.Junk);
         preloadData.Pers = await this.preloadResource(NovaDataType.Pers);
+        preloadData.Cron = await this.preloadResource(NovaDataType.Cron);
+        preloadData.Rank = await this.preloadResource(NovaDataType.Rank);
+        preloadData.Oops = await this.preloadResource(NovaDataType.Oops);
+        preloadData.Char = await this.preloadResource(NovaDataType.Char);
         preloadData.Explosion = await this.preloadResource(NovaDataType.Explosion);
         preloadData.SpriteSheetFrames = await this.preloadResource(NovaDataType.SpriteSheetFrames);
         preloadData.TargetCorners = await this.preloadResource(NovaDataType.TargetCorners);

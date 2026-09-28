@@ -11,11 +11,12 @@ describe("RankResource & RankParse", () => {
 
         view.setInt16(0, 10); // weight
         view.setInt16(2, 128); // government (Federation)
-        view.setInt32(4, 500); // salary
-        view.setInt32(8, 10000); // salaryCap
-        view.setUint32(12, 0x11223344); // contribute 1
-        view.setUint32(16, 0x55667788); // contribute 2
-        view.setUint32(20, 0x0100); // flags
+        view.setInt16(4, 85); // priceMod
+        view.setInt32(6, 500); // salary
+        view.setInt32(10, 10000); // salaryCap
+        view.setUint32(14, 0x11223344); // contribute high
+        view.setUint32(18, 0x55667788); // contribute low
+        view.setUint16(22, 0x0b08); // flags
 
         const convName = "Commander";
         for (let i = 0; i < convName.length; i++) {
@@ -42,7 +43,9 @@ describe("RankResource & RankParse", () => {
         expect(rankRes.government).toBe(128);
         expect(rankRes.salary).toBe(500);
         expect(rankRes.salaryCap).toBe(10000);
-        expect(rankRes.flags).toBe(0x0100);
+        expect(rankRes.priceMod).toBe(85);
+        expect(rankRes.contribute).toEqual([0x11223344, 0x55667788]);
+        expect(rankRes.flags).toBe(0x0b08);
         expect(rankRes.convName).toBe("Commander");
         expect(rankRes.shortName).toBe("Cmdr");
 
@@ -51,5 +54,6 @@ describe("RankResource & RankParse", () => {
         expect(data.convName).toBe("Commander");
         expect(data.shortName).toBe("Cmdr");
         expect(data.salary).toBe(500);
+        expect(data.priceMod).toBe(85);
     });
 });

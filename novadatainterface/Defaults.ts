@@ -1,4 +1,5 @@
 import { getDefaultRankData } from "./RankData";
+import { getDefaultCharData } from "./CharData";
 import { getDefaultOopsData } from "./OopsData";
 import { getDefaultCronData } from "./CronData";
 import { getDefaultCicnData } from "./CicnData";
@@ -54,4 +55,5 @@ export const Defaults = {
     get Cron() { return getDefaultCronData() },
     get Rank() { return getDefaultRankData() },
     get Oops() { return getDefaultOopsData() },
+    get Char() { return getDefaultCharData() },
 }

@@ -12,6 +12,7 @@ export async function RankParse(
         ...base,
         weight: rank.weight,
         government: rank.government,
+        priceMod: rank.priceMod,
         salary: rank.salary,
         salaryCap: rank.salaryCap,
         contribute: rank.contribute,

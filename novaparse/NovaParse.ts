@@ -1,4 +1,7 @@
 import { RankData } from "novadatainterface/RankData";
+import { CharData } from "novadatainterface/CharData";
+import { CharParse } from "./src/parsers/CharParse";
+import { CharResource } from "./src/resource_parsers/CharResource";
 import { RankParse } from "./src/parsers/RankParse";
 import { RankResource } from "./src/resource_parsers/RankResource";
 import { OopsData } from "novadatainterface/OopsData";
@@ -191,6 +194,7 @@ export class NovaParse implements GameDataInterface {
             Cron: this.buildIDsForResource(idSpace.crön),
             Rank: this.buildIDsForResource(idSpace.ränk),
             Oops: this.buildIDsForResource(idSpace.öops),
+            Char: this.buildIDsForResource(idSpace.chär),
             SoundFile: this.buildIDsForResource(idSpace["snd "]),
         }
     }
@@ -228,6 +232,14 @@ export class NovaParse implements GameDataInterface {
                 NovaResourceType.jünk, JunkParse),
             Pers: this.makeGettable<PersResource, PersData>(
                 NovaResourceType.përs, PersParse),
+            Cron: this.makeGettable<CronResource, CronData>(
+                NovaResourceType.crön, CronParse),
+            Rank: this.makeGettable<RankResource, RankData>(
+                NovaResourceType.ränk, RankParse),
+            Oops: this.makeGettable<OopsResource, OopsData>(
+                NovaResourceType.öops, OopsParse),
+            Char: this.makeGettable<CharResource, CharData>(
+                NovaResourceType.chär, CharParse),
             SoundFile: this.makeGettable<SndResource, SoundFile>(NovaResourceType.snd, SoundFileParse),
         }
 

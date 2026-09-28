@@ -2,6 +2,8 @@ import 'jasmine';
 import { createDraft, finishDraft } from 'immer';
 import { Entity } from 'nova_ecs/entity';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
+import { getDefaultMissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import { GameData } from '../client/gamedata/GameData';
 import { createInitialPlayerState, PlayerStateComponent } from '../nova_plugin/player_state';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin';
@@ -83,5 +85,73 @@ describe('visible mission text', () => {
             },
         );
         expect(sampleMissionText).toBe('Deliver 15 tons of Food to Sirius I in Sirius.');
+    });
+});
+
+describe('shipboard mission offers and Require', () => {
+    function gameDataWith(missions: Record<string, object>, outfits: Record<string, object> = {}) {
+        return {
+            preloadData: Promise.resolve({}),
+            ids: Promise.resolve({ Mission: Object.keys(missions) }),
+            data: {
+                Mission: { gotten: missions, get: async () => { throw new Error('unused'); } },
+                Outfit: {
+                    get: async (id: string) => {
+                        const outfit = outfits[id];
+                        if (!outfit) throw new Error(`no outfit ${id}`);
+                        return outfit;
+                    },
+                },
+            },
+        } as unknown as GameData;
+    }
+    const shipMission = (id: string, extra: object = {}) => ({
+        ...getDefaultMissionData(),
+        id,
+        name: `Mission ${id}`,
+        availLoc: MissionOfferLocation.Ship,
+        availRandom: 100,
+        ...extra,
+    });
+
+    it('passes the player Contribute so Require-gated missions can be offered', async () => {
+        const gameData = gameDataWith({
+            'nova:900': shipMission('nova:900', { require: [0x40, 0] }),
+        }, { 'nova:400': { contribute: [0x40, 0] } });
+        const input = new Entity()
+            .addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(ShipDataComponent, getDefaultShipData());
+        expect((await getShipboardMissionOffers(gameData, input)).offers).toEqual([]);
+
+        input.components.set(OutfitsStateComponent,
+            new Map([['nova:400', { count: 1 }]]));
+        const { offers } = await getShipboardMissionOffers(gameData, input);
+        expect(offers.map(offer => offer.mission.id)).toEqual(['nova:900']);
+    });
+
+    it('passes the ship InherentAI (mïsn Flags 0x4000 hides from warships)', async () => {
+        const gameData = gameDataWith({
+            'nova:901': shipMission('nova:901', { flags: 0x4000 }),
+        });
+        const input = new Entity()
+            .addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(ShipDataComponent, { ...getDefaultShipData(), inherentAI: 3 });
+        expect((await getShipboardMissionOffers(gameData, input)).offers).toEqual([]);
+        input.components.set(ShipDataComponent, { ...getDefaultShipData(), inherentAI: 1 });
+        expect((await getShipboardMissionOffers(gameData, input)).offers.length).toBe(1);
+    });
+
+    it('restricts to a përs LinkMission and ignores its AvailStel', async () => {
+        const gameData = gameDataWith({
+            'nova:132': shipMission('nova:132', { availStel: 5000 }),
+            'nova:133': shipMission('nova:133'),
+        });
+        const input = new Entity()
+            .addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(ShipDataComponent, getDefaultShipData());
+        const { offers } = await getShipboardMissionOffers(gameData, input, {
+            missionId: 'nova:132', seed: 'ship-a',
+        });
+        expect(offers.map(offer => offer.mission.id)).toEqual(['nova:132']);
     });
 });

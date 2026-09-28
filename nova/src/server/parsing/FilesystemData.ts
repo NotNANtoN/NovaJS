@@ -121,6 +121,7 @@ class FilesystemData implements GameDataInterface {
             Cron: [],
             Rank: [],
             Oops: [],
+            Char: [],
         }
     }
 

@@ -51,6 +51,13 @@ import {
 } from './comms_panel_layout';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
+import { executeSetOperations, parseSetExpression } from '../nova_plugin/ncb';
+import { createNcbHandlers } from '../nova_plugin/ncb_handlers';
+import {
+    findPersLinkOffer,
+    notifyPersLinkAccepted,
+    PersLinkInfo,
+} from './pers_link_offer';
 
 const COMMS_FONT = {
     fontFamily: 'Geneva',
@@ -73,6 +80,12 @@ export interface HailTarget {
     isPlanet?: boolean;
     roadsideAssistance?: boolean;
     disabled?: boolean;
+    /** spöb resource id of a hailed planet (dominatedStellars key). */
+    planetId?: string;
+    /** spöb OnDominate set expression of a hailed planet. */
+    onDominate?: string;
+    /** Set when the hailed ship is a përs; its LinkMission may be offered. */
+    pers?: PersLinkInfo;
 }
 
 /**
@@ -238,6 +251,32 @@ export class Comms extends Menu<Entity> {
         this.container.visible = true;
         this.controls.bind();
         this.reconcileAssistance();
+        void this.offerPersLinkMission(input, current);
+    }
+
+    /**
+     * EV Nova Bible, përs LinkMission: "What mission to activate when the
+     * ship is boarded or hailed." A hailed përs (without Flags 0x0200) whose
+     * linked mïsn is available offers it here; Request Assistance becomes
+     * the accept button and Close Channel declines.
+     */
+    private async offerPersLinkMission(input: Entity, current: () => boolean) {
+        const pers = this.target?.pers;
+        const ship = this.hailedUuid;
+        if (!pers || !ship || this.target?.hostile) return;
+        try {
+            const link = await findPersLinkOffer(
+                this.gameData, input, pers, 'hail', ship);
+            if (!link || !current()) return;
+            this.pendingShipboardOffer = link.offer;
+            this.pendingDestinationOptions = link.destinationOptions;
+            this.isOfferingContract = true;
+            this.message.text = `${this.message.text}\n\n${link.offer.displayText}`.trim();
+            this.buttons.assistance.setText(
+                link.offer.mission.acceptButton || 'Accept');
+        } catch (error) {
+            console.warn('Could not load përs mission offer', error);
+        }
     }
 
     private relation(): GovernmentRelation {
@@ -340,7 +379,8 @@ export class Comms extends Menu<Entity> {
 
     private demandPlanetTribute() {
         const name = this.target?.name ?? 'Stellar';
-        const targetId = this.hailedUuid ?? 'planet';
+        // Keyed by spöb id so it survives the planet entity being recreated.
+        const targetId = this.target?.planetId ?? this.hailedUuid ?? 'planet';
         const state = this.input?.components.get(PlayerStateComponent);
         if (!state) {
             return;
@@ -351,6 +391,16 @@ export class Comms extends Menu<Entity> {
             return;
         }
         state.dominatedStellars.push(targetId);
+        // spöb OnDominate (retail: b61xx bits read by the "Avoid ..." chain).
+        const onDominate = this.target?.onDominate;
+        if (onDominate?.trim()) {
+            try {
+                executeSetOperations(parseSetExpression(onDominate),
+                    state.missionBits, { handlers: createNcbHandlers({ state }) });
+            } catch (error) {
+                console.warn(`Could not run OnDominate '${onDominate}'`, error);
+            }
+        }
         const initialTribute = 5_000;
         state.credits += initialTribute;
         this.message.text = `${this.message.text}\n\n${name} Traffic Control: "We cannot withstand your orbital superiority! We submit to your rule. ${initialTribute.toLocaleString()} credits tribute transferred, and daily tribute will follow."`;
@@ -453,6 +503,9 @@ export class Comms extends Menu<Entity> {
                 return;
             }
             input.components.set(PlayerStateComponent, state);
+            if (this.target?.pers && this.hailedUuid) {
+                notifyPersLinkAccepted(input, this.hailedUuid, offer.mission.id);
+            }
             this.message.text = 'Contract confirmed!';
             this.buttons.assistance.setText('Request Assistance');
             this.isOfferingContract = false;

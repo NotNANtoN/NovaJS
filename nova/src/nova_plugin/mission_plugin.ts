@@ -41,6 +41,10 @@ import {
     PendingMissionSoundComponent,
 } from './ncb_runtime';
 import { SystemVariantIndex, variantIndexForCatalog } from './system_variants';
+import { FUEL_PER_JUMP } from './fuel';
+import { advanceCrons, activeCronIds } from './cron_plugin';
+import { loadPlayerContribute } from './player_contribute';
+import type { CronData } from 'novadatainterface/CronData';
 export {
     NcbRuntime,
     NcbRuntimeResource,
@@ -59,6 +63,7 @@ import {
 } from './mission_availability';
 import {
     GovernmentRelation,
+    governmentIndex,
     resolveStellarSelector,
     resolveSystemSelector,
     StellarSelectorContext,
@@ -122,6 +127,7 @@ function runMissionSetExpression(
     state: PlayerState,
     logger: (message: string) => void = console.warn,
     context: MissionSetContext = {},
+    mission?: Pick<MissionData, 'id'>,
 ) {
     if (!expression?.trim()) {
         return;
@@ -129,7 +135,11 @@ function runMissionSetExpression(
 
     try {
         const operations = parseSetExpression(expression, { logger });
-        const handlers = createNcbHandlers({ ...context, state, logger });
+        // The source lets the server approve C/E/H hull grants: it checks
+        // that this mission's strings really grant the requested hull.
+        const source = context.source
+            ?? (mission ? { kind: 'mission' as const, id: mission.id } : undefined);
+        const handlers = createNcbHandlers({ ...context, source, state, logger });
         // Bit operations are deliberately handled by ncb. All other
         // operations now dispatch to the game handlers above.
         executeSetOperations(operations, state.missionBits, {
@@ -262,24 +272,218 @@ function missionHoldsCargo(state: PlayerState, missionId: string): boolean {
         hold.isMissionCargo && hold.commodity === missionId);
 }
 
+function relationIndex(relation: GovernmentRelation): number | undefined {
+    return relation.index ?? governmentIndex(relation.id);
+}
+
+function classNumbers(values: GovernmentRelation['classes']): Set<number> {
+    return new Set((values ?? []).map(Number)
+        .filter(value => Number.isFinite(value) && value >= 0));
+}
+
+/**
+ * Governments (IDs 128-383) whose record a clean-record PayVal affects: the
+ * government itself, plus those with a class in its Allies list, or those
+ * sharing one of its classes (gövt Allies/Class hold class numbers).
+ */
+export function cleanRecordGovernments(
+    govt: number,
+    scope: 'self' | 'allies' | 'classmates',
+    governments: readonly GovernmentRelation[] = [],
+): number[] {
+    const result = new Set<number>([govt]);
+    if (scope === 'self') {
+        return [...result];
+    }
+    const target = governments.find(relation =>
+        relationIndex(relation) === govt - 128);
+    const wanted = classNumbers(
+        scope === 'allies' ? target?.allies : target?.classes);
+    if (wanted.size === 0) {
+        return [...result];
+    }
+    for (const relation of governments) {
+        const index = relationIndex(relation);
+        if (index === undefined) {
+            continue;
+        }
+        if ([...classNumbers(relation.classes)].some(value => wanted.has(value))) {
+            result.add(index + 128);
+        }
+    }
+    return [...result];
+}
+
+function initialRecordOf(
+    governments: readonly GovernmentRelation[] | undefined,
+    govt: number,
+): number {
+    const relation = governments?.find(candidate =>
+        relationIndex(candidate) === govt - 128) as
+        (GovernmentRelation & { initialRecord?: number }) | undefined;
+    return relation?.initialRecord ?? 0;
+}
+
+function adjustLegalRecord(
+    state: PlayerState,
+    govt: number,
+    update: (record: number) => number,
+    governments?: readonly GovernmentRelation[],
+) {
+    const governmentId = resourceId(govt);
+    const records = { ...state.legalRecords };
+    const current = records[governmentId]
+        ?? Object.entries(records).find(([key]) =>
+            key.replace(/^.*:/, '') === String(govt))?.[1]
+        ?? initialRecordOf(governments, govt);
+    records[governmentId] = update(current);
+    state.legalRecords = records;
+}
+
+function changeCompRecord(
+    state: PlayerState,
+    mission: MissionData,
+    delta: number,
+    governments?: readonly GovernmentRelation[],
+) {
+    if (mission.compGovt < 128 || delta === 0) {
+        return;
+    }
+    adjustLegalRecord(state, mission.compGovt,
+        record => record + delta, governments);
+}
+
+/**
+ * EV Nova Bible, mïsn/PayVal, applied on success (and on auto-abort with
+ * Flags2 0x0002). The -50000-and-down range is charged on accept instead.
+ */
+export function applyMissionPay(
+    state: PlayerState,
+    mission: Pick<MissionData, 'payVal'>,
+    governments?: readonly GovernmentRelation[],
+) {
+    const pay = mission.payVal;
+    if (pay > 0) {
+        state.credits += pay;
+        return;
+    }
+    const clean = (govt: number, scope: 'self' | 'allies' | 'classmates') => {
+        for (const id of cleanRecordGovernments(govt, scope, governments)) {
+            adjustLegalRecord(state, id, record => Math.max(record, 0),
+                governments);
+        }
+    };
+    if (pay <= -10128 && pay >= -10383) {
+        clean(-10000 - pay, 'self');
+    } else if (pay <= -20128 && pay >= -20383) {
+        clean(-20000 - pay, 'allies');
+    } else if (pay <= -30128 && pay >= -30383) {
+        clean(-30000 - pay, 'classmates');
+    } else if (pay <= -40001 && pay >= -40099) {
+        const percent = -40000 - pay;
+        state.credits -= Math.floor(Math.max(0, state.credits) * percent / 100);
+    }
+}
+
+/** mïsn/PayVal -50000 and down: "Take away this number of credits at mission start". */
+function applyMissionStartCost(
+    state: PlayerState,
+    mission: Pick<MissionData, 'payVal'>,
+) {
+    if (mission.payVal <= -50000) {
+        const cost = -50000 - mission.payVal;
+        state.credits = Math.max(0, state.credits - cost);
+    }
+}
+
 function applyMissionCompletionRewards(
     state: PlayerState,
     mission: MissionData,
+    governments?: readonly GovernmentRelation[],
 ) {
-    if (mission.payVal > 0) {
-        state.credits += mission.payVal;
-    } else if (mission.payVal < -1) {
-        console.warn(`Mission pay value ${mission.payVal} is not implemented`);
-    }
+    applyMissionPay(state, mission, governments);
     if (mission.datePostInc > 0) {
         advanceGameDate(state, mission.datePostInc);
     }
-    if (mission.compGovt >= 128 && mission.compReward !== 0) {
-        const governmentId = resourceId(mission.compGovt);
-        const records = { ...state.legalRecords };
-        records[governmentId] = (records[governmentId] ?? 0) + mission.compReward;
-        state.legalRecords = records;
+    changeCompRecord(state, mission, mission.compReward, governments);
+}
+
+/**
+ * EV Nova Bible, mïsn/CompReward: "if you have a CompGovt and reward defined
+ * and you fail the mission, that govt will take it personally and decrease
+ * your record by 1/2 the amount specified in CompReward."
+ */
+function applyMissionFailurePenalty(
+    state: PlayerState,
+    mission: MissionData,
+    governments?: readonly GovernmentRelation[],
+) {
+    changeCompRecord(state, mission, -Math.trunc(mission.compReward / 2),
+        governments);
+}
+
+const MISSION_AUTO_ABORT = 0x0001;
+const MISSION_TAKES_FUEL = 0x0008;
+const MISSION_ABORT_REVERSAL = 0x0040;
+const MISSION2_PAY_ON_AUTO_ABORT = 0x0002;
+
+/** mïsn Flags 0x0040: "Apply -5x CompReward reversal on abort." */
+function applyAbortReversal(
+    state: PlayerState,
+    mission: MissionData,
+    governments?: readonly GovernmentRelation[],
+) {
+    if (mission.flags & MISSION_ABORT_REVERSAL) {
+        changeCompRecord(state, mission, -5 * mission.compReward, governments);
     }
+}
+
+export function isAutoAbortMission(mission: Pick<MissionData, 'flags'>): boolean {
+    return (mission.flags & MISSION_AUTO_ABORT) !== 0;
+}
+
+/**
+ * Auto-aborting missions that have special ships stay alive until those
+ * ships exist: board/rescue goals (2, 5) abort when the goal completes,
+ * others when their goal completes or at the next landing.
+ */
+function autoAbortWaitsForShips(mission: MissionData): boolean {
+    return mission.shipCount > 0;
+}
+
+/**
+ * EV Nova Bible, mïsn Flags 0x0001 (auto-abort): run OnAbort, advance the
+ * date by DatePostInc, pay if Flags2 0x0002, take 100 fuel if Flags 0x0008,
+ * apply the Flags 0x0040 reversal, and drop the mission. NCB `S` operations
+ * stay queued for startPendingNcbMissions.
+ */
+export function autoAbortMission(
+    state: PlayerState,
+    entry: ActiveMission,
+    mission: MissionData,
+    options: {
+        logger?: (message: string) => void;
+        ncb?: MissionSetContext;
+        governments?: readonly GovernmentRelation[];
+    } = {},
+) {
+    runMissionSetExpression(mission.onAbort, state, options.logger, options.ncb, mission);
+    if (mission.datePostInc > 0) {
+        advanceGameDate(state, mission.datePostInc);
+    }
+    if (mission.flags2 & MISSION2_PAY_ON_AUTO_ABORT) {
+        applyMissionPay(state, mission, options.governments);
+    }
+    if (mission.flags & MISSION_TAKES_FUEL) {
+        state.fuel = Math.max(0, (state.fuel ?? 0) - FUEL_PER_JUMP);
+    }
+    applyAbortReversal(state, mission, options.governments);
+    releaseMissionCargo(state, entry.missionId);
+    const index = state.activeMissions.indexOf(entry);
+    if (index >= 0) {
+        state.activeMissions.splice(index, 1);
+    }
+    entry.state = 'aborted';
 }
 
 const MAX_NCB_MISSION_STARTS = 16;
@@ -387,7 +591,8 @@ export function acceptMission(
         return undefined;
     }
     runMissionSetExpression(
-        mission.onAccept, state, options.logger, options.ncb);
+        mission.onAccept, state, options.logger, options.ncb, mission);
+    applyMissionStartCost(state, mission);
     const missionUuid = uuid();
     let shipSystem = resolved.shipSystem;
     if (!shipSystem && (mission.shipCount > 0 || mission.shipSyst !== -1)) {
@@ -418,6 +623,13 @@ export function acceptMission(
             : {}),
     };
     state.activeMissions.push(activeMission);
+    if (isAutoAbortMission(mission) && !autoAbortWaitsForShips(mission)) {
+        autoAbortMission(state, activeMission, mission, {
+            logger: options.logger,
+            ncb: options.ncb,
+            governments: options.governments,
+        });
+    }
     return activeMission;
 }
 
@@ -427,7 +639,7 @@ export function refuseMission(
     logger?: (message: string) => void,
     context: MissionSetContext = {},
 ) {
-    runMissionSetExpression(mission.onRefuse, state, logger, context);
+    runMissionSetExpression(mission.onRefuse, state, logger, context, mission);
 }
 
 export function abortMission(
@@ -436,11 +648,13 @@ export function abortMission(
     mission: MissionData,
     logger?: (message: string) => void,
     context: MissionSetContext = {},
+    governments?: readonly GovernmentRelation[],
 ): boolean {
     if (!mission.canAbort || entry.state !== 'active') {
         return false;
     }
-    runMissionSetExpression(mission.onAbort, state, logger, context);
+    runMissionSetExpression(mission.onAbort, state, logger, context, mission);
+    applyAbortReversal(state, mission, governments);
     releaseMissionCargo(state, entry.missionId);
     const index = state.activeMissions.indexOf(entry);
     if (index >= 0) {
@@ -612,6 +826,86 @@ export class MissionRuntime {
     private missionCache = new Map<string, Promise<MissionData | undefined>>();
     private entryWork = new Map<string, Promise<unknown>>();
     private checkedDates = new WeakMap<object, number>();
+    private governmentsPromise?: Promise<GovernmentRelation[]>;
+    private cronsPromise?: Promise<CronData[]>;
+
+    /** gövt relations for PayVal clean-record ranges and CompGovt records. */
+    governments(): Promise<GovernmentRelation[]> {
+        this.governmentsPromise ??= (async () => {
+            const govts = this.gameData.data.Govt;
+            if (!govts) {
+                return [];
+            }
+            try {
+                const ids = (await this.gameData.ids).Govt ?? [];
+                const loaded = await Promise.all(ids.map(id =>
+                    govts.get(id).catch(() => undefined)));
+                return loaded.filter(govt => govt !== undefined)
+                    .map(govt => ({
+                        id: govt!.id,
+                        classes: govt!.classes,
+                        allies: govt!.allies,
+                        enemies: govt!.enemies,
+                        initialRecord: govt!.initialRecord,
+                    }) as GovernmentRelation);
+            } catch {
+                return [];
+            }
+        })();
+        return this.governmentsPromise;
+    }
+
+    private crons(): Promise<CronData[]> {
+        this.cronsPromise ??= (async () => {
+            const crons = this.gameData.data.Cron;
+            if (!crons) {
+                return [];
+            }
+            try {
+                const ids = (await this.gameData.ids).Cron ?? [];
+                const loaded = await Promise.all(ids.map(id =>
+                    crons.get(id).catch(() => undefined)));
+                return loaded.filter((cron): cron is CronData => cron !== undefined);
+            } catch {
+                return [];
+            }
+        })();
+        return this.cronsPromise;
+    }
+
+    /**
+     * Process every crön day up to state.gameDate, then start missions its
+     * set expressions queued with `S`.
+     */
+    async advanceCrons(
+        state: PlayerState,
+        context: MissionSetContext = {},
+    ): Promise<void> {
+        const crons = await this.crons();
+        if (crons.length === 0) {
+            return;
+        }
+        const contribute = await loadPlayerContribute(this.gameData, {
+            shipId: state.shipId,
+            outfits: context.outfits,
+            activeRanks: state.activeRanks,
+            // advanceCrons adds active crön Contribute itself, day by day.
+            activeCrons: [],
+        });
+        advanceCrons(crons, state, { contribute, ncb: context });
+        await startPendingNcbMissions(this.gameData, state, {
+            initialPlanetId: state.lastLandedPlanet,
+            initialSystemId: state.currentSystem,
+            currentSystemId: state.currentSystem,
+            governments: await this.governments(),
+            ncb: context,
+        });
+    }
+
+    /** Active crön ids, for callers computing the player's Contribute. */
+    activeCronIds(state: PlayerState): string[] {
+        return activeCronIds(state);
+    }
 
     /**
      * Expiration and landing share this queue so a date check in flight
@@ -699,9 +993,11 @@ export class MissionRuntime {
         } catch {
             // Ignore if state proxy is invalid
         }
-        return this.failExpired(state, context).catch(error => {
-            console.error('Mission expiration processing failed', error);
-        });
+        return this.failExpired(state, context)
+            .then(() => this.advanceCrons(state, context))
+            .catch(error => {
+                console.error('Mission expiration processing failed', error);
+            });
     }
 
     /**
@@ -765,13 +1061,16 @@ export class MissionRuntime {
                         return;
                     }
                     runMissionSetExpression(mission.onFailure, state, console.warn,
-                        context);
+                        context, mission);
                     task.entry.state = 'failed';
                     releaseMissionCargo(state, task.missionId);
+                    const governments = await this.governments();
+                    applyMissionFailurePenalty(state, mission, governments);
                     await startPendingNcbMissions(this.gameData, state, {
                         initialPlanetId: state.lastLandedPlanet,
                         initialSystemId: state.currentSystem,
                         currentSystemId: state.currentSystem,
+                        governments,
                         ncb: context,
                     });
                 } catch (error) {
@@ -822,6 +1121,28 @@ export class MissionRuntime {
                 if (entry.state !== 'active') {
                     return;
                 }
+                if (isAutoAbortMission(mission)) {
+                    // Its special ships have had their chance to spawn.
+                    // Board/rescue goals only pay out when the goal is met,
+                    // so a pilot who landed instead just loses the job.
+                    const governments = await this.governments();
+                    if (mission.shipGoal === 2 || mission.shipGoal === 5) {
+                        this.removeEntry(state, entry);
+                        entry.state = 'aborted';
+                        return;
+                    }
+                    autoAbortMission(state, entry, mission, {
+                        ncb: context, governments,
+                    });
+                    await startPendingNcbMissions(this.gameData, state, {
+                        initialPlanetId: planetId,
+                        initialSystemId: state.currentSystem,
+                        currentSystemId: state.currentSystem,
+                        governments,
+                        ncb: context,
+                    });
+                    return;
+                }
                 const atTravel = await destinationMatches(
                     missionTravelDestination(entry), planetId, this.gameData);
                 if (atTravel) {
@@ -857,13 +1178,14 @@ export class MissionRuntime {
                 if (goalProgress && !goalProgress.shipDoneApplied) {
                     goalProgress.shipDoneApplied = true;
                     runMissionSetExpression(
-                        mission.onShipDone, state, console.warn, context);
+                        mission.onShipDone, state, console.warn, context, mission);
                 }
                 // EV Nova Bible, mïsn/OnSuccess: "Control bit set expression
                 // which is evaluated when the mission is completed successfully."
                 runMissionSetExpression(
-                    mission.onSuccess, state, console.warn, context);
-                applyMissionCompletionRewards(state, mission);
+                    mission.onSuccess, state, console.warn, context, mission);
+                const governments = await this.governments();
+                applyMissionCompletionRewards(state, mission, governments);
                 const destinationName = await this.missionName(
                     missionTravelDestination(entry));
                 const returnDestinationName = await this.missionName(
@@ -884,6 +1206,7 @@ export class MissionRuntime {
                     initialPlanetId: planetId,
                     initialSystemId: state.currentSystem,
                     currentSystemId: state.currentSystem,
+                    governments,
                     ncb: context,
                 });
             });
@@ -930,30 +1253,40 @@ export class MissionRuntime {
             // EV Nova Bible, mïsn/ShipGoal 3:
             // "Escort them (keep them from getting killed)."
             runMissionSetExpression(
-                mission.onFailure, state, console.warn, context);
+                mission.onFailure, state, console.warn, context, mission);
             entry.state = 'failed';
             releaseMissionCargo(state, entry.missionId);
+            const governments = await this.governments();
+            applyMissionFailurePenalty(state, mission, governments);
             await startPendingNcbMissions(this.gameData, state, {
                 initialPlanetId: state.lastLandedPlanet,
                 initialSystemId: state.currentSystem,
                 currentSystemId: state.currentSystem,
+                governments,
                 ncb: context,
             });
             return false;
         }
-        if (entry.shipGoalProgress.completed
-            && !entry.shipGoalProgress.shipDoneApplied) {
+        const completed = entry.shipGoalProgress.completed;
+        if (completed && !entry.shipGoalProgress.shipDoneApplied) {
             entry.shipGoalProgress.shipDoneApplied = true;
             runMissionSetExpression(
-                mission.onShipDone, state, console.warn, context);
+                mission.onShipDone, state, console.warn, context, mission);
+            const governments = await this.governments();
+            if (isAutoAbortMission(mission) && entry.state === 'active') {
+                autoAbortMission(state, entry, mission, {
+                    ncb: context, governments,
+                });
+            }
             await startPendingNcbMissions(this.gameData, state, {
                 initialPlanetId: state.lastLandedPlanet,
                 initialSystemId: state.currentSystem,
                 currentSystemId: state.currentSystem,
+                governments,
                 ncb: context,
             });
         }
-        return entry.shipGoalProgress.completed;
+        return completed;
     }
 
     private removeEntry(state: PlayerState, entry: ActiveMission) {

@@ -11,6 +11,8 @@ import {
 import { OutfitsState } from './outfit_plugin';
 import { resourceId } from '../common/resource_id';
 
+export type NcbSetSource = { kind: 'mission' | 'outfit'; id: string };
+
 type Handler<T extends NcbOperation['type']> =
     (operation: Extract<NcbOperation, { type: T }>) => void;
 
@@ -23,7 +25,13 @@ export interface NcbHandlerContext {
         systemId: string,
         includeDefaults: boolean,
         resetNonPersistent: boolean,
+        source?: NcbSetSource,
     ) => void;
+    /**
+     * The mïsn/oütf whose set expression is running. The server only honors
+     * a C/E/H hull change it can find in that resource's expressions.
+     */
+    source?: NcbSetSource;
     onStartMission?: (missionId: number) => void;
     onAbortMission?: (missionId: number) => void;
     onFailMission?: (missionId: number) => void;
@@ -108,7 +116,8 @@ function changeShip(
         }
     }
     context.state.shipId = shipId;
-    context.onChangeShip?.(shipId, includeDefaults, resetNonPersistent);
+    context.onChangeShip?.(shipId, includeDefaults, resetNonPersistent,
+        context.source);
 }
 
 function activeMissionId(

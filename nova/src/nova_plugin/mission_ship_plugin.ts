@@ -1,5 +1,5 @@
 import * as t from 'io-ts';
-import { Entities, UUID } from 'nova_ecs/arg_types';
+import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Component } from 'nova_ecs/component';
 import { plainSnapshot } from 'nova_ecs/draft_snapshot';
@@ -35,10 +35,13 @@ import {
 } from './npc_plugin';
 import {
     ActiveMission,
+    decodePlayerState,
     PlayerState,
     PlayerStateComponent,
     PlayerStorePort,
 } from './player_state';
+import { MissionGoalEvent } from './mission_goals';
+import { noteServerMissionBits, takePlayerStateEcho } from './combat_resources';
 import { PlayerStoreResource } from './player_state';
 import { ShipComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
@@ -270,6 +273,135 @@ export function collectMissionSpawnCandidates(
                 }),
         }];
     });
+}
+
+function activeEntryKey(entry: ActiveMission): string {
+    return entry.missionUuid ?? `${entry.missionId}:${entry.acceptedDate ?? 0}`;
+}
+
+function applyListDelta<T>(target: T[], before: readonly T[],
+    after: readonly T[]): T[] {
+    const added = after.filter(value => !before.includes(value));
+    const removed = before.filter(value => !after.includes(value));
+    return [...target.filter(value => !removed.includes(value)),
+        ...added.filter(value => !target.includes(value))];
+}
+
+/**
+ * Apply only what a detached goal recording changed onto the pilot's current
+ * state. Anything else the owner changed meanwhile (the owner keeps writing
+ * its PlayerState while mission data loads) is preserved.
+ */
+export function applyGoalRecordingDelta(
+    current: PlayerState,
+    before: PlayerState,
+    after: PlayerState,
+): PlayerState {
+    const next = decodePlayerState(plainSnapshot(current));
+    if (next._tag === 'Left') {
+        throw new Error('Cannot merge goal progress into invalid player state');
+    }
+    const state = next.right;
+    for (let bit = 0; bit < after.missionBits.length; bit++) {
+        if (after.missionBits[bit] !== before.missionBits[bit]) {
+            state.missionBits[bit] = after.missionBits[bit];
+        }
+    }
+    const beforeEntries = new Map(before.activeMissions.map(entry =>
+        [activeEntryKey(entry), JSON.stringify(entry)] as const));
+    const afterKeys = new Set(after.activeMissions.map(activeEntryKey));
+    state.activeMissions = state.activeMissions.filter(entry =>
+        !beforeEntries.has(activeEntryKey(entry))
+        || afterKeys.has(activeEntryKey(entry)));
+    for (const entry of after.activeMissions) {
+        const key = activeEntryKey(entry);
+        const previous = beforeEntries.get(key);
+        if (previous === JSON.stringify(entry)) continue;
+        const index = state.activeMissions.findIndex(candidate =>
+            activeEntryKey(candidate) === key);
+        if (index >= 0) {
+            state.activeMissions[index] = entry;
+        } else if (previous === undefined) {
+            state.activeMissions.push(entry);
+        }
+    }
+    if (JSON.stringify(after.holds) !== JSON.stringify(before.holds)) {
+        state.holds = after.holds;
+    }
+    state.credits = Math.max(0, state.credits + after.credits - before.credits);
+    state.gameDate += after.gameDate - before.gameDate;
+    const records = { ...state.legalRecords };
+    for (const govt of new Set([
+        ...Object.keys(before.legalRecords ?? {}),
+        ...Object.keys(after.legalRecords ?? {}),
+    ])) {
+        const change = (after.legalRecords?.[govt] ?? 0)
+            - (before.legalRecords?.[govt] ?? 0);
+        if (change !== 0) records[govt] = (records[govt] ?? 0) + change;
+    }
+    state.legalRecords = records;
+    state.activeRanks = applyListDelta(
+        state.activeRanks, before.activeRanks, after.activeRanks);
+    state.destroyedStellars = applyListDelta(state.destroyedStellars,
+        before.destroyedStellars, after.destroyedStellars);
+    state.exploredSystems = applyListDelta(state.exploredSystems,
+        before.exploredSystems, after.exploredSystems);
+    return state;
+}
+
+type GoalRecorder = Pick<MissionRuntime, 'recordShipGoal'>;
+const goalQueues = new WeakMap<object, Map<string, Promise<void>>>();
+
+/**
+ * Record a special-ship goal without holding a step's Immer draft across the
+ * mission-data await. Recordings for one pilot run in order, each starting
+ * from the entity's then-current state, and the result is written back onto
+ * whatever PlayerState the entity carries once the await finishes.
+ */
+export function recordShipGoalDetached(
+    runtime: GoalRecorder,
+    entities: ReadonlyMap<string, Entity>,
+    playerUuid: string,
+    missionUuid: string,
+    event: MissionGoalEvent,
+): Promise<void> {
+    let queues = goalQueues.get(entities);
+    if (!queues) {
+        queues = new Map();
+        goalQueues.set(entities, queues);
+    }
+    const previous = queues.get(playerUuid) ?? Promise.resolve();
+    const work = async () => {
+        const live = entities.get(playerUuid)
+            ?.components.get(PlayerStateComponent);
+        if (!live) return;
+        const decoded = decodePlayerState(plainSnapshot(live));
+        if (decoded._tag === 'Left') return;
+        const before = decodePlayerState(plainSnapshot(live));
+        if (before._tag === 'Left') return;
+        const working = decoded.right;
+        await runtime.recordShipGoal(working, missionUuid, event);
+        if (JSON.stringify(working) === JSON.stringify(before.right)) return;
+        const entity = entities.get(playerUuid);
+        const current = entity?.components.get(PlayerStateComponent);
+        if (!entity || !current) return;
+        entity.components.set(PlayerStateComponent,
+            applyGoalRecordingDelta(current, before.right, working));
+        const owner = entity.components.get(MultiplayerData)?.owner;
+        if (owner) {
+            noteServerMissionBits(owner, working.missionBits
+                .map((value, bit) => [bit, value] as const)
+                .filter(([bit, value]) => before.right.missionBits[bit] !== value));
+        }
+    };
+    const next = previous.then(work).catch(error => {
+        console.error(`Could not record mission ship goal '${event}'`, error);
+    });
+    queues.set(playerUuid, next);
+    void next.finally(() => {
+        if (queues!.get(playerUuid) === next) queues!.delete(playerUuid);
+    });
+    return next;
 }
 
 function findPlayer(
@@ -516,8 +648,9 @@ const MissionShipDeathSystem = new System({
         Optional(PlayerStoreResource),
         MissionRuntimeResource,
         PlatformResource,
+        Entities,
     ] as const,
-    step(missionShip, players, playerStore, runtime, platform) {
+    step(missionShip, players, playerStore, runtime, platform, entities) {
         if (platform !== 'node') {
             return;
         }
@@ -527,8 +660,8 @@ const MissionShipDeathSystem = new System({
         if (!player) {
             return;
         }
-        void runtime.recordShipGoal(
-            player[2], missionShip.missionUuid, 'destroyed');
+        void recordShipGoalDetached(runtime, entities, player[0],
+            missionShip.missionUuid, 'destroyed');
     },
 });
 
@@ -542,8 +675,9 @@ const MissionShipChaseOffSystem = new System({
         MissionRuntimeResource,
         PlatformResource,
         SingletonComponent,
+        Entities,
     ] as const,
-    step(jump, players, playerStore, runtime, platform) {
+    step(jump, players, playerStore, runtime, platform, _singleton, entities) {
         if (platform !== 'node') {
             return;
         }
@@ -558,8 +692,8 @@ const MissionShipChaseOffSystem = new System({
         }
         // EV Nova Bible, mïsn/ShipGoal 6: "Chase them off (either kill them
         // or scare the into jumping out of the system)."
-        void runtime.recordShipGoal(
-            player[2], missionShip.missionUuid, 'chasedOff');
+        void recordShipGoalDetached(runtime, entities, player[0],
+            missionShip.missionUuid, 'chasedOff');
     },
 });
 
@@ -585,8 +719,8 @@ export const MissionShipBoardedSystem = new System({
         }
         const player = findPlayer(players, missionShip.playerToken, playerStore);
         if (player) {
-            void runtime.recordShipGoal(
-                player[2], missionShip.missionUuid, 'boarded');
+            void recordShipGoalDetached(runtime, entities, player[0],
+                missionShip.missionUuid, 'boarded');
         }
     },
 });
@@ -601,9 +735,10 @@ const MissionShipDisabledSystem = new System({
         Optional(PlayerStoreResource),
         MissionRuntimeResource,
         PlatformResource,
+        Entities,
     ] as const,
     step(missionShip, _disabled, status, players, playerStore,
-        runtime, platform) {
+        runtime, platform, entities) {
         if (platform !== 'node' || status.disabledRecorded) {
             return;
         }
@@ -612,8 +747,8 @@ const MissionShipDisabledSystem = new System({
         const player = findPlayer(
             players, missionShip.playerToken, store);
         if (player) {
-            void runtime.recordShipGoal(
-                player[2], missionShip.missionUuid, 'disabled');
+            void recordShipGoalDetached(runtime, entities, player[0],
+                missionShip.missionUuid, 'disabled');
         }
     },
 });
@@ -629,9 +764,10 @@ const MissionShipObservationSystem = new System({
         MissionRuntimeResource,
         SystemIdResource,
         PlatformResource,
+        Entities,
     ] as const,
     step(missionShip, status, behavior, players, playerStore,
-        runtime, systemId, platform) {
+        runtime, systemId, platform, entities) {
         if (platform !== 'node' || status.observedRecorded
             || behavior.cloaked) {
             return;
@@ -643,8 +779,27 @@ const MissionShipObservationSystem = new System({
             return;
         }
         status.observedRecorded = true;
-        void runtime.recordShipGoal(
-            player[2], missionShip.missionUuid, 'observed');
+        void recordShipGoalDetached(runtime, entities, player[0],
+            missionShip.missionUuid, 'observed');
+    },
+});
+
+/**
+ * When an owner's stale PlayerState write had server-recorded goal progress
+ * merged back in, replace the component so the corrected state is sent to
+ * the owner instead of silently becoming the replication baseline.
+ */
+const MissionProgressEchoSystem = new System({
+    name: 'MissionProgressEcho',
+    args: [MultiplayerData, PlayerStateComponent, GetEntity, PlatformResource] as const,
+    step(multiplayer, state, entity, platform) {
+        if (platform !== 'node' || !takePlayerStateEcho(multiplayer.owner)) {
+            return;
+        }
+        const copy = decodePlayerState(plainSnapshot(state));
+        if (copy._tag === 'Right') {
+            entity.components.set(PlayerStateComponent, copy.right);
+        }
     },
 });
 
@@ -705,6 +860,7 @@ export const MissionShipsPlugin: Plugin = {
             world.addSystem(MissionShipDisabledSystem);
             world.addSystem(MissionShipObservationSystem);
             world.addSystem(MissionShipCleanupSystem);
+            world.addSystem(MissionProgressEchoSystem);
         } else {
             world.removeSystem(MissionShipSpawnSystem);
             world.removeSystem(MissionShipBehaviorSystem);
@@ -718,5 +874,6 @@ export const MissionShipsPlugin: Plugin = {
         world.removeSystem(MissionShipDisabledSystem);
         world.removeSystem(MissionShipObservationSystem);
         world.removeSystem(MissionShipCleanupSystem);
+        world.removeSystem(MissionProgressEchoSystem);
     },
 };

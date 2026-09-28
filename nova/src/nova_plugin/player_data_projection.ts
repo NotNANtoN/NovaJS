@@ -8,6 +8,7 @@ import {
     PlayerSnapshotSummary,
     PlayerState,
     PlayerStateCodec,
+    toPersistentPlayerState,
 } from './player_state';
 
 export interface StoredPlayerData {
@@ -23,40 +24,9 @@ function projectPlayerState(raw: unknown): PlayerState {
     if (!isRight(decoded)) {
         throw new Error('Invalid persisted player state');
     }
-    const state = decoded.right;
-    const persisted: PersistentPlayerState = {
-        credits: state.credits,
-        missionBits: state.missionBits,
-        gameDate: state.gameDate,
-        activeMissions: state.activeMissions,
-        shipId: state.shipId,
-        currentSystem: state.currentSystem,
-        lastLandedPlanet: state.lastLandedPlanet,
-        lastLandedSystem: state.lastLandedSystem,
-        lastLandedPosition: state.lastLandedPosition,
-        cargoCapacity: state.cargoCapacity,
-        holds: state.holds,
-        pilotName: state.pilotName,
-        shipName: state.shipName,
-        gender: state.gender,
-        destroyedStellars: state.destroyedStellars,
-        activeRanks: state.activeRanks,
-        exploredSystems: state.exploredSystems,
-        ...(state.registered === undefined
-            ? {} : { registered: state.registered }),
-        ...(state.daysSinceRegistration === undefined
-            ? {} : { daysSinceRegistration: state.daysSinceRegistration }),
-        ...(state.landingCount === undefined
-            ? {} : { landingCount: state.landingCount }),
-        ...(state.kills === undefined ? {} : { kills: state.kills }),
-        ...(state.fuel === undefined ? {} : { fuel: state.fuel }),
-        ...(state.legalRecords === undefined
-            ? {} : { legalRecords: state.legalRecords }),
-        ...(state.escorts === undefined ? {} : { escorts: state.escorts }),
-        ...(state.dominatedStellars === undefined
-            ? {} : { dominatedStellars: state.dominatedStellars }),
-        ...(state.diedAt === undefined ? {} : { diedAt: state.diedAt }),
-    };
+    // The codec is the one schema: a hand-kept field list here silently
+    // dropped newer fields (crön state, combat balances) on every reload.
+    const persisted: PersistentPlayerState = toPersistentPlayerState(decoded.right);
     const projected = PlayerStateCodec.decode(persisted);
     if (!isRight(projected)) {
         throw new Error('Could not project persisted player state');

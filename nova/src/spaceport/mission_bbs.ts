@@ -54,6 +54,7 @@ import { Button } from './button';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
 import { plainSnapshot } from 'nova_ecs/draft_snapshot';
+import { contributeForPlayer } from './player_contribute_context';
 import {
     barOfferView,
     BAR_LAYOUT,
@@ -940,9 +941,14 @@ export abstract class MissionBoard extends Menu<Entity> {
             this.render();
             return;
         }
-        const [fullWorld, missions] = await Promise.all([
+        const outfits = plainSnapshot(
+            this.input.components.get(OutfitsStateComponent));
+        const playerShipAI = this.input.components
+            .get(ShipDataComponent)?.inherentAI;
+        const [fullWorld, missions, contribute] = await Promise.all([
             loadMissionWorld(this.gameData),
             loadMissionCatalog(this.gameData),
+            contributeForPlayer(this.gameData, state, outfits),
         ]);
         if (generation !== this.refreshGeneration) {
             return;
@@ -967,8 +973,10 @@ export abstract class MissionBoard extends Menu<Entity> {
             destinationPlanets: world.planets,
             destinationSystems: world.systems,
             governments: world.governments,
-            outfits: this.input.components.get(OutfitsStateComponent),
+            outfits,
             playerShipGovt: ship?.inherentGovt,
+            playerShipAI,
+            contribute,
         }).sort((a, b) => b.displayWeight - a.displayWeight);
         const offerSeed = this.sessionKey
             ?? `${state.currentSystem}:${this.planetId}:${state.gameDate}`;
@@ -1363,7 +1371,7 @@ export async function getConcourseMissionOffers(
     offers: ConcourseMissionOffer[];
     destinationOptions: (resolved: ResolvedMissionDestinations) => MissionDestinationOptions;
 }> {
-    const state = input.components.get(PlayerStateComponent);
+    const state = plainSnapshot(input.components.get(PlayerStateComponent));
     const ship = input.components.get(ShipDataComponent);
     if (!state || !ship) {
         return {
@@ -1371,9 +1379,13 @@ export async function getConcourseMissionOffers(
             destinationOptions: (resolved) => ({ initialPlanetId: planetId, resolved }),
         };
     }
-    const [fullWorld, missions] = await Promise.all([
+    const playerShipGovt = ship.inherentGovt;
+    const playerShipAI = ship.inherentAI;
+    const outfits = plainSnapshot(input.components.get(OutfitsStateComponent));
+    const [fullWorld, missions, contribute] = await Promise.all([
         loadMissionWorld(gameData),
         loadMissionCatalog(gameData),
+        contributeForPlayer(gameData, state, outfits),
     ]);
     const world = liveMissionWorld(fullWorld, state.missionBits);
     const currentSystem = world.systems.find(system =>
@@ -1395,8 +1407,10 @@ export async function getConcourseMissionOffers(
         destinationPlanets: world.planets,
         destinationSystems: world.systems,
         governments: world.governments,
-        outfits: input.components.get(OutfitsStateComponent),
-        playerShipGovt: ship?.inherentGovt,
+        outfits,
+        playerShipGovt,
+        playerShipAI,
+        contribute,
     }).sort((a, b) => b.displayWeight - a.displayWeight);
 
     const offerSeed = `${state.currentSystem}:${planetId}:${state.gameDate}:concourse:${offerLocation}`;
@@ -1442,15 +1456,28 @@ export async function getConcourseMissionOffers(
     return { offers: resourceOffers, destinationOptions };
 }
 
+export interface ShipboardOfferOptions {
+    /**
+     * Only consider this mïsn: a përs ship's LinkMission. AvailStel does not
+     * apply to a ship offer (the offer comes from the ship, wherever it is),
+     * so it is ignored for this mission.
+     */
+    missionId?: string;
+    /** Seeds AvailRandom and destinations, e.g. per hailed ship. */
+    seed?: string;
+}
+
 export async function getShipboardMissionOffers(
     gameData: GameData,
     input: Entity,
+    options: ShipboardOfferOptions = {},
 ): Promise<{
     offers: ConcourseMissionOffer[];
     destinationOptions: (resolved: ResolvedMissionDestinations) => MissionDestinationOptions;
 }> {
     const rawState = input.components.get(PlayerStateComponent);
     const playerShipGovt = input.components.get(ShipDataComponent)?.inherentGovt;
+    const playerShipAI = input.components.get(ShipDataComponent)?.inherentAI;
     if (!rawState) {
         return {
             offers: [],
@@ -1458,9 +1485,11 @@ export async function getShipboardMissionOffers(
         };
     }
     const state = plainSnapshot(rawState);
-    const [fullWorld, missions] = await Promise.all([
+    const outfits = plainSnapshot(input.components.get(OutfitsStateComponent));
+    const [fullWorld, missions, contribute] = await Promise.all([
         loadMissionWorld(gameData),
         loadMissionCatalog(gameData),
+        contributeForPlayer(gameData, state, outfits),
     ]);
     const world = liveMissionWorld(fullWorld, state.missionBits);
     const currentSystem = world.systems.find(system =>
@@ -1469,12 +1498,27 @@ export async function getShipboardMissionOffers(
             links: [],
             planets: [],
         };
-    const currentPlanet = world.planets.find(planet =>
+    const landedPlanet = world.planets.find(planet =>
         sameId(planet.id, state.lastLandedPlanet)) ?? { id: state.lastLandedPlanet || 'nova:128' };
+    let missionIds = [...missions.keys()];
+    let offerMissions: ReadonlyMap<string, MissionData> = missions;
+    let currentPlanet: MissionPlanetSelector = landedPlanet;
+    if (options.missionId !== undefined) {
+        const linked = [...missions.values()].find(mission =>
+            sameId(mission.id, options.missionId!));
+        missionIds = linked ? [linked.id] : [];
+        // AvailStel -1 only asks for an inhabited current stellar, which a
+        // ship in space does not have.
+        offerMissions = new Map(linked
+            ? [[linked.id, { ...linked, availStel: -1 }]] : []);
+        currentPlanet = { ...landedPlanet, inhabited: true };
+    }
+    const offerSeed = options.seed
+        ?? `${state.currentSystem}:shipboard:${state.gameDate}`;
 
     const offerable = getOfferableMissions({
-        missionIds: [...missions.keys()],
-        missions,
+        missionIds,
+        missions: offerMissions,
         playerState: state,
         currentPlanet,
         currentSystem,
@@ -1482,11 +1526,14 @@ export async function getShipboardMissionOffers(
         destinationPlanets: world.planets,
         destinationSystems: world.systems,
         governments: world.governments,
-        outfits: input.components.get(OutfitsStateComponent),
+        outfits,
         playerShipGovt,
+        playerShipAI,
+        contribute,
+        random: options.seed
+            ? seededRandom(`${options.seed}:availability`) : undefined,
     }).sort((a, b) => b.displayWeight - a.displayWeight);
 
-    const offerSeed = `${state.currentSystem}:shipboard:${state.gameDate}`;
     const resourceOffers: ConcourseMissionOffer[] = [];
     for (const sourceMission of offerable) {
         const mission = preparedMission(sourceMission, offerSeed);

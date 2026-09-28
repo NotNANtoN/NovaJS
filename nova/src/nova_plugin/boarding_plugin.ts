@@ -61,6 +61,7 @@ import { WeaponsStateComponent } from './weapons_state';
 import { CombatAuthorityComponent } from './combat_resources';
 import { AdoptServerHullSystem, RefreshChangedHullSystem, transferFlagship } from './flagship_swap';
 import { DerelictComponent } from './derelict_component';
+import { executeSetOperations, parseSetExpression } from './ncb';
 
 export const BOARDING_STANDOFF = 80;
 export const BOARDING_TOLERANCE = 20;
@@ -392,6 +393,27 @@ export function plunderShip(
     return { cargo, credits };
 }
 
+/**
+ * EV Nova Bible, shïp OnCapture: set expression run when the player captures
+ * a ship of this type. Retail only uses bit operators ("b8888"); other
+ * operators need client-side effects and are ignored here with a warning.
+ * Runs on the server's PlayerState draft in the capturing step.
+ */
+export function applyCaptureBits(
+    player: Pick<PlayerState, 'missionBits'>,
+    onCapture: string | undefined,
+): void {
+    if (!onCapture?.trim()) {
+        return;
+    }
+    try {
+        executeSetOperations(parseSetExpression(onCapture),
+            player.missionBits);
+    } catch (error) {
+        console.warn(`Could not run OnCapture '${onCapture}'`, error);
+    }
+}
+
 export function isBoardingTransferReady(
     boarder: Parameters<typeof hasArrived>[0],
     target: Parameters<typeof hasArrived>[1],
@@ -555,6 +577,7 @@ export const PlayerBoardingSystem = new System({
                             commandeered = true;
                             transferFlagship(player, entity, victimShipId, uuid, maxEscorts);
                             capturedShip = shipName;
+                            applyCaptureBits(player, victimShipData?.onCapture);
                             entities.delete(request.target);
                             emitNow(SoundEvent, { id: CAPTURE_SOUND_ID });
                         } else {
@@ -565,6 +588,7 @@ export const PlayerBoardingSystem = new System({
                                 dailyPay,
                             };
                             player.escorts = [...currentEscorts, newContract];
+                            applyCaptureBits(player, victimShipData?.onCapture);
                             entity.components.set(PlayerStateComponent, player);
                             capturedShip = shipName;
                             entities.delete(request.target);

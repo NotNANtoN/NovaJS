@@ -45,5 +45,6 @@ export function getDefaultNovaIDs(): NovaIDs {
         Cron: [],
         Rank: [],
         Oops: [],
+        Char: [],
     }
 }

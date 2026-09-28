@@ -12,6 +12,8 @@ import { ArmorComponent, IonizationComponent, ShieldComponent } from './health_p
 import { buyFuel, clampFuel, refuelsOnLanding } from './fuel';
 import { areSystemsSameOrVariants, isPlanetInSystem } from './system_variants';
 import { BOUNDARY } from 'nova_ecs/datatypes/position';
+import { NcbOperation, parseSetExpression } from './ncb';
+import { resourceId, sameResourceId } from '../common/resource_id';
 
 import { getPersistentPlayerToken } from '../communication/player_identity';
 import { makePlayerData, StoredPlayerData } from './player_data_projection';
@@ -51,9 +53,129 @@ export function registerCombatAmmoIds(ids: Iterable<string>): void {
 function ownerWrite(context: ReplicationMergeContext): boolean {
     return context.localIsAdmin && !context.peerIsAdmin && context.source === context.owner;
 }
+type PendingServerBits = Map<number, { value: boolean; revision?: number }>;
+// Mission bits the server authored (special-ship goals) that the owner has
+// not yet acknowledged. Keyed by owning peer, like `owners`.
+const serverMissionBits = new Map<string, PendingServerBits>();
+
+/**
+ * Remember server-authored mission bit changes until the owner has seen them.
+ * With a combat authority the change is stamped with a fresh ledger revision,
+ * which the next projection carries to the owner in the same PlayerState
+ * delta; an owner write at or past that revision has observed the bits. Without
+ * an authority (tests, legacy stores) echoing the value acknowledges it.
+ */
+export function noteServerMissionBits(owner: string,
+    changes: Iterable<readonly [number, boolean]>): void {
+    const list = [...changes];
+    if (list.length === 0) return;
+    const authority = owners.get(owner);
+    let revision: number | undefined;
+    if (authority && !authority.retired) {
+        authority.commit();
+        revision = authority.balance.revision;
+    }
+    let pending = serverMissionBits.get(owner);
+    if (!pending) {
+        pending = new Map();
+        serverMissionBits.set(owner, pending);
+    }
+    for (const [bit, value] of list) pending.set(bit, { value, revision });
+}
+
+function missionEntryKey(entry: PlayerState['activeMissions'][number]): string {
+    return entry.missionUuid ?? `${entry.missionId}:${entry.acceptedDate ?? 0}`;
+}
+
+/**
+ * Special-ship goal progress is recorded by the server, while the owner keeps
+ * authoring the rest of its PlayerState and may send a complete copy taken
+ * before the server's write. Goal counters are monotonic, so keep the larger
+ * of each; a mission the server failed cannot be revived by a stale write.
+ * Entries the owner removed (completed/aborted on landing) stay removed.
+ */
+function mergeServerMissionProgress(local: PlayerState, merged: PlayerState,
+    owner: string, remoteRevision: number | undefined): PlayerState {
+    const localEntries = new Map(local.activeMissions?.map(entry =>
+        [missionEntryKey(entry), entry] as const) ?? []);
+    let activeMissions = merged.activeMissions;
+    activeMissions?.forEach((entry, index) => {
+        const server = localEntries.get(missionEntryKey(entry));
+        if (!server) return;
+        const serverProgress = server.shipGoalProgress;
+        const ownerProgress = entry.shipGoalProgress;
+        const failed = server.state === 'failed' && entry.state === 'active';
+        let progress = ownerProgress;
+        if (serverProgress && (!ownerProgress
+            || serverProgress.goal !== ownerProgress.goal
+            || serverProgress.total !== ownerProgress.total)) {
+            progress = ownerProgress ?? serverProgress;
+        } else if (serverProgress && ownerProgress) {
+            progress = {
+                ...ownerProgress,
+                destroyed: Math.max(ownerProgress.destroyed, serverProgress.destroyed),
+                disabled: Math.max(ownerProgress.disabled, serverProgress.disabled),
+                boarded: Math.max(ownerProgress.boarded, serverProgress.boarded),
+                observed: Math.max(ownerProgress.observed, serverProgress.observed),
+                lost: Math.max(ownerProgress.lost, serverProgress.lost),
+                completed: ownerProgress.completed || serverProgress.completed,
+                shipDoneApplied: ownerProgress.shipDoneApplied
+                    || serverProgress.shipDoneApplied,
+            };
+        }
+        if (!failed && JSON.stringify(progress) === JSON.stringify(ownerProgress)) return;
+        if (activeMissions === merged.activeMissions) activeMissions = [...activeMissions];
+        activeMissions[index] = {
+            ...entry,
+            ...(failed ? { state: 'failed' as const } : {}),
+            ...(progress ? { shipGoalProgress: progress } : {}),
+        };
+    });
+    let missionBits = merged.missionBits;
+    const pending = serverMissionBits.get(owner);
+    if (pending) {
+        for (const [bit, { value, revision }] of pending) {
+            const acknowledged = revision !== undefined
+                ? (remoteRevision ?? -1) >= revision
+                : missionBits[bit] === value;
+            if (acknowledged) {
+                pending.delete(bit);
+                continue;
+            }
+            if (missionBits[bit] !== value) {
+                if (missionBits === merged.missionBits) missionBits = [...missionBits];
+                missionBits[bit] = value;
+            }
+        }
+        if (pending.size === 0) serverMissionBits.delete(owner);
+    }
+    if (activeMissions === merged.activeMissions && missionBits === merged.missionBits) {
+        return merged;
+    }
+    // The merged value becomes the replication baseline without being sent,
+    // so the owner would keep its stale copy. Ask the server to echo it.
+    playerStateEchoes.add(owner);
+    return withState(merged, { activeMissions, missionBits });
+}
+
+const playerStateEchoes = new Set<string>();
+/** True once after an owner write had server mission progress merged in. */
+export function takePlayerStateEcho(owner: string): boolean {
+    return playerStateEchoes.delete(owner);
+}
+
+/** Copy with overrides, keeping the non-enumerable freeSpace getter. */
+function withState(state: PlayerState, overrides: Partial<PlayerState>): PlayerState {
+    const copy = { ...state, ...overrides } as PlayerState;
+    const freeSpace = Object.getOwnPropertyDescriptor(state, 'freeSpace');
+    if (freeSpace?.get) Object.defineProperty(copy, 'freeSpace', freeSpace);
+    return copy;
+}
+
 export function mergeCombatPlayerState(local: PlayerState, remote: PlayerState,
     context: ReplicationMergeContext): PlayerState {
     if (!ownerWrite(context)) return remote;
+    const remoteRevision = remote.combatResources?.revision;
     // A decrease is an intent relative to a server-issued fuel basis, consumed
     // once. Absolute min(local, remote) would erase transfers/refills when an
     // older client snapshot arrives; trusting the submitted basis would mint fuel.
@@ -64,8 +186,9 @@ export function mergeCombatPlayerState(local: PlayerState, remote: PlayerState,
         authority.commit();
     }
     const fuel = authority ? authority.balance.fuel : Math.max(0, (local.fuel ?? 0) - debit);
-    return { ...remote, fuel, shipId: local.shipId,
-        combatResources: authority?.state.combatResources ?? local.combatResources };
+    return mergeServerMissionProgress(local, withState(remote, { fuel, shipId: local.shipId,
+        combatResources: authority?.state.combatResources ?? local.combatResources }),
+        context.owner, remoteRevision);
 }
 export function mergeCombatOutfits(local: OutfitsState, remote: OutfitsState,
     context: ReplicationMergeContext): OutfitsState {
@@ -265,15 +388,91 @@ export function withCost<T>(entity: Entity, ammoType: AmmoType,
     return fired;
 }
 
+/** The resource whose control-bit set expression granted a hull. */
+export type ShipGrantSource = { kind: 'mission' | 'outfit'; id: string };
+
 export type CombatShopRequest = {
-    action: 'open' | 'close' | 'refuel' | 'buy' | 'sell' | 'ship' | 'recover' | 'sync';
+    action: 'open' | 'close' | 'refuel' | 'buy' | 'sell' | 'ship' | 'recover' | 'sync' | 'grant';
     planet: string;
     revision: number;
     item?: string;
     state: PlayerState;
     outfits?: Array<[string, number]>;
     resolveAction?: CombatShopRequest['action'];
+    /** Required for `grant`: the mïsn/oütf whose NCB set changes the hull. */
+    source?: ShipGrantSource;
 };
+
+export function isShipGrantSource(value: unknown): value is ShipGrantSource {
+    const source = value as ShipGrantSource | undefined;
+    return typeof source === 'object' && source !== null
+        && (source.kind === 'mission' || source.kind === 'outfit')
+        && typeof source.id === 'string' && source.id.length > 0 && source.id.length <= 64;
+}
+
+type ShipChange = Extract<NcbOperation, { type: 'changeShip' }>;
+
+function findShipChange(operations: readonly NcbOperation[], shipId: string): ShipChange | undefined {
+    for (const operation of operations) {
+        if (operation.type === 'changeShip' && sameResourceId(resourceId(operation.id), shipId)) {
+            return operation;
+        }
+        if (operation.type === 'randomChoice') {
+            for (const choice of operation.choices) {
+                const found = findShipChange(choice, shipId);
+                if (found) return found;
+            }
+        }
+    }
+    return undefined;
+}
+
+/**
+ * The C/E/H operator in a mission or outfit set expression that changes the
+ * player's hull to `shipId` (EV Nova Bible, NCB set expressions), if any.
+ */
+export function grantedShipChange(expressions: readonly (string | undefined)[],
+    shipId: string): ShipChange | undefined {
+    for (const expression of expressions) {
+        if (!expression?.trim()) continue;
+        let operations: NcbOperation[];
+        try {
+            operations = parseSetExpression(expression);
+        } catch {
+            continue;
+        }
+        const found = findShipChange(operations, shipId);
+        if (found) return found;
+    }
+    return undefined;
+}
+
+/** Apply a validated hull change to a combat balance. */
+function applyShipChange(balance: CombatResources, ship: { id: string; fuelCapacity: number;
+    outfits: Record<string, number> }, change: Pick<ShipChange, 'includeDefaults' | 'resetNonPersistent'>): void {
+    balance.shipId = ship.id;
+    balance.fuel = clampFuel(balance.fuel, ship.fuelCapacity);
+    if (!change.includeDefaults) return;
+    // E adds the hull's default outfits to the current ones; H first clears
+    // the non-persistent outfits, so ammunition becomes exactly the defaults.
+    for (const id of ammoIds) {
+        const stock = Math.max(0, Math.floor(ship.outfits[id] ?? 0));
+        balance.ammo[id] = change.resetNonPersistent ? stock : (balance.ammo[id] ?? 0) + stock;
+    }
+}
+
+/**
+ * Server-originated hull change (e.g. a mission's OnShipDone recorded by the
+ * server). The caller has already established that the change is legitimate.
+ */
+export async function grantShipFromServer(authority: CombatAuthority, gameData: GameDataInterface,
+    shipId: string, change: Pick<ShipChange, 'includeDefaults' | 'resetNonPersistent'>): Promise<boolean> {
+    const ship = await gameData.data.Ship.get(shipId);
+    if (authority.retired) return false;
+    applyShipChange(authority.balance, ship, change);
+    authority.commit();
+    return true;
+}
 export type CombatShopResult = { balance: CombatResources; credits: number; landed?: string | null; resolved?: boolean };
 
 /** One ledger per PlayerStore, shared across rooms and retained while landed. */
@@ -305,7 +504,10 @@ export class CombatLedger {
     private async initialize(token: string): Promise<CombatAuthority> {
         await this.ready;
         const stored = await this.store.get(token);
-        const state = (stored ?? createInitialPlayerState()) as PlayerState;
+        // A pilot with no record yet starts from the server's new-pilot
+        // template (the default chär) when the store provides one.
+        const starting = (this.store as { startingState?: () => Promise<PlayerState> }).startingState;
+        const state = (stored ?? (starting ? await starting.call(this.store) : createInitialPlayerState())) as PlayerState;
         const hull = await this.gameData.data.Ship.get(state.shipId);
         const saved = state.combatResources;
         const stock = new Map(Object.entries(hull.outfits).map(([id, count]) => [id, { count }]));
@@ -382,10 +584,31 @@ export class CombatLedger {
         // Availability imports the mission runtime; load it at transaction
         // time rather than creating an outfit/provider initialization cycle.
         const { hasSpaceportService, isPurchaseAvailable } = await import('../spaceport/availability');
+        const { loadPlayerContribute } = await import('./player_contribute');
+        const { activeCronIds } = await import('./cron_plugin');
         const planet = await this.gameData.data.Planet.get(request.planet);
         const hull = await this.gameData.data.Ship.get(authority.balance.shipId);
-        const item = request.action === 'ship' && request.item
+        const item = (request.action === 'ship' || request.action === 'grant') && request.item
             ? await this.gameData.data.Ship.get(request.item) : undefined;
+        let grant: ShipChange | undefined;
+        if (request.action === 'grant') {
+            const source = request.source;
+            if (!item || !isShipGrantSource(source)) throw new Error('Invalid ship grant');
+            if (source.kind === 'mission') {
+                const mission = await this.gameData.data.Mission?.get(source.id);
+                if (!mission) throw new Error('Unknown grant source');
+                const active = request.state.activeMissions.some(entry =>
+                    sameResourceId(entry.missionId, mission.id));
+                if (!active && !authority.landed) throw new Error('Grant source mission is not active');
+                grant = grantedShipChange([mission.onAccept, mission.onRefuse, mission.onSuccess,
+                    mission.onFailure, mission.onAbort, mission.onShipDone], item.id);
+            } else {
+                const outfit = await this.gameData.data.Outfit.get(source.id);
+                if (!authority.landed) throw new Error('Not landed');
+                grant = grantedShipChange([outfit.onPurchase], item.id);
+            }
+            if (!grant) throw new Error('Ship not granted by source');
+        }
         const outfit = (request.action === 'buy' || request.action === 'sell') && request.item
             ? await this.gameData.data.Outfit.get(request.item) : undefined;
         const inventory = new Map<string, number>();
@@ -399,6 +622,14 @@ export class CombatLedger {
         for (const [id, count] of Object.entries(authority.balance.ammo)) inventory.set(id, count);
         const installed = outfit ? await Promise.all([...inventory].map(async ([id, count]) =>
             [await this.gameData.data.Outfit.get(id), count] as const)) : [];
+        // oütf/shïp Require: the current authoritative hull plus the reported
+        // inventory, ränks and cröns (all owner-writable) form the Contribute.
+        const contribute = item || outfit ? await loadPlayerContribute(this.gameData, {
+            shipId: authority.balance.shipId,
+            outfits: new Map([...inventory].map(([id, count]) => [id, { count }])),
+            activeRanks: request.state.activeRanks ?? [],
+            activeCrons: activeCronIds({ crons: request.state.crons ?? [] }),
+        }) : undefined;
         const effectiveSystemId = authority.system ?? authority.state.currentSystem ?? request.state?.currentSystem;
         const system = request.action === 'open'
             ? await this.gameData.data.System.get(effectiveSystemId)
@@ -420,7 +651,10 @@ export class CombatLedger {
             || request.revision !== originalRevision) throw new Error('Stale combat transaction');
         let credits = request.state.credits;
         if (!Nonnegative.is(credits)) throw new Error('Invalid credits');
-        if (request.action === 'open') {
+        if (request.action === 'grant') {
+            // No credits change: a control-bit hull change is not a sale.
+            applyShipChange(authority.balance, item!, grant!);
+        } else if (request.action === 'open') {
             if (!planet.canLand || !planetInSystem) {
                 throw new Error(`Not at this spaceport (planet: ${planet.id} (${planet.name || 'unknown'}), current system: ${system?.id} (${system?.name || 'unknown'}))`);
             }
@@ -451,7 +685,7 @@ export class CombatLedger {
                 authority.balance.fuel = result.fuel;
                 credits = result.credits;
             } else if (item) {
-                if (!hasSpaceportService(planet, 'shipyard') || !isPurchaseAvailable(item, planet, request.state)) {
+                if (!hasSpaceportService(planet, 'shipyard') || !isPurchaseAvailable(item, planet, request.state, undefined, contribute)) {
                     throw new Error('Ship unavailable');
                 }
                 const price = Math.max(0, Math.floor(item.cost) - Math.floor(hull.cost * 0.8));
@@ -464,7 +698,7 @@ export class CombatLedger {
                 if (!hasSpaceportService(planet, 'outfitter')) throw new Error('No outfitter');
                 const held = authority.balance.ammo[outfit.id] ?? 0;
                 if (request.action === 'buy') {
-                    if (!isPurchaseAvailable(outfit, planet, request.state, inventory)
+                    if (!isPurchaseAvailable(outfit, planet, request.state, inventory, contribute)
                         || outfit.max > 0 && held >= outfit.max) throw new Error('Ammo unavailable');
                     const usedMass = installed.reduce((sum, [data, count]) => sum + (data.physics.freeMass ?? 0) * count, 0);
                     const flags = outfit.flags ?? 0;
@@ -529,11 +763,51 @@ export async function fetchCombatShop(body: string, timeoutMs = COMBAT_SHOP_TIME
     } finally { clearTimeout(timer); }
 }
 
-function applyCombatReceipt(state: PlayerState, result: CombatShopResult): void {
+export function applyCombatReceipt(state: PlayerState, result: CombatShopResult): void {
     state.combatResources = copyCombatResources(result.balance);
     state.fuel = result.balance.fuel;
     state.credits = result.credits;
     state.shipId = result.balance.shipId;
+}
+
+/**
+ * Ask the server to apply a hull change made by a mission/outfit control-bit
+ * set expression. PlayerState.shipId is server-authoritative, so without this
+ * the server's next projection would revert the change. Retries once against
+ * a fresh revision when the ledger moved on (e.g. a shot or jump debit).
+ */
+export async function requestShipGrant(state: PlayerState, shipId: string,
+    source: ShipGrantSource,
+    apply: (result: CombatShopResult) => void = result => applyCombatReceipt(state, result),
+): Promise<CombatShopResult> {
+    // Snapshot now: the caller's state is often an ECS draft that is revoked
+    // before the response arrives, and the mission entry that justifies the
+    // grant may be removed right after its OnSuccess runs.
+    const snapshot = toPersistentPlayerState(state);
+    const send = (revision: number, action: CombatShopRequest['action'] = 'grant') => fetchCombatShop(JSON.stringify({
+        token: getPersistentPlayerToken(), action, planet: snapshot.lastLandedPlanet,
+        item: shipId, source, revision, state: snapshot,
+        ...(action === 'sync' ? { resolveAction: 'grant' } : {}),
+    }));
+    const revision = snapshot.combatResources?.revision ?? -1;
+    let result: CombatShopResult;
+    try {
+        result = await send(revision);
+    } catch (error) {
+        if (!(error instanceof CombatShopRejected)) {
+            // The response was lost; the grant may already be committed.
+            const sync = await send(revision, 'sync');
+            if (!sync.resolved) result = await send(sync.balance.revision);
+            else result = sync;
+        } else if (error.message.includes('Stale combat transaction')) {
+            const sync = await send(revision, 'sync');
+            result = await send(sync.balance.revision);
+        } else {
+            throw error;
+        }
+    }
+    apply(result);
+    return result;
 }
 
 /** Retry one identical request. On an uncertain shop spend, fence pending

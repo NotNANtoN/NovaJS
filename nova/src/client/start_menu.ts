@@ -1,3 +1,4 @@
+import { fetchNewPilotState } from './new_pilot_state';
 import {
     createInitialPlayerState,
     PlayerData,
@@ -980,21 +981,28 @@ export class StartMenu {
         dialog.append(heading, subtitle, input, actions);
         this.content.appendChild(dialog);
         input.focus();
-        const submit = () => {
-            const state = createInitialPlayerState();
+        let submitting = false;
+        const submit = async () => {
+            if (submitting) {
+                return;
+            }
+            submitting = true;
+            launch.disabled = true;
             const name = input.value.trim();
-            state.pilotName = name || INITIAL_PLAYER_STATE.pilotName;
+            const state = await fetchNewPilotState();
+            state.pilotName = name || state.pilotName
+                || INITIAL_PLAYER_STATE.pilotName;
             onCreated(state);
         };
         const goBack = () => {
             input.blur();
             showMainMenu();
         };
-        launch.addEventListener('click', submit);
+        launch.addEventListener('click', () => void submit());
         input.addEventListener('keydown', event => {
             if (event.key === 'Enter') {
                 event.preventDefault();
-                submit();
+                void submit();
             }
         });
         cancel.addEventListener('click', goBack);

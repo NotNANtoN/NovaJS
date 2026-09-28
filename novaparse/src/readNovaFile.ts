@@ -1,4 +1,5 @@
 import { RankResource } from "./resource_parsers/RankResource";
+import { CharResource } from "./resource_parsers/CharResource";
 import { OopsResource } from "./resource_parsers/OopsResource";
 import { CronResource } from "./resource_parsers/CronResource";
 import { readResourceFork } from "resource_fork";
@@ -60,7 +61,7 @@ function read(path: string) {
 // TODO: Fill this out as more are implemented
 var parserMap: { [index: string]: typeof BaseResource } = {};
 parserMap[NovaResourceType.bööm] = BoomResource;
-//parserMap[NovaResourceType.chär] = ;
+parserMap[NovaResourceType.chär] = CharResource;
 //parserMap[NovaResourceType.cicn] = ;
 //parserMap[NovaResourceType.cölr] = ;
 parserMap[NovaResourceType.crön] = CronResource;

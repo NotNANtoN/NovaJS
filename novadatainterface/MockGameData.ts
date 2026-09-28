@@ -1,4 +1,5 @@
 import { getDefaultRankData } from "./RankData";
+import { getDefaultCharData } from "./CharData";
 import { getDefaultOopsData } from "./OopsData";
 import { getDefaultCronData } from "./CronData";
 import { getDefaultCicnData } from "./CicnData";
@@ -77,6 +78,7 @@ export class MockGameData implements GameDataInterface {
         Cron: new MockGettable(getDefaultCronData()),
         Rank: new MockGettable(getDefaultRankData()),
         Oops: new MockGettable(getDefaultOopsData()),
+        Char: new MockGettable(getDefaultCharData()),
         Outfit: new MockGettable(getDefaultOutfitData()),
         Pict: new MockGettable(getDefaultPictData()),
         PictImage: new MockGettable(new Uint8Array(0).buffer as ArrayBuffer),

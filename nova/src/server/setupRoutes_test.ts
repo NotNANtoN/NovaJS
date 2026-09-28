@@ -8,6 +8,7 @@ import { MockGameData } from 'novadatainterface/MockGameData';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
 import { getDefaultSystemData } from 'novadatainterface/SystemData';
+import { getDefaultMissionData } from 'novadatainterface/MissionData';
 import { combatLedger } from '../nova_plugin/combat_resources';
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 import { createInitialPlayerState } from '../nova_plugin/player_state';
@@ -108,6 +109,28 @@ describe('/player/state', () => {
         } finally { release(); }
         expect((await delayed).status).toBe(409);
         expect(authority.landed).toBeUndefined();
+    });
+
+    it('routes validated ship grants and rejects malformed grant sources', async () => {
+        gameData.data.Ship.map.set('nova:128', { ...getDefaultShipData(), id: 'nova:128', fuelCapacity: 300 });
+        gameData.data.Ship.map.set('nova:381', { ...getDefaultShipData(), id: 'nova:381', fuelCapacity: 200 });
+        gameData.data.Planet.map.set('port', { ...getDefaultPlanetData(), id: 'port' });
+        gameData.data.Mission!.map.set('nova:197', { ...getDefaultMissionData(), id: 'nova:197', onAccept: 'H381' });
+        const authority = await combatLedger(playerStore, gameData).get('pilot');
+        const state = createInitialPlayerState();
+        state.activeMissions = [{ missionId: 'nova:197', state: 'active' }];
+        const post = (body: unknown) => fetch(`${baseUrl}/player/combat/shop`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const request = { token: 'pilot', action: 'grant', planet: 'port', item: 'nova:381',
+            revision: authority.balance.revision, state, source: { kind: 'mission', id: 'nova:197' } };
+        expect((await post({ ...request, source: undefined })).status).toBe(400);
+        expect((await post({ ...request, source: { kind: 'planet', id: 'x' } })).status).toBe(400);
+        expect((await post({ ...request, item: 'nova:128' })).status).toBe(409);
+        const granted = await post(request);
+        expect(granted.status).toBe(200);
+        expect((await granted.json() as { balance: { shipId: string } }).balance.shipId).toBe('nova:381');
+        expect((await playerStore.get('pilot'))?.shipId).toBe('nova:381');
     });
 
     it('rejects combat transactions before server flight initialization', async () => {

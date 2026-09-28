@@ -25,6 +25,7 @@ import { GameDataAggregator } from "./src/server/parsing/GameDataAggregator";
 import { NovaParseWorkerApi } from "./src/server/parsing/nova_parse_worker";
 import { setupRoutes } from "./src/server/setupRoutes";
 import { PlayerStore } from './src/server/player_store';
+import { createStartingPlayerState } from './src/nova_plugin/new_pilot';
 import {
     CompatibilityProfile,
     CompatibilityProfileResource,
@@ -140,6 +141,8 @@ async function startGame() {
         throw new Error("Expected novaparse worker to be defined");
     }
     const gameData = new GameDataAggregator([filesystemData, novaFileData]);
+    // New pilots start from the default chär resource once data is parsed.
+    playerStore.setStartingStateFactory(() => createStartingPlayerState(gameData));
     if (repl.repl) {
         repl.repl.context.gameData = gameData;
         repl.repl.context.makeShip = makeShip;

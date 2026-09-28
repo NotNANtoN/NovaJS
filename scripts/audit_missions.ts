@@ -1,17 +1,14 @@
 /**
  * Retail storyline audit: which control bits gate missions, who sets them,
- * whether the engine executes those setters, and which missions (including
- * every storyline finale) are reachable with the engine's current wiring.
+ * and which resource fields carry control-bit strings.
  *
  * Needs nova/Nova_Data. Bundle and run like the test runner does:
  *   node -e "require('esbuild').build({entryPoints:['scripts/audit_missions.ts'],
  *     bundle:true,platform:'node',outfile:'/tmp/audit.cjs',external:['sharp'],
  *     plugins:[...packedPngPlugin]})" && NOVAJS_ROOT=$PWD node /tmp/audit.cjs
  *   --details               dump Require/ship-offered/auto-abort/crön tables
- *   --legacy-origin-filter  model the pre-fix "not at its own ReturnStel" rule
  *
- * The reachability model is optimistic (negated bit tests always pass) and
- * mirrors engine wiring by hand; update `run('engine')` when wiring changes.
+ * Mission reachability is in nova/src/nova_plugin/storyline_reachability.ts.
  */
 import * as path from 'path';
 import { NovaParse } from '../novaparse/NovaParse';
@@ -142,7 +139,7 @@ function starts(expr: string): number[] {
     for (const s of setters) for (const b of bitsSet(s.expr)) {
         const list = setBy.get(b) ?? []; list.push(s); setBy.set(b, list);
     }
-    const handled = new Set(['misn', 'cron', 'outf.onPurchase', 'ship.onPurchase']);
+    const handled = new Set(['misn', 'cron', 'outf', 'ship', 'char', 'spob.@54', 'spob.@310']);
     const isHandled = (s: Source) => handled.has(s.kind) || handled.has(`${s.kind}.${s.field}`);
 
     const missionTestedBits = new Set<number>();
@@ -280,116 +277,9 @@ export async function blockers(res: any) {
 }
 
 /**
- * Optimistic reachability: a bit is "possible" once any reachable setter can
- * set it; negated tests are assumed satisfiable. Run once with the engine's
- * current wiring and once with full Bible semantics; the difference is what
- * missing engine features block.
+ * Reachability now lives in nova/src/nova_plugin/storyline_reachability.ts
+ * and is enforced by storyline_reachability_retail_test.ts.
  */
-export async function reachability(res: any) {
-    const { parseTestExpression } = await import('../nova/src/nova_plugin/ncb');
-    const nid = (id: string) => Number(String(id).replace(/^.*:/, ''));
-    const misn = Object.entries<any>(res[NovaResourceType.mïsn]).map(([id, m]) => ({ m, id: nid(id) }));
-    const byId = new Map(misn.map(x => [x.id, x]));
-    const crons = Object.values<any>(res[NovaResourceType.crön]);
-    const outfs = Object.values<any>(res[NovaResourceType.oütf]);
-    const ships = Object.values<any>(res[NovaResourceType.shïp]);
-    const spobSetters: string[] = [];
-    for (const p of Object.values<any>(res[NovaResourceType.spöb])) {
-        const d: DataView = p.data;
-        for (let off = 0; off < d.byteLength; off++) {
-            const s = cstr(d, off, 255);
-            if (s.length >= 2 && /[bB]\d/.test(s) && /^[\s!^()|&a-zA-Z0-9]+$/.test(s) && (off === 0 || d.getUint8(off - 1) === 0)) { spobSetters.push(s); off += s.length; }
-        }
-    }
-    const sets = (e: string) => [...(e ?? '').matchAll(/(^|[\s(])\^?b(\d+)/gi)].map(x => Number(x[2]));
-    const startsOf = (e: string) => [...(e ?? '').matchAll(/(^|[\s(])s(\d+)/gi)].map(x => Number(x[2]));
-    const sat = (expr: string, possible: Set<number>): boolean => {
-        if (!expr?.trim()) return true;
-        let ast: any;
-        try { ast = parseTestExpression(expr); } catch { return false; }
-        const ev = (n: any): boolean => {
-            switch (n.type) {
-                case 'literal': return n.value;
-                case 'bit': return possible.has(n.bit);
-                case 'not': return true;
-                case 'and': return ev(n.left) && ev(n.right);
-                case 'or': return ev(n.left) || ev(n.right);
-                default: return true;
-            }
-        };
-        return ev(ast);
-    };
-    const hasRequire = (m: any) => (m.require ?? []).some((x: number) => x);
-
-    // Mirrors mission_availability.ts destinationIsSatisfiable's origin rule
-    // as of f20e47c5: a mission is hidden at its own ReturnStel.
-    const originFiltered = (m: any) => m.availStel >= 128 && m.availStel <= 2175 && (
-        (m.returnStel > 0 && m.dropOffMode === 1 && m.returnStel === m.availStel)
-        || (m.travelStel > 0 && (m.returnStel === -1 || m.dropOffMode === 0) && m.travelStel === m.availStel));
-    const legacyOrigin = process.argv.includes('--legacy-origin-filter');
-
-    function run(mode: 'engine' | 'retail') {
-        const possible = new Set<number>();
-        const reachable = new Set<number>();
-        const started = new Set<number>();
-        const add = (e: string) => { let c = false; for (const b of sets(e)) if (!possible.has(b)) { possible.add(b); c = true; } return c; };
-        const startAll = (e: string) => { for (const s of startsOf(e)) started.add(s); };
-        if (mode === 'retail') for (const s of spobSetters) add(s);
-        let changed = true;
-        while (changed) {
-            changed = false;
-            for (const { m, id } of misn) {
-                if (reachable.has(id)) continue;
-                const offered = sat(m.availBits, possible) && m.availRandom > 0
-                    && (mode === 'retail' || (m.availLoc !== 2 && !hasRequire(m)
-                        && !(legacyOrigin && originFiltered(m))));
-                if (!offered && !started.has(id)) continue;
-                reachable.add(id); changed = true;
-            }
-            for (const id of reachable) {
-                const { m } = byId.get(id)!;
-                const autoAbort = (m.flags & 1) !== 0;
-                const dialogLoc = m.availLoc >= 3;
-                const refusable = (m.flags & 0x0004) === 0;
-                const fields: string[] = ['onAccept', 'onSuccess', 'onFailure', 'onShipDone'];
-                if (!autoAbort || mode === 'retail') fields.push('onAbort');
-                if (autoAbort && mode === 'retail') fields.push('onAbort');
-                if (refusable) fields.push('onRefuse');
-                for (const f of fields) {
-                    if (add(m[f])) changed = true;
-                    void dialogLoc;
-                    const before = started.size; startAll(m[f]); if (started.size !== before) changed = true;
-                }
-            }
-            for (const c of crons) {
-                if (!sat(c.enableOn, possible)) continue;
-                if (add(c.onStart)) changed = true;
-                if (mode === 'retail' || c.duration <= 0) if (add(c.onEnd)) changed = true;
-            }
-            for (const o of outfs) {
-                if (!sat(o.availabilityNCB, possible)) continue;
-                if (add(o.onPurchase)) changed = true;
-                if (mode === 'retail') { const b = started.size; startAll(o.onPurchase); if (started.size !== b) changed = true; }
-            }
-            for (const s of ships) {
-                if (add(s.onPurchase)) changed = true;
-                if (mode === 'retail' && add(s.onCapture)) changed = true;
-            }
-        }
-        return reachable;
-    }
-    const engine = run('engine');
-    const retail = run('retail');
-    const blocked = [...retail].filter(id => !engine.has(id)).sort((a, b) => a - b);
-    console.log(`\n== Reachability: retail ${retail.size} missions, engine ${engine.size}; blocked by wiring: ${blocked.length}`);
-    for (const id of blocked) {
-        const { m } = byId.get(id)!;
-        console.log(`  ${id} loc=${m.availLoc} flags=0x${m.flags.toString(16)} ${m.name} | avail="${m.availBits}"`);
-    }
-    const unreachable = misn.filter(({ id }) => !retail.has(id));
-    console.log(`\n== Never reachable even with full semantics: ${unreachable.length}`);
-    for (const { m, id } of unreachable) console.log(`  ${id} loc=${m.availLoc} ${m.name} | avail="${m.availBits}"`);
-    const finals = misn.filter(({ m }) => /LAST/i.test(m.name));
-    console.log('\n== Storyline finales (LAST):');
-    for (const { m, id } of finals) console.log(`  ${engine.has(id) ? 'OK     ' : retail.has(id) ? 'BLOCKED' : 'UNREACH'} ${id} ${m.name}`);
+export async function reachability(_res: unknown) {
+    console.log('\nReachability: run `bun scripts/test.mjs storyline_reachability`.');
 }

@@ -22,6 +22,47 @@ describe('spaceport availability', () => {
         expect(hasRequiredTechnology(15, planet)).toBe(false);
     });
 
+    describe('Require / Contribute gating', () => {
+        // Retail: Capital Ships License contributes high 0x40; Pegasus
+        // requires it. Normal hulls contribute low bit 1, most weapons
+        // require it; Chrome Valk Upgrade requires a Starbridge.
+        const pegasus = { techLevel: 1, availabilityNCB: '', require: [0x40, 0] };
+        const blaster = { techLevel: 1, availabilityNCB: '', require: [0, 1] };
+        const chromeValk = {
+            techLevel: 1, availabilityNCB: '', require: [0, 0x80000001],
+        };
+
+        it('stays permissive when no contribute is supplied', () => {
+            expect(isPurchaseAvailable(pegasus, planet)).toBe(true);
+            expect(isPurchaseUnlocked(pegasus, planet)).toBe(true);
+        });
+
+        it('requires license bits for licensed hulls', () => {
+            expect(isPurchaseAvailable(pegasus, planet, new Set(), undefined,
+                [0, 1])).toBe(false);
+            expect(isPurchaseUnlocked(pegasus, planet, new Set(), undefined,
+                [0, 1])).toBe(false);
+            expect(isPurchaseAvailable(pegasus, planet, new Set(), undefined,
+                [0x40, 1])).toBe(true);
+        });
+
+        it('requires every Require bit, including the sign bit', () => {
+            expect(isPurchaseAvailable(blaster, planet, new Set(), undefined,
+                [0, 1])).toBe(true);
+            expect(isPurchaseAvailable(blaster, planet, new Set(), undefined,
+                [0, 0])).toBe(false);
+            expect(isPurchaseAvailable(chromeValk, planet, new Set(), undefined,
+                [0, 1])).toBe(false);
+            expect(isPurchaseAvailable(chromeValk, planet, new Set(), undefined,
+                [0, 0x80000001])).toBe(true);
+        });
+
+        it('passes items without a Require', () => {
+            expect(isPurchaseAvailable({ techLevel: 1, availabilityNCB: '' },
+                planet, new Set(), undefined, [0, 0])).toBe(true);
+        });
+    });
+
     it('evaluates AvailabilityNCB against mission bits', () => {
         expect(isPurchaseAvailable({
             techLevel: 1,

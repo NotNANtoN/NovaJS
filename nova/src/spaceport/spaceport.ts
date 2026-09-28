@@ -17,7 +17,6 @@ import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin';
 import { MissionNotice } from '../nova_plugin/mission_plugin';
-import { evaluateCrons } from '../nova_plugin/cron_plugin';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import type { PlanetType } from '../nova_plugin/planet_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
@@ -208,6 +207,7 @@ export class Spaceport extends Menu<Entity> {
                 this.input.components.get(PlayerStateComponent));
             try {
                 this.outfitter.setPlayerState(playerState);
+                this.outfitter.setShipEntity(this.input);
                 this.outfitter.setShipData(plainSnapshot(
                     this.input.components.get(ShipDataComponent)));
                 this.outfitter.onUpdateOutfits = (newOutfits) => {
@@ -818,21 +818,6 @@ export class Spaceport extends Menu<Entity> {
                 }
                 this.setActiveDialog();
                 this.controls.bind();
-            }
-
-            // Evaluate scheduled crön events asynchronously on landing
-            if (this.gameData.data.Cron) {
-                void (async () => {
-                    const cronIds = (await this.gameData.ids).Cron ?? [];
-                    const crons = await Promise.all(cronIds.map(id => this.gameData.data.Cron!.get(id)));
-                    const rawState = input.components.get(PlayerStateComponent);
-                    const state = plainSnapshot(rawState);
-                    if (state) {
-                        evaluateCrons(crons, state);
-                        input.components.set(PlayerStateComponent, { ...state });
-                        this.onUpdateShip?.(input);
-                    }
-                })().catch(() => {});
             }
 
             // Check for concourse storyline offers (availLoc = 3) asynchronously so spaceport opens immediately

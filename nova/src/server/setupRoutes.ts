@@ -8,9 +8,9 @@ import { idsPath, dataPath, settingsPrefix } from "../common/GameDataPaths";
 import { GameDataInterface } from "../../../novadatainterface/GameDataInterface";
 import { NovaDataType } from "../../../novadatainterface/NovaDataInterface";
 import { PlayerStore } from "./player_store";
-import { combatLedger, CombatShopRequest,
+import { combatLedger, CombatShopRequest, isShipGrantSource,
     makePlayerDataWithCombatResources as makePlayerData } from '../nova_plugin/combat_resources';
-import { createInitialPlayerState, decodePlayerState } from '../nova_plugin/player_state';
+import { createInitialPlayerState, decodePlayerState, PlayerState, PlayerStateCodec } from '../nova_plugin/player_state';
 import { setupHttpLimiter } from './http_limiter';
 import { LosslessWebPCache } from './lossless_webp';
 import {
@@ -240,15 +240,19 @@ class GameDataServer {
                 if (typeof token !== 'string' || decoded._tag === 'Left'
                     || typeof req.body?.planet !== 'string'
                     || !Number.isSafeInteger(req.body?.revision)
-                    || !['open', 'close', 'buy', 'sell', 'ship', 'refuel', 'recover', 'sync'].includes(req.body?.action)
+                    || !['open', 'close', 'buy', 'sell', 'ship', 'refuel', 'recover', 'sync', 'grant'].includes(req.body?.action)
                     || req.body?.item !== undefined && typeof req.body.item !== 'string'
-                    || req.body?.resolveAction !== undefined && !['open', 'close', 'buy', 'sell', 'ship', 'refuel'].includes(req.body.resolveAction)) {
+                    || req.body?.action === 'grant' && (typeof req.body?.item !== 'string' || !isShipGrantSource(req.body?.source))
+                    || req.body?.source !== undefined && !isShipGrantSource(req.body.source)
+                    || req.body?.resolveAction !== undefined && !['open', 'close', 'buy', 'sell', 'ship', 'refuel', 'grant'].includes(req.body.resolveAction)) {
                     res.status(400).send('Invalid combat transaction');
                     return;
                 }
                 try {
                     const result = await combatLedger(this.playerStore!, this.gameData).transact(token, {
-                        ...req.body, state: decoded.right,
+                        action: req.body.action, planet: req.body.planet, revision: req.body.revision,
+                        item: req.body.item, outfits: req.body.outfits, resolveAction: req.body.resolveAction,
+                        source: req.body.source, state: decoded.right,
                     } as CombatShopRequest);
                     res.send(result);
                 } catch (error) {
@@ -281,6 +285,14 @@ class GameDataServer {
                     quarantine,
                 }));
             });
+            // The server's template for a brand-new pilot (default chär).
+            // Clients should build New Pilot state from this rather than from
+            // createInitialPlayerState, so start system, date and legal
+            // records match what the server grants.
+            this.app.get('/player/new-pilot', async (_req, res) => {
+                res.send(PlayerStateCodec.encode(
+                    await this.playerStore!.startingState() as PlayerState));
+            });
             this.app.get('/player/snapshots', async (req, res) => {
                 const token = typeof req.query.token === 'string'
                     ? req.query.token : undefined;
@@ -308,7 +320,7 @@ class GameDataServer {
                     ? req.body.reason
                     : 'manual';
                 const existing = await this.playerStore!.get(token);
-                const baseline = existing ?? createInitialPlayerState();
+                const baseline = existing ?? await this.playerStore!.startingState();
                 // Before the first flight migration, only the existing disk
                 // record is a trusted legacy ammo seed, never an HTTP upload.
                 const protectedState = { ...state, fuel: baseline.fuel,
@@ -339,9 +351,11 @@ class GameDataServer {
                         const decoded = decodePlayerState(replaceCurrent);
                         if (decoded._tag === 'Left') throw new Error('Invalid replacement pilot');
                         const defaults = createInitialPlayerState();
-                        if (!replaceCurrent.combatResources && !replaceShip
-                            && replaceCurrent.shipId === defaults.shipId
-                            && replaceCurrent.gameDate === defaults.gameDate) {
+                        const starting = await this.playerStore!.startingState();
+                        const isFreshPilot = [defaults, starting].some(template =>
+                            replaceCurrent.shipId === template.shipId
+                            && replaceCurrent.gameDate === template.gameDate);
+                        if (!replaceCurrent.combatResources && !replaceShip && isFreshPilot) {
                             // Explicit New Pilot resets the entire economy to
                             // server defaults, retaining only identity choices.
                             await combatLedger(this.playerStore!, this.gameData).startNewPilot(token, {

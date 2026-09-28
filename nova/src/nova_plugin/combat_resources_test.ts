@@ -14,7 +14,9 @@ import { OutfitsStateComponent, OutfitPlugin } from './outfit_plugin';
 import { GameDataResource } from './game_data_resource';
 import { PersistentPlayerStateCodec, PlayerStateComponent, PlayerStateCodec, PlayerStatePlugin, PlayerStorePort, createInitialPlayerState } from './player_state';
 import { CombatAuthority, CombatAuthorityComponent, CombatLedger, bindCombatOwner, canPay, consumeShot,
-    copyCombatResources, mergeCombatPlayerState, mergeCombatOutfits, withCost, fetchCombatShop, combatShopTransaction } from './combat_resources';
+    copyCombatResources, mergeCombatPlayerState, mergeCombatOutfits, withCost, fetchCombatShop, combatShopTransaction,
+    grantedShipChange, noteServerMissionBits, requestShipGrant } from './combat_resources';
+import { getDefaultMissionData } from 'novadatainterface/MissionData';
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -208,6 +210,32 @@ describe('authoritative combat resources', () => {
         expect(authority.landed).toBeUndefined();
     });
 
+    it('rejects hulls and ammo whose Require the pilot does not Contribute', async () => {
+        const { ledger, authority, entity, gameData } = await setup();
+        const state = entity.components.get(PlayerStateComponent)!;
+        const request = (action: 'open' | 'buy' | 'ship', item?: string,
+            outfits?: [string, number][]) => ({
+            action, item, planet: 'port', state, outfits,
+            revision: authority.balance.revision,
+        });
+        gameData.data.Ship.map.set('licensed', { ...getDefaultShipData(), id: 'licensed',
+            cost: 1000, displayWeight: 1, buyRandom: 100, techLevel: 0, require: [0x40, 0] });
+        gameData.data.Outfit.map.set('ammo', { ...getDefaultOutfitData(), id: 'ammo',
+            price: 20, max: 10, techLevel: 0, displayWeight: 1, availabilityNCB: '',
+            require: [0, 1] });
+        gameData.data.Outfit.map.set('license', { ...getDefaultOutfitData(), id: 'license',
+            contribute: [0x40, 0] });
+        await ledger.transact('pilot', request('open'));
+        // The default hull contributes nothing, so ammo requiring low bit 1 fails.
+        await expectAsync(ledger.transact('pilot', request('buy', 'ammo')))
+            .toBeRejectedWithError(/Ammo unavailable/);
+        await expectAsync(ledger.transact('pilot', request('ship', 'licensed')))
+            .toBeRejectedWithError(/Ship unavailable/);
+        const ship = await ledger.transact('pilot',
+            request('ship', 'licensed', [['license', 1]]));
+        expect(ship.balance.shipId).toBe('licensed');
+    });
+
     it('authorizes open landing when planet is in a storyline variant of the current system', async () => {
         const { ledger, authority, entity, gameData } = await setup();
         // Setup variant systems: nova:761 is the player's current system, nova:759 contains Brass (nova:503)
@@ -364,6 +392,138 @@ describe('authoritative combat resources', () => {
         expect(fresh.balance.fuel).toBe(300);
         expect(fresh.balance.ammo.ammo).toBe(3);
         expect(fresh.acceptOwnerFuel(oldState)).toBe(0);
+    });
+
+    describe('control-bit ship grants', () => {
+        async function grantSetup() {
+            const context = await setup();
+            const { gameData } = context;
+            gameData.data.Ship.map.set('nova:381', { ...getDefaultShipData(), id: 'nova:381', name: 'Vell-os Dart',
+                fuelCapacity: 100, cost: 900_000, outfits: { ammo: 1 } });
+            gameData.data.Ship.map.set('nova:382', { ...getDefaultShipData(), id: 'nova:382', fuelCapacity: 400, outfits: {} });
+            // Retail mïsn 197 grants the Dart from OnAccept.
+            gameData.data.Mission!.map.set('nova:197', { ...getDefaultMissionData(), id: 'nova:197',
+                onAccept: 'b300 H381 !b301' });
+            gameData.data.Mission!.map.set('nova:198', { ...getDefaultMissionData(), id: 'nova:198', onAccept: 'b1' });
+            gameData.data.Outfit.map.set('nova:314', { ...getDefaultOutfitData(), id: 'nova:314', onPurchase: 'E382' });
+            return context;
+        }
+        const grant = (state: ReturnType<typeof createInitialPlayerState>, revision: number,
+            item: string, source: { kind: 'mission' | 'outfit'; id: string }) =>
+            ({ action: 'grant' as const, planet: 'port', item, source, state, revision });
+
+        it('accepts H381 from an active mission 197 without charging, clamping fuel and resetting ammo', async () => {
+            const { ledger, authority, entity } = await grantSetup();
+            const state = entity.components.get(PlayerStateComponent)!;
+            state.activeMissions = [{ missionId: 'nova:197', state: 'active' }];
+            const credits = state.credits;
+            const receipt = await ledger.transact('pilot',
+                grant(state, authority.balance.revision, 'nova:381', { kind: 'mission', id: 'nova:197' }));
+            expect(receipt.balance.shipId).toBe('nova:381');
+            expect(receipt.credits).toBe(credits);
+            expect(receipt.balance.fuel).toBe(100);
+            expect(receipt.balance.ammo.ammo).toBe(1);
+            authority.project(entity);
+            expect(entity.components.get(PlayerStateComponent)!.shipId).toBe('nova:381');
+        });
+
+        it('rejects a hull the source does not grant, a wrong source, and an inactive mission in flight', async () => {
+            const { ledger, authority, entity } = await grantSetup();
+            const state = entity.components.get(PlayerStateComponent)!;
+            state.activeMissions = [{ missionId: 'nova:197', state: 'active' },
+                { missionId: 'nova:198', state: 'active' }];
+            const revision = authority.balance.revision;
+            await expectAsync(ledger.transact('pilot', grant(state, revision, 'nova:382',
+                { kind: 'mission', id: 'nova:197' }))).toBeRejectedWithError(/not granted/);
+            await expectAsync(ledger.transact('pilot', grant(state, revision, 'nova:381',
+                { kind: 'mission', id: 'nova:198' }))).toBeRejectedWithError(/not granted/);
+            state.activeMissions = [];
+            await expectAsync(ledger.transact('pilot', grant(state, revision, 'nova:381',
+                { kind: 'mission', id: 'nova:197' }))).toBeRejectedWithError(/not active/);
+            // An outfit purchase only happens while landed.
+            await expectAsync(ledger.transact('pilot', grant(state, revision, 'nova:382',
+                { kind: 'outfit', id: 'nova:314' }))).toBeRejectedWithError(/Not landed/);
+            expect(authority.balance.shipId).toBe('nova:128');
+            expect(authority.balance.revision).toBe(revision);
+        });
+
+        it('accepts a just-completed mission and an outfit OnPurchase while landed', async () => {
+            const { ledger, authority, entity } = await grantSetup();
+            const state = entity.components.get(PlayerStateComponent)!;
+            await ledger.transact('pilot', { action: 'open', planet: 'port', revision: authority.balance.revision, state });
+            const dart = await ledger.transact('pilot', grant(state, authority.balance.revision, 'nova:381',
+                { kind: 'mission', id: 'nova:197' }));
+            expect(dart.balance.shipId).toBe('nova:381');
+            // E keeps current ammo and adds the (empty) defaults; fuel is not raised.
+            const bought = await ledger.transact('pilot', grant(state, authority.balance.revision, 'nova:382',
+                { kind: 'outfit', id: 'nova:314' }));
+            expect(bought.balance.shipId).toBe('nova:382');
+            expect(bought.balance.fuel).toBe(100);
+            expect(bought.balance.ammo.ammo).toBe(1);
+        });
+
+        it('requests a grant over HTTP and resyncs once when the ledger moved on', async () => {
+            const { ledger, authority, entity } = await grantSetup();
+            const state = entity.components.get(PlayerStateComponent)!;
+            state.activeMissions = [{ missionId: 'nova:197', state: 'active' }];
+            authority.commit(); // a shot or jump debit the client has not seen
+            const actions: string[] = [];
+            spyOn(globalThis, 'fetch').and.callFake(async (_url, options) => {
+                const request = JSON.parse(String(options?.body));
+                actions.push(request.action);
+                try {
+                    return new Response(JSON.stringify(await ledger.transact('pilot', request)));
+                } catch (error: any) {
+                    return new Response(error.message, { status: 409 });
+                }
+            });
+            await requestShipGrant(state, 'nova:381', { kind: 'mission', id: 'nova:197' });
+            expect(actions).toEqual(['grant', 'sync', 'grant']);
+            expect(state.shipId).toBe('nova:381');
+            expect(state.combatResources?.revision).toBe(authority.balance.revision);
+        });
+
+        it('finds grants inside random choices and matches unprefixed ids', () => {
+            expect(grantedShipChange(['R50 b1', '(C381 | b2)'], 'nova:381')?.includeDefaults).toBeFalse();
+            expect(grantedShipChange(['H381'], '381')?.resetNonPersistent).toBeTrue();
+            expect(grantedShipChange(['b381', 'G381'], 'nova:381')).toBeUndefined();
+        });
+    });
+
+    describe('server-recorded mission progress', () => {
+        const progress = (destroyed: number) => ({ goal: 0, total: 2, destroyed, disabled: 0, boarded: 0,
+            observed: 0, lost: 0, completed: destroyed >= 2, shipDoneApplied: false });
+
+        it('keeps the larger goal counters and server-set bits against a stale owner write', async () => {
+            await setup();
+            const local = createInitialPlayerState();
+            local.activeMissions = [{ missionId: 'nova:9', missionUuid: 'm', state: 'active', shipGoalProgress: progress(2) }];
+            local.missionBits[40] = true;
+            noteServerMissionBits('stale-owner', [[40, true]]);
+            const remote = createInitialPlayerState();
+            remote.credits = 77;
+            remote.activeMissions = [{ missionId: 'nova:9', missionUuid: 'm', state: 'active', shipGoalProgress: progress(1) }];
+            const context = { ...ownerContext, source: 'stale-owner', owner: 'stale-owner' };
+            const merged = mergeCombatPlayerState(local, remote, context);
+            expect(merged.credits).toBe(77);
+            expect(merged.activeMissions[0].shipGoalProgress?.destroyed).toBe(2);
+            expect(merged.activeMissions[0].shipGoalProgress?.completed).toBeTrue();
+            expect(merged.missionBits[40]).toBeTrue();
+            expect(typeof merged.freeSpace).toBe('number');
+            // Once the owner echoes the bit it is no longer forced.
+            remote.missionBits[40] = true;
+            mergeCombatPlayerState(merged, remote, context);
+            remote.missionBits[40] = false;
+            expect(mergeCombatPlayerState(merged, remote, context).missionBits[40]).toBeFalse();
+        });
+
+        it('lets the owner remove a completed mission entry', async () => {
+            await setup();
+            const local = createInitialPlayerState();
+            local.activeMissions = [{ missionId: 'nova:9', missionUuid: 'm', state: 'active', shipGoalProgress: progress(2) }];
+            const remote = createInitialPlayerState();
+            expect(mergeCombatPlayerState(local, remote, ownerContext).activeMissions).toEqual([]);
+        });
     });
 
     it('keeps protected components on owner removal and applies protection to codec deltas', async () => {

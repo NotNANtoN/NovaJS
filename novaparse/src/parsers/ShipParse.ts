@@ -233,6 +233,8 @@ export async function ShipParse(ship: ShipResource,
         onPurchase: ship.onPurchase,
         onCapture: ship.onCapture,
         onRetire: ship.onRetire,
+        contribute: [...ship.contribute],
+        require: [...ship.require],
         animation,
         vulnerableTo: ["normal"], // TODO: Parse if it's vulnerable to point defense
         ...base

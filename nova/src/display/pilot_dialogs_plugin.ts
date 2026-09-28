@@ -35,6 +35,12 @@ import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import { PlanetDataComponent } from '../nova_plugin/planet_plugin';
 import { FleetMemberComponent } from '../nova_plugin/fleet_plugin';
 import { ScreenSize } from './screen_size_plugin';
+import {
+    acceptPersLinkOffer,
+    findPersLinkOffer,
+    persLinkInfo,
+} from '../spaceport/pers_link_offer';
+import { MissionOfferDialog } from '../spaceport/mission_offer_dialog';
 import { Stage } from './stage_resource';
 import {
     handlePilotDialogEvent,
@@ -50,6 +56,7 @@ export const ShipInfoResource = new Resource<ShipInfo>('ShipInfo');
 export const MissionLogResource = new Resource<MissionInfo>('MissionLog');
 export const CommsResource = new Resource<Comms>('Comms');
 export const PlayerChatDialogResource = new Resource<PlayerChatDialog>('PlayerChatDialog');
+export const FlightMissionOfferResource = new Resource<MissionOfferDialog>('FlightMissionOffer');
 export { BoardingDialogResource } from '../spaceport/boarding_dialog';
 
 /** Retail's "P" pilot status, available in flight as well as when landed. */
@@ -114,6 +121,8 @@ export const CommsSystem = new AsyncSystem({
                 record: 0,
                 hostile: false,
                 isPlanet: true,
+                planetId: planetData.id,
+                onDominate: planetData.onDominate,
             });
             comms.container.position.set(screenSize.x / 2, screenSize.y / 2);
             await comms.show(entity);
@@ -158,6 +167,7 @@ export const CommsSystem = new AsyncSystem({
                 isEscort,
             }, playerState?.legalRecords),
             disabled: isTargetDisabled,
+            pers: persLinkInfo(hailed),
         });
         comms.container.position.set(screenSize.x / 2, screenSize.y / 2);
         await comms.show(entity);
@@ -187,9 +197,13 @@ export const BoardingSystem = new AsyncSystem({
         DisabledBoardingTargets,
         PlayerShipSelector,
         Emit,
+        Entities,
+        Optional(FlightMissionOfferResource),
+        GameDataResource,
     ] as const,
     async step(controlEvent, boardingDialog, screenSize, entity, target,
-        movement, request, boarding, disabledTargets, _player, emit) {
+        movement, request, boarding, disabledTargets, _player, emit,
+        entities, missionOffer, gameData) {
         if (!isDialogStartEdge(controlEvent, 'board', (boardingDialog as any).container.visible)) {
             return;
         }
@@ -213,6 +227,36 @@ export const BoardingSystem = new AsyncSystem({
         }
 
         emit(SoundEvent, { id: 'nova:390' });
+
+        // përs Flags 0x0200: the LinkMission is offered on boarding.
+        if (missionOffer) {
+            const pers = persLinkInfo(entities.get(targetUuid));
+            try {
+                const link = await findPersLinkOffer(
+                    gameData as GameData, entity, pers, 'board', targetUuid);
+                if (link) {
+                    const mission = link.offer.mission;
+                    const canRefuse = (mission.flags & 0x0004) === 0;
+                    missionOffer.container.position.set(
+                        screenSize.x / 2, screenSize.y / 2);
+                    const prompt = await missionOffer.show({
+                        mission,
+                        title: link.offer.title,
+                        text: link.offer.displayText,
+                        acceptLabel: mission.acceptButton || (canRefuse ? 'Accept' : 'OK'),
+                        refuseLabel: canRefuse ? (mission.refuseButton || 'Refuse') : undefined,
+                        canRefuse,
+                    });
+                    if (prompt.accepted && !await acceptPersLinkOffer(
+                        gameData as GameData, entity, link, targetUuid)) {
+                        entity.components.set(BoardingNoticeComponent,
+                            { text: 'The mission could not be accepted.' });
+                    }
+                }
+            } catch (error) {
+                console.warn('Could not offer përs boarding mission', error);
+            }
+        }
 
         const isDerelict = Boolean(victim[9]);
         const victimShipData = victim[7];
@@ -308,6 +352,10 @@ export const PilotDialogsPlugin: Plugin = {
         world.resources.set(BoardingDialogResource, boardingDialog);
         world.resources.set(PlayerChatDialogResource, playerChatDialog);
 
+        const missionOffer = new MissionOfferDialog(gameData as GameData, controls);
+        stage.addChild(missionOffer.container);
+        world.resources.set(FlightMissionOfferResource, missionOffer);
+
         // Hailing needs the government cache. Plugin build order is not
         // guaranteed, so seed it here rather than skipping the dialog when the
         // NPC plugin has not been built yet.
@@ -336,6 +384,9 @@ export const PilotDialogsPlugin: Plugin = {
         const boardingDialog = world.resources.get(BoardingDialogResource);
         (boardingDialog as any)?.container.parent?.removeChild(boardingDialog.container);
         world.resources.delete(BoardingDialogResource);
+        const missionOffer = world.resources.get(FlightMissionOfferResource);
+        missionOffer?.container.parent?.removeChild(missionOffer.container);
+        world.resources.delete(FlightMissionOfferResource);
         const shipInfo = world.resources.get(ShipInfoResource);
         shipInfo?.container.parent?.removeChild(shipInfo.container);
         world.resources.delete(ShipInfoResource);

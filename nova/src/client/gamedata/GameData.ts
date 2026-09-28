@@ -31,6 +31,10 @@ import { TargetCornersData } from 'novadatainterface/TargetCornersData';
 import { WeaponData } from 'novadatainterface/WeaponData';
 import { JunkData } from 'novadatainterface/JunkData';
 import { PersData } from 'novadatainterface/PersData';
+import { CronData } from 'novadatainterface/CronData';
+import { RankData } from 'novadatainterface/RankData';
+import { OopsData } from 'novadatainterface/OopsData';
+import { CharData } from 'novadatainterface/CharData';
 import * as PIXI from 'pixi.js';
 import * as sound from '@pixi/sound';
 import { dataPath, idsPath } from '../../common/GameDataPaths';
@@ -95,6 +99,10 @@ export class GameData implements GameDataInterface {
                 NovaDataType.StringList),
             Junk: this.addGettable<JunkData>(NovaDataType.Junk),
             Pers: this.addGettable<PersData>(NovaDataType.Pers),
+            Cron: this.addGettable<CronData>(NovaDataType.Cron),
+            Rank: this.addGettable<RankData>(NovaDataType.Rank),
+            Oops: this.addGettable<OopsData>(NovaDataType.Oops),
+            Char: this.addGettable<CharData>(NovaDataType.Char),
             SoundFile: this.addSoundFileGettable(),
             Sound: this.addSoundGettable(),
         };

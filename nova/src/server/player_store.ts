@@ -64,13 +64,23 @@ function defaultPlayerDataPath() {
         : path.resolve(configured);
 }
 
-function initialPlayerState(): StoredPlayer {
+function initialPlayerState(
+    state: PersistentPlayerState = createInitialPlayerState(),
+): StoredPlayer {
     return {
-        ...createInitialPlayerState(),
+        ...state,
         schemaVersion: CURRENT_PLAYER_RECORD_SCHEMA_VERSION,
         snapshots: [],
     };
 }
+
+/**
+ * Builds the state for a brand-new pilot, e.g. from the default chär
+ * resource. Game data is parsed after the store is created, so the server
+ * installs this later with setStartingStateFactory.
+ */
+export type StartingStateFactory =
+    () => PersistentPlayerState | Promise<PersistentPlayerState>;
 
 function cloneSnapshot(snapshot: PlayerSnapshot): PlayerSnapshot {
     return {
@@ -147,9 +157,26 @@ export class PlayerStore implements PlayerStorePort {
     private fileQuarantined = false;
     private snapshotSequence = 0;
 
-    constructor(filePath = defaultPlayerDataPath()) {
+    constructor(filePath = defaultPlayerDataPath(),
+        private startingStateFactory?: StartingStateFactory) {
         this.filePath = path.resolve(filePath);
         this.ready = this.load();
+    }
+
+    setStartingStateFactory(factory: StartingStateFactory | undefined): void {
+        this.startingStateFactory = factory;
+    }
+
+    /** A detached new-pilot state; never fails, falling back to defaults. */
+    async startingState(): Promise<PersistentPlayerState> {
+        if (this.startingStateFactory) {
+            try {
+                return toPersistentPlayerState(await this.startingStateFactory());
+            } catch (error) {
+                console.error('New pilot factory failed; using defaults', error);
+            }
+        }
+        return toPersistentPlayerState(createInitialPlayerState());
     }
 
     private async load() {
@@ -237,6 +264,14 @@ export class PlayerStore implements PlayerStorePort {
     async getOrCreate(token: string): Promise<StoredPlayer> {
         await this.ready;
         this.assertWritable(token);
+        if (!this.players.has(token)) {
+            const starting = await this.startingState();
+            this.assertWritable(token);
+            if (!this.players.has(token)) {
+                this.players.set(token, initialPlayerState(starting));
+                this.scheduleSave();
+            }
+        }
         let player = this.players.get(token);
         if (!player) {
             player = initialPlayerState();
@@ -308,9 +343,11 @@ export class PlayerStore implements PlayerStorePort {
     async startNewPilot(token: string, metadata: Pick<PersistentPlayerState, 'pilotName' | 'shipName' | 'gender'>): Promise<void> {
         await this.ready;
         this.assertWritable(token);
+        const starting = await this.startingState();
+        this.assertWritable(token);
         const previous = this.players.get(token);
         this.players.set(token, {
-            ...initialPlayerState(),
+            ...initialPlayerState(starting),
             pilotName: metadata.pilotName,
             shipName: metadata.shipName,
             gender: metadata.gender,

@@ -241,6 +241,41 @@ describe('player snapshots', () => {
     });
 });
 
+describe('new pilot template', () => {
+    async function storeIn(prefix: string) {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+        return { directory, file: path.join(directory, 'players.json') };
+    }
+
+    it('creates pilots from the starting-state factory, including New Pilot', async () => {
+        const { directory, file } = await storeIn('novajs-player-store-template-');
+        const store = new PlayerStore(file, () => ({ ...stateFor(0), credits: 25_000,
+            currentSystem: 'nova:136', lastLandedSystem: 'nova:136' }));
+        const created = await store.getOrCreate('pilot');
+        expect(created.credits).toBe(25_000);
+        expect(created.currentSystem).toBe('nova:136');
+        await store.save('pilot', { ...stateFor(5), credits: 3 });
+        await store.startNewPilot('pilot', { pilotName: 'Ann', shipName: 'Kestrel', gender: 'female' });
+        const fresh = await store.get('pilot');
+        expect(fresh?.credits).toBe(25_000);
+        expect(fresh?.pilotName).toBe('Ann');
+        expect(fresh?.gameDate).toBe(0);
+        await store.flush();
+        await fs.rm(directory, { recursive: true, force: true });
+    });
+
+    it('falls back to the built-in pilot without a factory or when it fails', async () => {
+        const { directory, file } = await storeIn('novajs-player-store-template-');
+        const store = new PlayerStore(file);
+        expect((await store.getOrCreate('a')).credits).toBe(10_000);
+        store.setStartingStateFactory(() => { throw new Error('no data'); });
+        spyOn(console, 'error');
+        expect((await store.getOrCreate('b')).credits).toBe(10_000);
+        await store.flush();
+        await fs.rm(directory, { recursive: true, force: true });
+    });
+});
+
 describe('player state revisions', () => {
     async function freshStore() {
         const directory = await fs.mkdtemp(

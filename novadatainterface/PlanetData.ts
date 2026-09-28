@@ -29,6 +29,11 @@ export interface PlanetData extends SpaceObjectData {
     tradeCommodities: TradeCommodity[];
     /** Ambient landscape sound played while landed (spöb CustSndID). */
     ambientSound?: string;
+    /** spöb control-bit set expressions (EV Nova Bible, spöb resource). */
+    onDominate?: string;
+    onRelease?: string;
+    onDestroy?: string;
+    onRegen?: string;
 }
 
 export function getDefaultPlanetData(): PlanetData {

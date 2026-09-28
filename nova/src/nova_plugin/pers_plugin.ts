@@ -4,22 +4,32 @@ import {
     PersDataCodec,
 } from "novadatainterface/PersData";
 import { Component } from "nova_ecs/component";
-import { Entities, GetEntity } from "nova_ecs/arg_types";
+import { Emit, Entities, GetEntity, UUID } from "nova_ecs/arg_types";
+import { MultiplayerData, replicationPolicies } from "nova_ecs/plugins/multiplayer_plugin";
+import { consumeRequest } from "nova_ecs/transient_request";
 import { Plugin } from "nova_ecs/plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import { Optional } from "nova_ecs/optional";
 import { AppliedDamageEvent, DeathEvent } from "./death_plugin";
-import { GovtComponent } from "./npc_components";
+import { GovtComponent, NpcDepartureComponent } from "./npc_components";
+import { GameDataResource } from "./game_data_resource";
+import { InitiateJumpEvent, JumpStateComponent } from "./jump_plugin";
+import { PlatformPlugin, PlatformResource } from "./platform_plugin";
+import { PlayerStateComponent } from "./player_state";
+import { SystemIdResource } from "./system_id_resource";
+import { sameResourceId } from "../common/resource_id";
 import { makeNpc } from "./npc_plugin";
 import { resolveDamageSource } from "./npc_hostility";
 import {
     applyPersShipData,
+    persLinkAcceptEffects,
     PersState,
     persShipOverrides,
     recordPersAttack,
     recordPersDestruction,
+    recordPersDeactivated,
 } from "./pers";
 import { PlayerShipSelector } from "./player_ship_plugin";
 import {
@@ -60,6 +70,30 @@ export const PersAppearanceComponent = new Component<{
     hailQuote: number;
     linkMission: string | null;
 }>("PersAppearanceComponent");
+
+/**
+ * Client -> server: the pilot accepted this përs ship's LinkMission. The
+ * mission itself lives in the owner-writable PlayerState; the server only
+ * applies the përs side effects it owns (Flags 0x0800 leave, 0x0100
+ * deactivate), the same one-shot request pattern as surrender/assistance.
+ */
+const PersLinkAcceptedRequest = t.type({
+    target: t.string,
+    missionId: t.string,
+    sequence: t.number,
+});
+export type PersLinkAcceptedRequest = t.TypeOf<typeof PersLinkAcceptedRequest>;
+export const PersLinkAcceptedRequestComponent =
+    new Component<PersLinkAcceptedRequest>("PersLinkAcceptedRequestComponent");
+const PersLinkSequenceComponent =
+    new Component<number>("PersLinkSequenceComponent");
+
+replicationPolicies.register(PersLinkAcceptedRequestComponent, {
+    codec: PersLinkAcceptedRequest, authority: "owning-client",
+});
+replicationPolicies.register(PersLinkSequenceComponent, {
+    codec: t.number, authority: "local-only",
+});
 
 export const PersStateResource =
     new Resource<Map<string, PersState>>("PersStateResource");
@@ -240,9 +274,64 @@ export const RecordPersDestruction = new System({
     },
 });
 
+export const PersLinkAcceptedSystem = new System({
+    name: "PersLinkAcceptedSystem",
+    args: [
+        PersLinkAcceptedRequestComponent,
+        PlayerStateComponent,
+        MultiplayerData,
+        PlatformResource,
+        GetEntity,
+        Entities,
+        UUID,
+        PersStateResource,
+        Optional(GameDataResource),
+        Optional(SystemIdResource),
+        Emit,
+    ] as const,
+    step(request, _state, multiplayer, platform, player, entities, uuid,
+        states, gameData, systemId, emit) {
+        if (platform !== "node" || multiplayer.owner === "server") {
+            return;
+        }
+        consumeRequest(player, PersLinkAcceptedRequestComponent);
+        if (!Number.isSafeInteger(request.sequence) || request.sequence <= 0
+            || request.sequence
+            <= (player.components.get(PersLinkSequenceComponent) ?? 0)) {
+            return;
+        }
+        player.components.set(PersLinkSequenceComponent, request.sequence);
+        const target = request.target === uuid
+            ? undefined : entities.get(request.target);
+        const instance = target?.components.get(PersComponent);
+        if (!target || !instance?.data.linkMission
+            || target.components.get(MultiplayerData)?.owner !== "server"
+            || !sameResourceId(instance.data.linkMission, request.missionId)) {
+            return;
+        }
+        const effects = persLinkAcceptEffects(instance.data);
+        if (effects.deactivate) {
+            instance.state = recordPersDeactivated(instance.state);
+            states.set(instance.data.id, instance.state);
+        }
+        if (effects.leave && !target.components.has(JumpStateComponent)
+            && !target.components.has(NpcDepartureComponent) && systemId) {
+            const destination = gameData?.data.System.getCached(systemId)
+                ?.links[0];
+            if (destination) {
+                target.components.set(NpcDepartureComponent, undefined);
+                emit(InitiateJumpEvent, { to: destination }, [request.target]);
+            }
+        }
+    },
+});
+
 export const PersPlugin: Plugin = {
     name: "PersPlugin",
     build(world) {
+        if (!world.resources.has(PlatformResource)) {
+            world.addPlugin(PlatformPlugin);
+        }
         const deltaMaker = world.resources.get(DeltaResource);
         if (!deltaMaker) {
             throw new Error("Expected delta maker resource to exist");
@@ -253,6 +342,11 @@ export const PersPlugin: Plugin = {
         world.addComponent(PersZeroFuelComponent);
         world.addComponent(PersWeaponsConfiguredComponent);
         world.addComponent(PersAppearanceComponent);
+        world.addComponent(PersLinkAcceptedRequestComponent);
+        world.addComponent(PersLinkSequenceComponent);
+        deltaMaker.addComponent(PersLinkAcceptedRequestComponent, {
+            componentType: PersLinkAcceptedRequest,
+        });
         world.resources.set(PersStateResource, new Map());
         deltaMaker.addComponent(PersComponent, {
             componentType: PersInstanceCodec,
@@ -261,12 +355,14 @@ export const PersPlugin: Plugin = {
         world.addSystem(ApplyPersWeapons);
         world.addSystem(RecordPersAttack);
         world.addSystem(RecordPersDestruction);
+        world.addSystem(PersLinkAcceptedSystem);
     },
     remove(world) {
         world.removeSystem(ConfigurePersShip);
         world.removeSystem(ApplyPersWeapons);
         world.removeSystem(RecordPersAttack);
         world.removeSystem(RecordPersDestruction);
+        world.removeSystem(PersLinkAcceptedSystem);
         world.resources.delete(PersStateResource);
     },
 };

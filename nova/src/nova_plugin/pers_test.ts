@@ -11,6 +11,10 @@ import {
     resolvePersHailQuote,
     selectPers,
     shouldShowPersHailQuote,
+    persLinkAcceptEffects,
+    persLinkMissionFor,
+    persLinkOfferedOn,
+    recordPersDeactivated,
 } from "./pers";
 
 function person(changes: Partial<PersData> = {}): PersData {
@@ -131,5 +135,58 @@ describe("përs pure logic", () => {
             grudge: true,
             linkMissionAvailable: true,
         })).toBe(4);
+    });
+});
+
+describe("përs LinkMission rules", () => {
+    const terrapin = {
+        ...getDefaultPersData(),
+        linkMission: "nova:132",
+        // Retail Terrapin 128: quote-once, linkDeactivate, linkQuote, linkNoWimpy...
+        flags: 0x14ca,
+        activeOn: "",
+    };
+    const eamon = {
+        ...getDefaultPersData(),
+        linkMission: "nova:909",
+        // Retail Eamon Flannigan 443: board-offered, deactivate, grudge, pod.
+        flags: 0x0303,
+        activeOn: "!b175",
+    };
+
+    it("offers on hail unless Flags 0x0200 asks for boarding", () => {
+        expect(persLinkOfferedOn(terrapin)).toBe("hail");
+        expect(persLinkOfferedOn(eamon)).toBe("board");
+        expect(persLinkMissionFor(terrapin, { via: "hail" })).toBe("nova:132");
+        expect(persLinkMissionFor(terrapin, { via: "board" })).toBeUndefined();
+        expect(persLinkMissionFor(eamon, { via: "hail" })).toBeUndefined();
+        expect(persLinkMissionFor(eamon, { via: "board" })).toBe("nova:909");
+    });
+
+    it("applies ActiveOn, deactivation and player ship type gates", () => {
+        expect(persLinkMissionFor(eamon, {
+            via: "board", evaluateActiveOn: () => false,
+        })).toBeUndefined();
+        expect(persLinkMissionFor(eamon, {
+            via: "board", state: { alive: false },
+        })).toBeUndefined();
+        // 0x1000: not offered to a wimpy freighter (aiType 1).
+        expect(persLinkMissionFor(terrapin, {
+            via: "hail", playerAiType: 1,
+        })).toBeUndefined();
+        expect(persLinkMissionFor(terrapin, {
+            via: "hail", playerAiType: 3,
+        })).toBe("nova:132");
+        expect(persLinkMissionFor({ ...terrapin, linkMission: null },
+            { via: "hail" })).toBeUndefined();
+    });
+
+    it("reports leave and deactivate effects of accepting", () => {
+        expect(persLinkAcceptEffects({ flags: 0x080b }))
+            .toEqual({ leave: true, deactivate: false });
+        expect(persLinkAcceptEffects(eamon))
+            .toEqual({ leave: false, deactivate: true });
+        expect(recordPersDeactivated({ grudge: true }))
+            .toEqual({ grudge: true, alive: false });
     });
 });

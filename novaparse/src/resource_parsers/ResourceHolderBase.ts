@@ -1,4 +1,5 @@
 import { RankResource } from "./RankResource";
+import { CharResource } from "./CharResource";
 import { OopsResource } from "./OopsResource";
 import { CronResource } from "./CronResource";
 import { BaseResource } from "./NovaResourceBase";
@@ -76,7 +77,7 @@ type ResList<T> = {
 type NovaResources = {
     [index: string]: ResList<BaseResource>;
     bööm: ResList<BoomResource>;
-    chär: ResList<BaseResource>;
+    chär: ResList<CharResource>;
     cicn: ResList<BaseResource>;
     cölr: ResList<BaseResource>;
     crön: ResList<CronResource>;

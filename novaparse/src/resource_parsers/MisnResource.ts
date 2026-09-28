@@ -122,10 +122,8 @@ class MisnResource extends BaseResource {
         this.onSuccess = getString(857, 255);
         this.onFailure = getString(1112, 255);
         this.onAbort = getString(1367, 255);
-        this.require = [];
-        for (var i = 0; i < 8; i++) {
-            this.require.push(d.getUint8(1622 + i));
-        }
+        // [high, low] words of the 64-bit Require flag.
+        this.require = [d.getUint32(1622), d.getUint32(1626)];
         this.datePostInc = d.getInt16(1630);
         this.onShipDone = getString(1632, 255);
         this.acceptButton = getString(1887, 32);

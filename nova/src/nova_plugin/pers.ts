@@ -396,3 +396,74 @@ export function applyPersShipData(
         },
     };
 }
+
+/**
+ * EV Nova Bible, përs Flags 0x0200: "Offer ship's LinkMission when boarding
+ * it instead of when hailing it."
+ */
+export function persLinkOfferedOn(
+    pers: Pick<PersData, "flags">,
+): "hail" | "board" {
+    return (pers.flags & PersFlags.linkBoard) !== 0 ? "board" : "hail";
+}
+
+export interface PersLinkAcceptEffects {
+    /** 0x0800: "Make ship leave after accepting its LinkMission." */
+    leave: boolean;
+    /**
+     * 0x0100: "Deactivate ship (i.e. don't make it show up again) after
+     * accepting its LinkMission."
+     */
+    deactivate: boolean;
+}
+
+export function persLinkAcceptEffects(
+    pers: Pick<PersData, "flags">,
+): PersLinkAcceptEffects {
+    return {
+        leave: (pers.flags & PersFlags.linkLeave) !== 0,
+        deactivate: (pers.flags & PersFlags.linkDeactivate) !== 0,
+    };
+}
+
+/** Record that a përs accepted-link deactivation removes it from play. */
+export function recordPersDeactivated(state: PersState = {}): PersState {
+    return { ...state, alive: false };
+}
+
+export interface PersLinkOfferContext {
+    /** How the player is interacting with the përs ship. */
+    via: "hail" | "board";
+    /** InherentAI of the player's ship (Flags 0x1000/0x2000/0x4000). */
+    playerAiType?: number;
+    /** Evaluates the përs ActiveOn expression against the pilot. */
+    evaluateActiveOn?: (expression: string) => boolean;
+    state?: PersState;
+}
+
+/**
+ * The përs LinkMission to offer for this interaction, if any: the link
+ * exists, is offered on this interaction (hail vs board), the pilot's ship
+ * type is allowed, the përs is still active and its ActiveOn holds. Mission
+ * availability (AvailBits, record, random...) is checked separately.
+ */
+export function persLinkMissionFor(
+    pers: Pick<PersData, "linkMission" | "flags" | "activeOn">,
+    context: PersLinkOfferContext,
+): string | undefined {
+    if (!pers.linkMission || persLinkOfferedOn(pers) !== context.via
+        || context.state?.alive === false
+        || !canOfferPersMission(pers, { playerAiType: context.playerAiType })) {
+        return undefined;
+    }
+    if (pers.activeOn?.trim() && context.evaluateActiveOn) {
+        try {
+            if (!context.evaluateActiveOn(pers.activeOn)) {
+                return undefined;
+            }
+        } catch {
+            return undefined;
+        }
+    }
+    return pers.linkMission;
+}

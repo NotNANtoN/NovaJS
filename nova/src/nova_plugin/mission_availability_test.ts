@@ -1,7 +1,7 @@
 import { getDefaultMissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
 import {
     getOfferableMissions,
-    matchesRequiredOutfits,
+    matchesRequire,
     MissionAvailabilityInput,
 } from './mission_availability';
 import { createInitialPlayerState } from './player_state';
@@ -21,23 +21,69 @@ function makeInput(
 }
 
 describe('mission availability', () => {
-    it('enforces required installed outfits (mission.require)', () => {
+    it('gates Require against the player Contribute bits, not outfit ids', () => {
+        // Retail 557 "Bulk Delivery" needs low bit 0x10 (Leviathan: 0x11).
         const mission = {
             ...getDefaultMissionData(),
-            id: 'nova:205',
-            require: [150, 0, 0, 0],
-            destination: -1,
+            id: 'nova:557',
+            require: [0, 0x10],
             travelStel: -1,
-            returnDestination: -1,
             returnStel: -1,
         };
         const input = makeInput(mission);
-
-        // Without outfit: rejected
         expect(getOfferableMissions(input)).toEqual([]);
+        input.contribute = [0, 0x1];
+        expect(getOfferableMissions(input)).toEqual([]);
+        input.contribute = [0, 0x11];
+        expect(getOfferableMissions(input)).toEqual([mission]);
+        // An outfit whose id happens to match is irrelevant.
+        input.contribute = [0, 0];
+        input.outfits = new Map([['nova:16', { count: 1 }]]);
+        expect(getOfferableMissions(input)).toEqual([]);
+    });
 
-        // With outfit: accepted
-        input.outfits = new Map([['nova:150', { count: 1 }]]);
+    it('matchesRequire checks both words and passes all-zero Require', () => {
+        expect(matchesRequire({ require: [0, 0] }, undefined)).toBe(true);
+        expect(matchesRequire({ require: [] }, undefined)).toBe(true);
+        expect(matchesRequire({ require: [0x2, 0] }, undefined)).toBe(false);
+        expect(matchesRequire({ require: [0x2, 0] }, [0x3, 0])).toBe(true);
+        expect(matchesRequire({ require: [0x2, 0x1] }, [0x2, 0])).toBe(false);
+        expect(matchesRequire({ require: [0x80000000, 0] }, [0xffffffff, 0])).toBe(true);
+    });
+
+    it('hides Flags 0x2000 from freighters and 0x4000 from warships', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:224',
+            flags: 0x2000,
+            travelStel: -1,
+            returnStel: -1,
+        };
+        const input = makeInput(mission);
+        expect(getOfferableMissions(input)).toEqual([mission]);
+        for (const [ai, offered] of [[1, false], [2, false], [3, true], [4, true]] as const) {
+            input.playerShipAI = ai;
+            expect(getOfferableMissions(input).length).withContext(`AI ${ai}`).toBe(offered ? 1 : 0);
+        }
+        mission.flags = 0x4000;
+        for (const [ai, offered] of [[1, true], [2, true], [3, false], [4, false]] as const) {
+            input.playerShipAI = ai;
+            expect(getOfferableMissions(input).length).withContext(`AI ${ai}`).toBe(offered ? 1 : 0);
+        }
+    });
+
+    it('does not offer Flags 0x0008 fuel missions below 100 fuel', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:225',
+            flags: 0x0008,
+            travelStel: -1,
+            returnStel: -1,
+        };
+        const input = makeInput(mission);
+        input.playerState.fuel = 99;
+        expect(getOfferableMissions(input)).toEqual([]);
+        input.playerState.fuel = 100;
         expect(getOfferableMissions(input)).toEqual([mission]);
     });
 

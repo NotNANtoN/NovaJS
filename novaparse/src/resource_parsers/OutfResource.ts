@@ -47,17 +47,19 @@ class OutfResource extends BaseResource {
     get onPurchase(): string {
         return this.getString(301, 255);
     }
+    get onSell(): string {
+        return this.getString(556, 255);
+    }
+    // Contribute and Require are 64-bit flags stored as [high, low] words
+    // between the ModType fields and the Availability string.
+    private getUint32Or0(offset: number): number {
+        return this.data.byteLength >= offset + 4 ? this.data.getUint32(offset) : 0;
+    }
     get contribute(): number[] {
-        return [
-            this.data.byteLength >= 548 ? this.data.getUint32(544) : 0,
-            this.data.byteLength >= 552 ? this.data.getUint32(548) : 0,
-        ];
+        return [this.getUint32Or0(30), this.getUint32Or0(34)];
     }
     get require(): number[] {
-        return [
-            this.data.byteLength >= 556 ? this.data.getUint32(552) : 0,
-            this.data.byteLength >= 560 ? this.data.getUint32(556) : 0,
-        ];
+        return [this.getUint32Or0(38), this.getUint32Or0(42)];
     }
     get modTypes(): number[] {
         return [6, 18, 22, 26].map(position =>

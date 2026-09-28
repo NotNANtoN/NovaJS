@@ -83,6 +83,14 @@ export interface ShipData extends SpaceObjectData {
     onPurchase: string;
     onCapture: string;
     onRetire: string;
+    /**
+     * shïp Contribute / Require as [high word, low word] of the Bible's
+     * 64-bit flags. Missions, outfits and hulls AND their Require against
+     * the union of the ship's, outfits', active ranks' and active cröns'
+     * Contribute. Optional so legacy generated data stays source compatible.
+     */
+    contribute?: [number, number];
+    require?: [number, number];
 };
 
 export function getDefaultShipData(): ShipData {
@@ -123,6 +131,8 @@ export function getDefaultShipData(): ShipData {
         appearOn: "",
         onPurchase: "",
         onCapture: "",
-        onRetire: ""
+        onRetire: "",
+        contribute: [0, 0],
+        require: [0, 0],
     }
 }

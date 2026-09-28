@@ -347,6 +347,7 @@ describe('pirate boarding', () => {
             name: 'Kestrel',
             crew: 5,
             cost: 200_000,
+            onCapture: 'b8888',
         };
 
         const victim = new Entity('victim')
@@ -370,6 +371,8 @@ describe('pirate boarding', () => {
         expect(outcome.target).toBe('victim');
         expect(outcome.capturedShip).toBe('Kestrel');
         expect(playerState.escorts?.length).toBe(1);
+        // shïp OnCapture (retail: every capturable hull sets b8888).
+        expect(player.components.get(PlayerStateComponent)?.missionBits[8888]).toBeTrue();
         expect(playerState.escorts?.[0].shipId).toBe('nova:130');
         expect(world.entities.has('victim')).toBeFalse();
         expect(player.components.get(BoardingNoticeComponent)?.text)
@@ -694,6 +697,7 @@ describe('pirate boarding', () => {
             name: 'Kestrel',
             crew: 5,
             cost: 200_000,
+            onCapture: 'b8888',
         };
 
         const victim = new Entity('victim')
@@ -716,6 +720,7 @@ describe('pirate boarding', () => {
 
         expect(outcome.target).toBe('victim');
         expect(outcome.commandeered).toBeTrue();
+        expect(player.components.get(PlayerStateComponent)?.missionBits[8888]).toBeTrue();
         expect(outcome.capturedShip).toBe('Kestrel');
         // Player's new flagship is the captured Kestrel!
         expect(playerState.shipId).toBe('nova:130');
