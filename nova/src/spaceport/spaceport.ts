@@ -561,8 +561,9 @@ export class Spaceport extends Menu<Entity> {
                 for (const offer of offers) {
                     if (!this.container.visible) break;
                     this.setActiveDialog(this.missionOfferDialog.container);
-                    const canRefuse = (offer.mission.flags & 0x0100) === 0
-                        && offer.mission.refuseButton !== '';
+                    // Bible mïsn Flags 0x0004: "Can't refuse the mission."
+                    // (0x0100 is the green map arrow, set on 267 retail missions.)
+                    const canRefuse = (offer.mission.flags & 0x0004) === 0;
                     const prompt = await this.missionOfferDialog.show({
                         mission: offer.mission,
                         title: offer.title,
@@ -574,28 +575,26 @@ export class Spaceport extends Menu<Entity> {
                         refuseLabel: canRefuse ? (offer.mission.refuseButton || 'Refuse') : undefined,
                         canRefuse,
                     });
+                    const ncb = this.ncbRuntime.setContext(this.input, state);
                     if (prompt.accepted) {
-                        const ncb = this.ncbRuntime.setContext(this.input, state);
-                        const accepted = acceptMission(state, offer.mission, {
+                        acceptMission(state, offer.mission, {
                             ...destinationOptions(offer.resolved),
                             ncb,
                         });
-                        if (accepted) {
-                            await startPendingNcbMissions(this.gameData, state, {
-                                ...destinationOptions(offer.resolved),
-                                ncb,
-                            });
-                        }
-                        if (ncb.outfits) {
-                            this.input.components.set(OutfitsStateComponent, ncb.outfits);
-                        }
-                        this.input.components.set(PlayerStateComponent, { ...state });
-                        this.onUpdateShip?.(this.input);
                     } else {
-                        refuseMission(state, offer.mission);
-                        this.input.components.set(PlayerStateComponent, { ...state });
-                        this.onUpdateShip?.(this.input);
+                        // OnRefuse carries story branches too, e.g. the
+                        // tutorial's "b9215 S758" and Polaris43a's S880 S881.
+                        refuseMission(state, offer.mission, undefined, ncb);
                     }
+                    await startPendingNcbMissions(this.gameData, state, {
+                        ...destinationOptions(offer.resolved),
+                        ncb,
+                    });
+                    if (ncb.outfits) {
+                        this.input.components.set(OutfitsStateComponent, ncb.outfits);
+                    }
+                    this.input.components.set(PlayerStateComponent, { ...state });
+                    this.onUpdateShip?.(this.input);
                 }
                 this.setActiveDialog(returnToDialog);
                 this.controls.bind();

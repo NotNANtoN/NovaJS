@@ -41,6 +41,29 @@ describe('mission availability', () => {
         expect(getOfferableMissions(input)).toEqual([mission]);
     });
 
+    it('offers round trips at their own ReturnStel but not one-way drops to it', () => {
+        // Retail Rebel1 "Rebel Food Drop": offered on Rebel I (171),
+        // deliver to 140, come back to 171. 87 story missions use this shape.
+        const roundTrip = {
+            ...getDefaultMissionData(),
+            id: 'nova:330',
+            availStel: 130,
+            travelStel: 140,
+            returnStel: 130,
+            dropOffMode: 1,
+        };
+        expect(getOfferableMissions(makeInput(roundTrip))).toEqual([roundTrip]);
+
+        const oneWay = {
+            ...roundTrip,
+            id: 'nova:331',
+            travelStel: 130,
+            returnStel: -1,
+            dropOffMode: 0,
+        };
+        expect(getOfferableMissions(makeInput(oneWay))).toEqual([]);
+    });
+
     it('gates offers on AvailBits', () => {
         const mission = {
             ...getDefaultMissionData(),

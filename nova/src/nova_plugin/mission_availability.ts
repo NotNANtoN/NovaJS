@@ -81,15 +81,14 @@ function destinationIsSatisfiable(
     mission: MissionData,
     input: MissionAvailabilityInput,
 ): boolean {
-    // A delivery mission cannot deliver to the very stellar where it is offered
-    if (mission.returnStel > 0 && mission.dropOffMode === 1) {
-        if (sameResourceId(resourceId(mission.returnStel), input.currentPlanet.id)) {
-            return false;
-        }
-    } else if (mission.travelStel > 0 && (mission.returnStel === -1 || mission.dropOffMode === 0)) {
-        if (sameResourceId(resourceId(mission.travelStel), input.currentPlanet.id)) {
-            return false;
-        }
+    // A one-way delivery cannot drop off where it is offered. A ReturnStel
+    // equal to the offering stellar is a round trip (go to TravelStel, come
+    // back); 87 retail story missions, e.g. every Rebel food drop and Fed
+    // "Bring in ..." job, are built that way and must stay offerable.
+    if (mission.travelStel >= 128 && mission.travelStel <= 2175
+        && (mission.returnStel === -1 || mission.dropOffMode === 0)
+        && sameResourceId(resourceId(mission.travelStel), input.currentPlanet.id)) {
+        return false;
     }
 
     return destinationSelectorIsSatisfiable(
