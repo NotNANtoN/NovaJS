@@ -124,11 +124,18 @@ jobs:
 
           query_instances() {
             local destination="$1"
+            local raw
+            raw="$(mktemp)"
             curl --fail-with-body --silent --show-error \
               --retry 3 --retry-delay 2 --retry-all-errors \
               -H "$auth_header" -H 'Accept: application/json' \
               "${api_url}/linode/instances?label=${label}&page_size=100" \
-              >"$destination"
+              >"$raw"
+            # The API ignores ?label= and lists every Linode on the account,
+            # so unrelated instances made the deploy refuse to run.
+            jq --arg label "$label" \
+              '.data |= map(select(.label == $label))' "$raw" >"$destination"
+            rm -f "$raw"
           }
 
           resolve_single_instance() {
