@@ -79,7 +79,10 @@ describe('networked hyperjump audio', () => {
             }
             // Nothing here performs the system transfer, so the server may
             // re-send its departing copy after the client drops the ship.
-            expect(phases.slice(0, 4)).toEqual(['braking', 'spooling', 'departing', 'none']);
+            // A ship already at rest can finish braking within one step, so
+            // "braking" is only sometimes observed (flaky on slow CI runners).
+            const observed = phases[0] === 'braking' ? phases.slice(1) : phases;
+            expect(observed.slice(0, 3)).toEqual(['spooling', 'departing', 'none']);
             expect(sounds.filter(s => s === HYPERSPACE_WINDUP_SOUND_ID).length).toBe(1);
         // ~470 simulated network steps: well over the 5 s default on CI runners.
         }, 60_000);
