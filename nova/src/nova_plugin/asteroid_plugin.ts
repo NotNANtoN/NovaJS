@@ -46,6 +46,14 @@ import {
 } from './player_state';
 import { Stat } from './stat';
 import { authorExternalImpulse, ExternalImpulsePlugin } from './external_impulse';
+import { CombatAuthorityComponent } from './combat_resources';
+import {
+    CONQUEST_BASE_MAGNET_RADIUS,
+    CONQUEST_MAGNET_ACCEL,
+    CONQUEST_UPGRADED_MAGNET_RADIUS,
+    conquestOreCreditValue,
+    isConquestMode,
+} from './conquest_config';
 
 /** Drift speed of a freshly spawned asteroid, in engine units per second. */
 const ASTEROID_DRIFT_SPEED = 30;
@@ -388,23 +396,56 @@ const OrePickupSystem = new System({
             return;
         }
         for (const [collectorMovement, playerState, cargoScoop, collectorEntity, shield] of collectors) {
+            const conquest = isConquestMode(playerState);
+            const hasScoopOutfit = Boolean(cargoScoop && cargoScoop.enabled);
+            const magnetRadius = conquest
+                ? (hasScoopOutfit ? CONQUEST_UPGRADED_MAGNET_RADIUS : CONQUEST_BASE_MAGNET_RADIUS)
+                : ORE_MAGNET_RADIUS;
+            const magnetAccel = conquest ? CONQUEST_MAGNET_ACCEL : ORE_MAGNET_ACCEL;
+
             const delta = collectorMovement.position.subtract(movement.position);
             const distance = delta.length;
-            if (distance > ORE_MAGNET_RADIUS) {
+            if (distance > magnetRadius) {
                 continue;
             }
 
             // Magnetic scoop tractor field pulls ore toward the ship
             if (distance > ORE_PICKUP_RADIUS) {
-                if (cargoScoop && cargoScoop.enabled && getFreeSpace(playerState) > 0) {
-                    const pull = delta.normalize().scale(ORE_MAGNET_ACCEL * 0.016);
+                const canPull = conquest || (hasScoopOutfit && getFreeSpace(playerState) > 0);
+                if (canPull) {
+                    const pull = delta.normalize().scale(magnetAccel * 0.016);
                     movement.velocity = movement.velocity.add(pull);
                     const speed = movement.velocity.length;
-                    if (speed > 120) {
-                        movement.velocity = movement.velocity.normalize().scale(120);
+                    const maxPullSpeed = conquest ? 180 : 120;
+                    if (speed > maxPullSpeed) {
+                        movement.velocity = movement.velocity.normalize().scale(maxPullSpeed);
                     }
                 }
                 continue;
+            }
+
+            if (conquest) {
+                const creditYield = conquestOreCreditValue(
+                    ore.commodity,
+                    ore.tons,
+                    hasScoopOutfit,
+                );
+                playerState.credits = Math.max(0, (playerState.credits ?? 0) + creditYield);
+                const authority = collectorEntity.components.get(CombatAuthorityComponent);
+                if (authority && !authority.retired) {
+                    authority.state.credits = playerState.credits;
+                    authority.commit();
+                    authority.project(collectorEntity);
+                }
+                collectorEntity.components.set(BoardingNoticeComponent, {
+                    text: `+${creditYield.toLocaleString()} cr collected (${ore.commodity}) — Wallet: ${playerState.credits.toLocaleString()} cr`,
+                });
+                SoundEvent.emit(emit, {
+                    id: 'nova:150',
+                    position: collectorMovement.position,
+                });
+                entities.delete(selfUuid);
+                return;
             }
 
             // Retail EV Nova rule: collecting floating ore requires a Cargo/Mining Scoop (ModType 31).

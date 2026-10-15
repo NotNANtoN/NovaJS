@@ -22,6 +22,7 @@ import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { GameDataResource } from './game_data_resource';
 import { pickWeighted } from './npc_spawn_plugin';
 import { SystemIdResource } from './system_id_resource';
+import { effectiveAsteroidDensity, isConquestMode } from './conquest_config';
 
 /** How often the belt is topped back up after asteroids are mined out. */
 export const ASTEROID_RESPAWN_INTERVAL_MS = 20_000;
@@ -119,6 +120,8 @@ const AsteroidSpawnSystem = new AsyncSystem({
                 state.disabled = true;
                 return;
             }
+            const hasConquest = players.some(([, pState]) => isConquestMode(pState));
+            density = effectiveAsteroidDensity(systemId, density, hasConquest);
             state.target = asteroidCountForDensity(density);
             if (state.target === 0) {
                 state.disabled = true;
@@ -147,6 +150,14 @@ const AsteroidSpawnSystem = new AsyncSystem({
             return;
         }
 
+        if (players.some(([, pState]) => isConquestMode(pState))) {
+            const conquestTarget = asteroidCountForDensity(
+                effectiveAsteroidDensity(systemId, 0, true),
+            );
+            if (state.target < conquestTarget) {
+                state.target = conquestTarget;
+            }
+        }
         if (asteroids.length >= state.target) {
             return;
         }

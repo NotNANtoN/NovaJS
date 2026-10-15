@@ -41,6 +41,12 @@ import { PlatformResource } from "./platform_plugin";
 import { AppliedDamageEvent } from "./damage_events";
 import { areSystemsSameOrVariants, variantIndexForCatalog, visibleJumpTarget, type SystemLookup } from "./system_variants";
 import { resolveWingJumpTarget } from "./wing";
+import {
+    CONQUEST_SYSTEM_POSITIONS,
+    isConquestMode,
+    isConquestPocketSystem,
+    oppositeConquestSystem,
+} from "./conquest_config";
 export { areSystemsSameOrVariants, type SystemLookup };
 
 export const JUMP_SPOOL_MS = 1_200;
@@ -181,12 +187,18 @@ export interface JumpArrivalGeometry {
 /**
  * Enter on the side facing the source and travel toward the destination
  * system's center. Thus a destination east of the source enters from its west.
+ *
+ * When `departurePosition` is provided, the ship's lateral offset perpendicular
+ * to the jump vector is preserved along the arrival circle so jumping from a
+ * lower/upper point in System A arrives at a corresponding lower/upper point
+ * in System B instead of a single campable coordinate.
  */
 export function calculateJumpArrival(
     source: readonly [number, number],
     destination: readonly [number, number],
     radius = JUMP_ARRIVAL_RADIUS,
     speed = 80,
+    departurePosition?: { x: number; y: number } | readonly [number, number],
 ): JumpArrivalGeometry {
     const delta = new Vector(
         destination[0] - source[0],
@@ -195,7 +207,24 @@ export function calculateJumpArrival(
     const direction = delta.lengthSquared > 0
         ? delta.normalize()
         : new Vector(0, -1);
-    const offset = direction.scale(-Math.max(0, radius));
+    const safeRadius = Math.max(0, radius);
+    let offset = direction.scale(-safeRadius);
+    if (departurePosition && safeRadius > 0) {
+        const depX = Array.isArray(departurePosition)
+            ? departurePosition[0]
+            : (departurePosition as { x: number }).x;
+        const depY = Array.isArray(departurePosition)
+            ? departurePosition[1]
+            : (departurePosition as { y: number }).y;
+        const perp = new Vector(-direction.y, direction.x);
+        const rawLateral = depX * perp.x + depY * perp.y;
+        const maxLateral = safeRadius * 0.85;
+        const lateral = Math.max(-maxLateral, Math.min(maxLateral, rawLateral));
+        const longitudinal = -Math.sqrt(
+            Math.max(0, safeRadius * safeRadius - lateral * lateral),
+        );
+        offset = direction.scale(longitudinal).add(perp.scale(lateral));
+    }
     return {
         position: new Position(offset.x, offset.y),
         velocity: direction.scale(Math.max(0, speed)),
@@ -203,15 +232,19 @@ export function calculateJumpArrival(
     };
 }
 
-
-
 export function isValidNextHop(
-    currentSystem: Pick<SystemData, 'links'> | undefined,
+    currentSystem: Pick<SystemData, 'id' | 'links'> | undefined,
     nextSystem: string | undefined,
     systems?: SystemLookup,
+    conquestMode = false,
 ): nextSystem is string {
     if (!currentSystem?.links || !nextSystem) {
         return false;
+    }
+    if (conquestMode && currentSystem.id
+        && isConquestPocketSystem(currentSystem.id)
+        && oppositeConquestSystem(currentSystem.id) === nextSystem) {
+        return true;
     }
     const targetBare = String(nextSystem).replace(/^.*:/, '');
     return currentSystem.links.some(link => {
@@ -509,6 +542,13 @@ const PlayerJumpControl = new System({
             return;
         }
         let nextSystem = jumpRoute.route[0];
+        if (!nextSystem && isConquestMode(playerState)) {
+            const conquestOpposite = oppositeConquestSystem(systemId);
+            if (conquestOpposite) {
+                nextSystem = conquestOpposite;
+                jumpRoute.route = [conquestOpposite];
+            }
+        }
         if (!nextSystem) {
             emit(JumpRefusedEvent, { reason: 'destination' });
             emit(SoundEvent, { id: 'nova:153' });
@@ -548,7 +588,7 @@ const PlayerJumpControl = new System({
             jumpRoute.route = [visibleTarget, ...jumpRoute.route.slice(1)];
             nextSystem = visibleTarget;
         }
-        if (!isValidNextHop(currentSystem, nextSystem, gameData.data.System)) {
+        if (!isValidNextHop(currentSystem, nextSystem, gameData.data.System, isConquestMode(playerState))) {
             console.warn(`[JUMP REFUSED] Not a valid next hop. Current system: ${systemId} (${currentSystem.name ?? 'unknown'}), links: [${currentSystem.links.join(', ')}], nextSystem: ${nextSystem}`);
             jumpRoute.route = [];
             emit(JumpRefusedEvent, { reason: 'invalid-hop' });
@@ -673,7 +713,7 @@ export const JumpLifecycleSystem = new System({
             return;
         }
         if (source && state.requiresAdjacency
-            && !isValidNextHop(source, state.to, gameData.data.System)) {
+            && !isValidNextHop(source, state.to, gameData.data.System, isConquestMode(playerState))) {
             cancelJumpFlight(entity, movement, physics);
             route.route = [];
             emit(SoundEvent, { id: 'nova:153' });
@@ -697,9 +737,17 @@ export const JumpLifecycleSystem = new System({
             return;
         }
 
+        const sourcePos = isConquestMode(playerState)
+            && CONQUEST_SYSTEM_POSITIONS[state.from]
+            ? CONQUEST_SYSTEM_POSITIONS[state.from]
+            : source.position;
+        const destPos = isConquestMode(playerState)
+            && CONQUEST_SYSTEM_POSITIONS[state.to]
+            ? CONQUEST_SYSTEM_POSITIONS[state.to]
+            : destination.position;
         const direction = new Vector(
-            destination.position[0] - source.position[0],
-            destination.position[1] - source.position[1],
+            destPos[0] - sourcePos[0],
+            destPos[1] - sourcePos[1],
         );
         const travelDirection = direction.lengthSquared > 0
             ? direction.normalize()
@@ -754,10 +802,11 @@ export const JumpLifecycleSystem = new System({
                 }
             }
             const arrival = calculateJumpArrival(
-                source.position,
-                destination.position,
+                sourcePos,
+                destPos,
                 JUMP_ARRIVAL_RADIUS,
                 physics.maxVelocity * JUMP_ARRIVAL_SPEED_MULTIPLIER,
+                movement.position,
             );
             movement.position = arrival.position ? new Position(arrival.position.x, arrival.position.y) : movement.position;
             movement.velocity = arrival.velocity ? new Vector(arrival.velocity.x, arrival.velocity.y) : movement.velocity;

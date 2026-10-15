@@ -13,6 +13,7 @@ export interface StarmapPlayerState {
     exploredSystems?: readonly string[];
     activeMissions?: readonly ActiveMission[];
     missionBits?: readonly boolean[];
+    gameMode?: 'story' | 'sandbox' | 'conquest';
 }
 
 export function consumeInitialCenter(state: StarmapViewState): boolean {

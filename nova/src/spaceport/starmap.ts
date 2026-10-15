@@ -43,6 +43,7 @@ import {
     TerritoryPoint,
 } from "./territory_field";
 import { isSystemVisible, variantIndexFor } from "../nova_plugin/system_variants";
+import { applyConquestPocketSystems } from "../nova_plugin/conquest_config";
 
 export { shortestRoute, shortestRoutes } from "./route_planning";
 
@@ -418,7 +419,9 @@ export class SystemGraph {
     private territorySprite?: PIXI.Sprite;
     private territoryPoints: TerritoryPoint[] = [];
     private readonly graphics: PIXI.Graphics;
+    private readonly baseSystems: Map<string, SystemData>;
     private systems: Map<string, SystemData>;
+    private gameMode?: 'story' | 'sandbox' | 'conquest';
     private links: [SystemData, SystemData][];
     private scale = 1;
     private dragData?: {
@@ -445,7 +448,8 @@ export class SystemGraph {
         private size = MAP_WELL.size,
         missionBits?: ReadonlySet<number> | readonly boolean[]) {
         this.missionBits = missionBits;
-        this.systems = new Map(systems.map(s => [s.id, s]));
+        this.baseSystems = new Map(systems.map(s => [s.id, s]));
+        this.systems = new Map(this.baseSystems);
         this.knownSystems = normalizeKnownSystems(
             exploredSystems, this.currentSystem);
         this.routes = this.computeShortestPaths();
@@ -608,6 +612,26 @@ export class SystemGraph {
         }
     }
 
+    setGameMode(
+        gameMode: 'story' | 'sandbox' | 'conquest' | undefined,
+        redraw = true,
+    ) {
+        if (this.gameMode === gameMode) {
+            return;
+        }
+        this.gameMode = gameMode;
+        const effective = applyConquestPocketSystems(
+            [...this.baseSystems.values()],
+            gameMode,
+        );
+        this.systems = new Map(effective.map(s => [s.id, s]));
+        this.links = [...this.getUniqueLinks()];
+        this.routes = this.computeShortestPaths();
+        if (redraw) {
+            this.draw();
+        }
+    }
+
     get route() {
         return this.wrappedRoute;
     }
@@ -709,6 +733,9 @@ export class SystemGraph {
 
     /** The one copy of each place that exists for the pilot's bits. */
     private isLive(system: SystemData): boolean {
+        if (!this.systems.has(system.id)) {
+            return false;
+        }
         return variantIndexFor(this.systems).isLive(system.id, this.missionBits);
     }
 
@@ -956,6 +983,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             MAP_WELL.size,
             this.playerState?.missionBits,
         );
+        this.systemGraph.setGameMode(this.playerState?.gameMode, false);
         const well = mapWellOrigin();
         this.systemGraph.container.position.set(well.x, well.y);
         this.container.addChild(this.systemGraph.container);
@@ -1085,6 +1113,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             this.playerState.currentSystem = this.systemId;
         }
         const currentSystem = this.currentSystemId();
+        this.systemGraph?.setGameMode(this.playerState?.gameMode, false);
         this.systemGraph?.setCurrentSystem(currentSystem, false);
         // Use the copies: the caller's arrays may be drafts that are revoked
         // while the map is open, and an unreadable bit list would make every

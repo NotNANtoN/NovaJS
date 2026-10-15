@@ -6,6 +6,7 @@ import {
     PlayerState,
     PlayerSnapshotSummary,
 } from '../nova_plugin/player_state';
+import { ensureConquestPocketState } from '../nova_plugin/conquest_config';
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 import type { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { artworkUrl } from './artwork_url';
@@ -435,6 +436,7 @@ export class StartMenu {
                 showEnteringOverlay();
                 this.root.remove();
                 state.gameMode = this.selectedGameMode;
+                ensureConquestPocketState(state);
                 resolvePromise({ playerState: state, ship, continued });
             };
             let showMainMenu: (focusLabel?: string) => void;
@@ -445,6 +447,7 @@ export class StartMenu {
                     previous, currentIsNew, savedAt);
                 const applyNewPilot = () => {
                     state.gameMode = this.selectedGameMode;
+                    ensureConquestPocketState(state);
                     current = state;
                     currentShip = undefined;
                     savedAt = undefined;

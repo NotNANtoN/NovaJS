@@ -45,6 +45,7 @@ import { TargetPlugin } from "./target_plugin";
 import { CloakingPlugin } from "./cloaking_plugin";
 import { WeaponPlugin } from "./weapon_plugin";
 import { StellarDamagePlugin } from "./stellar_damage_plugin";
+import { ConquestModePlugin } from "./conquest_mode";
 
 // Users must add the multiplayer plugin and a display plugin.
 // Users must also add the NovaData resource.
@@ -97,6 +98,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(DerelictPlugin);
         world.addPlugin(NpcInteractionPlugin);
         world.addPlugin(CloakingPlugin);
+        world.addPlugin(ConquestModePlugin);
     }
 };
 
