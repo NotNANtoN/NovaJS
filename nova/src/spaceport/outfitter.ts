@@ -12,7 +12,7 @@ import { Button } from "./button";
 import { ShipData } from "novadatainterface/ShipData";
 import { ItemGrid, ItemTile } from "./item_grid";
 import { Menu } from "./menu";
-import { isPurchaseAvailable } from "./availability";
+import { classifyOutfitCategory, isPurchaseAvailable, OutfitCategory } from "./availability";
 import { Entity } from "nova_ecs/entity";
 import { Bits64 } from "../nova_plugin/contribute";
 import { contributeForPlayer } from "./player_contribute_context";
@@ -52,6 +52,7 @@ export class Outfitter extends Menu<OutfitsState> {
     private refreshPromise?: Promise<void>;
     private combatBusy = false;
     private ncbEntity?: Entity;
+    private selectedCategory: OutfitCategory = 'all';
 
     private readonly outfitDataMap = new Map<string, OutfitData>();
     private text = {
@@ -72,11 +73,20 @@ export class Outfitter extends Menu<OutfitsState> {
 
         this.outfits = new DefaultMap(() => 0);
         const buttons = {
+            catAll: new Button(gameData, "All", 46, { x: -348, y: -176 }),
+            catWeapons: new Button(gameData, "Weapons", 72, { x: -284, y: -176 }),
+            catDefenses: new Button(gameData, "Defenses", 74, { x: -205, y: -176 }),
+            catUpgrades: new Button(gameData, "Upgrades", 76, { x: -124, y: -176 }),
             buy: new Button(gameData, "Buy", 50, { x: -140, y: 126 }),
             sell: new Button(gameData, "Sell", 50, { x: -50, y: 126 }),
             refill: new Button(gameData, "Refill Ammo", 80, { x: 50, y: 126 }),
             done: new Button(gameData, "Done", 50, { x: 145, y: 126 })
         };
+
+        buttons.catAll.click.subscribe(() => this.setCategory('all'));
+        buttons.catWeapons.click.subscribe(() => this.setCategory('weapons'));
+        buttons.catDefenses.click.subscribe(() => this.setCategory('defenses'));
+        buttons.catUpgrades.click.subscribe(() => this.setCategory('upgrades'));
 
         buttons.buy.click.subscribe((event?: any) => {
             const shift = event?.shiftKey;
@@ -220,6 +230,14 @@ export class Outfitter extends Menu<OutfitsState> {
         this.refreshPromise = this.refreshGrid();
     }
 
+    setCategory(category: OutfitCategory) {
+        if (this.selectedCategory === category) {
+            return;
+        }
+        this.selectedCategory = category;
+        this.refreshPromise = this.refreshGrid();
+    }
+
     override async show(input: OutfitsState): Promise<OutfitsState> {
         await this.buildPromise;
         await this.refreshPromise;
@@ -227,6 +245,9 @@ export class Outfitter extends Menu<OutfitsState> {
     }
 
     private async makeOutfitsGrid() {
+        if (!this.planetData) {
+            return new ItemGrid<OutfitData>(this.gameData, []);
+        }
         const ids = (await this.gameData.ids).Outfit;
         let outfits = await Promise.all(ids.map(id =>
             this.gameData.data.Outfit.get(id, 100)));
@@ -243,10 +264,15 @@ export class Outfitter extends Menu<OutfitsState> {
                 )
             );
         }
+        if (this.selectedCategory !== 'all') {
+            outfits = outfits.filter(
+                outfit => classifyOutfitCategory(outfit) === this.selectedCategory,
+            );
+        }
         for (const outfit of outfits) {
             this.outfitDataMap.set(outfit.id, outfit);
             if (outfit.pict) {
-                void this.gameData.textureFromPictAsync(outfit.pict, 50).catch(() => {});
+                void this.gameData.textureFromPictAsync(outfit.pict, 80).catch(() => {});
             }
         }
         outfits.sort((a, b) => b.displayWeight - a.displayWeight);

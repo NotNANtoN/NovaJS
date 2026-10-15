@@ -28,7 +28,7 @@ import {
     createInitialPlayerState,
     PlayerStateComponent,
 } from './player_state';
-import { isPurchaseAvailable } from '../spaceport/availability';
+import { classifyOutfitCategory, isPurchaseAvailable } from '../spaceport/availability';
 import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 
@@ -186,8 +186,9 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(player.components.get(PlayerStateComponent)!.credits).toBe(9_800);
     });
 
-    it('unlocks Federation/Auroran military ships and custom conquest outfits in Conquest mode while hiding zero-cost story items', () => {
-        const earth = { ...getDefaultPlanetData(), id: 'nova:128', techLevel: 10 };
+    it('unlocks Federation/Vell-os ships on Sol and Auroran ships on Aurora while excluding Polaris gear and classifying outfitter categories', () => {
+        const earth = { ...getDefaultPlanetData(), id: 'nova:128', name: 'Earth', techLevel: 10 };
+        const aurora = { ...getDefaultPlanetData(), id: 'nova:382', name: 'Aurora', techLevel: 17 };
         const state = createInitialPlayerState();
         state.gameMode = 'conquest';
 
@@ -200,6 +201,37 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
             availabilityNCB: 'b4000',
             require: [1, 0],
         };
+        const vellosDart = {
+            id: 'nova:173',
+            techLevel: 1,
+            cost: 500_000,
+            displayWeight: 40,
+            buyRandom: 50,
+            availabilityNCB: 'b200',
+        };
+        const auroraCruiser = {
+            id: 'nova:154',
+            techLevel: 17,
+            cost: 2_800_000,
+            displayWeight: 50,
+            buyRandom: 50,
+            availabilityNCB: 'b5000',
+        };
+        const polarisManta = {
+            id: 'nova:161',
+            techLevel: 19,
+            cost: 1_500_000,
+            displayWeight: 50,
+            buyRandom: 50,
+            availabilityNCB: '',
+        };
+        const polarisOrganicShield = {
+            id: 'nova:194',
+            techLevel: 9,
+            price: 600_000,
+            displayWeight: 40,
+            availabilityNCB: '',
+        };
         const hyperthrusters = {
             id: 'conquest:hyperthrusters',
             techLevel: 1,
@@ -207,21 +239,43 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
             displayWeight: 90,
             availabilityNCB: '',
         };
-        const storyToken = {
-            id: 'nova:350',
+        const shieldMatrix = {
+            id: 'conquest:shield_overcharger',
             techLevel: 1,
-            price: 0,
-            displayWeight: 10,
+            price: 45_000,
+            displayWeight: 90,
             availabilityNCB: '',
         };
+        const lightBlaster = {
+            id: 'nova:128',
+            techLevel: 4,
+            price: 5_000,
+            displayWeight: 50,
+            availabilityNCB: '',
+            weapons: { 'nova:128': 1 },
+        };
 
+        // Sol (Earth) stocks Federation + Vell-os, blocks Auroran & Polaris
         expect(isPurchaseAvailable(fedDestroyer, earth, state)).toBeTrue();
-        expect(isPurchaseAvailable(hyperthrusters, earth, state)).toBeTrue();
-        expect(isPurchaseAvailable(storyToken, earth, state)).toBeFalse();
+        expect(isPurchaseAvailable(vellosDart, earth, state)).toBeTrue();
+        expect(isPurchaseAvailable(auroraCruiser, earth, state)).toBeFalse();
+        expect(isPurchaseAvailable(polarisManta, earth, state)).toBeFalse();
 
-        // In Story mode, conquest outfits stay hidden and Fed Destroyer requires NCB/tech
-        state.gameMode = 'story';
-        expect(isPurchaseAvailable(hyperthrusters, earth, state)).toBeFalse();
-        expect(isPurchaseAvailable(fedDestroyer, earth, state)).toBeFalse();
+        // Aurora stocks Auroran, blocks Federation/Vell-os & Polaris
+        expect(isPurchaseAvailable(auroraCruiser, aurora, state)).toBeTrue();
+        expect(isPurchaseAvailable(fedDestroyer, aurora, state)).toBeFalse();
+        expect(isPurchaseAvailable(vellosDart, aurora, state)).toBeFalse();
+        expect(isPurchaseAvailable(polarisManta, aurora, state)).toBeFalse();
+
+        // Outfitter blocks Polaris organic gear, stocks Conquest & faction items
+        expect(isPurchaseAvailable(polarisOrganicShield, earth, state)).toBeFalse();
+        expect(isPurchaseAvailable(polarisOrganicShield, aurora, state)).toBeFalse();
+        expect(isPurchaseAvailable(hyperthrusters, earth, state)).toBeTrue();
+        expect(isPurchaseAvailable(hyperthrusters, aurora, state)).toBeTrue();
+
+        // Outfitter category classification
+        expect(classifyOutfitCategory(lightBlaster)).toBe('weapons');
+        expect(classifyOutfitCategory(shieldMatrix)).toBe('defenses');
+        expect(classifyOutfitCategory(hyperthrusters)).toBe('upgrades');
     });
 });

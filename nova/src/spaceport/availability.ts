@@ -16,9 +16,179 @@ type PurchaseData = Pick<ShipData | OutfitData, "techLevel" | "availabilityNCB">
         readonly buyRandom?: number;
         readonly flags3?: number;
         readonly require?: readonly number[];
+        readonly weapons?: Readonly<Record<string, number>>;
+        readonly cargoScoop?: boolean;
+        readonly cloak?: boolean;
+        readonly repairSystem?: boolean;
+        readonly physics?: {
+            readonly freeMass?: number;
+            readonly freeCargo?: number;
+            readonly shield?: number;
+            readonly shieldRecharge?: number;
+            readonly armor?: number;
+            readonly armorRecharge?: number;
+            readonly speed?: number;
+            readonly acceleration?: number;
+            readonly turnRate?: number;
+            readonly energy?: number;
+            readonly energyRecharge?: number;
+        };
     };
 
-function isConquestPurchaseAvailable(item: PurchaseData): boolean {
+export type OutfitCategory = 'all' | 'weapons' | 'defenses' | 'upgrades';
+
+const WEAPON_OR_AMMO_OUTFIT_NUMS = new Set<number>([
+    128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141,
+    142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155,
+    156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169,
+    170, 171, 172, 173, 174, 175, 176, 215, 216, 217, 218, 219, 220, 254,
+    255, 270, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 298, 299,
+    328, 329, 330, 345, 346, 435, 436, 438,
+]);
+
+const DEFENSE_OUTFIT_NUMS = new Set<number>([
+    180, 181, 182, 183, 193, 194, 195, 196, 211, 234, 238, 239, 240, 241,
+    242, 243, 244, 245, 246, 247, 248, 250, 262, 268, 269, 347, 437,
+]);
+
+export function classifyOutfitCategory(item: PurchaseData): Exclude<OutfitCategory, 'all'> {
+    const id = item.id ?? '';
+    if (id === 'conquest:shield_overcharger' || id === 'conquest:hull_nanites') {
+        return 'defenses';
+    }
+    if (id.startsWith('conquest:')) {
+        return 'upgrades';
+    }
+    if (item.weapons && Object.keys(item.weapons).length > 0) {
+        return 'weapons';
+    }
+    const bareNum = Number(id.replace(/^.*:/, ''));
+    if (Number.isFinite(bareNum)) {
+        if (WEAPON_OR_AMMO_OUTFIT_NUMS.has(bareNum)) {
+            return 'weapons';
+        }
+        if (DEFENSE_OUTFIT_NUMS.has(bareNum)) {
+            return 'defenses';
+        }
+    }
+    const phys = item.physics;
+    if (item.cloak || item.repairSystem
+        || (phys?.shield ?? 0) > 0 || (phys?.shieldRecharge ?? 0) > 0
+        || (phys?.armor ?? 0) > 0 || (phys?.armorRecharge ?? 0) > 0) {
+        return 'defenses';
+    }
+    return 'upgrades';
+}
+
+/**
+ * Ships sold on Earth (Sol, `nova:128`) in Galactic Conquest mode:
+ * Civilian starters + Federation Military + Vell-os psychic hulls.
+ */
+const CONQUEST_SOL_SHIPS = new Set<number>([
+    // Civilian starters & haulers
+    128, // Shuttle
+    129, // Heavy Shuttle
+    131, // Leviathan
+    132, // Pegasus
+    133, // Starbridge
+    135, // Lightning
+    136, // Terrapin
+    137, // Valkyrie
+    165, // Mod Starbridge
+    167, // Viper
+    // Federation Military
+    140, // IDA Frigate
+    141, // Fed Destroyer
+    142, // Fed Patrol Boat
+    143, // Fed Carrier
+    144, // Fed Viper
+    145, // Fed Anaconda
+    172, // RAGE Gunboat
+    187, // Fed Scout Ship
+    // Vell-os
+    173, // Vell-os Dart
+    174, // Vell-os Arrow
+    175, // Vell-os Javelin
+]);
+
+/**
+ * Ships sold on Aurora (`nova:315` / Auroran spaceports) in Galactic Conquest:
+ * Civilian starters + Auroran Empire hulls.
+ */
+const CONQUEST_AURORA_SHIPS = new Set<number>([
+    // Civilian starters
+    128, // Shuttle
+    129, // Heavy Shuttle
+    133, // Starbridge
+    136, // Terrapin
+    // Auroran Empire
+    138, // Argosy
+    139, // Enterprise
+    152, // Abomination
+    153, // Aurora Carrier
+    154, // Aurora Cruiser
+    155, // Firebird
+    156, // Phoenix
+    157, // Thunderhead
+]);
+
+/**
+ * Shared civilian/mining outfits stocked at both Sol and Aurora in Conquest mode.
+ */
+const CONQUEST_SHARED_OUTFITS = new Set<number>([
+    128, 129, 130, 131, 132, 133, // Light/Medium/Heavy/Quad Blasters & Turrets
+    134, 135, 136, 137,           // IR & Radar Missile Launchers + Ammo
+    177, 179, 228, 256,           // Fusion/Fission Reactors, Solar Panels, Battery Pack
+    180, 182,                     // Carbon Fiber, Titanium Lattice
+    184, 185, 186, 187, 188,      // Sensors, IFF, Auto-recharger, Escape Pod
+    189, 190, 191, 192,           // Cargo/Mass Expansion & Retool
+    193, 195,                     // Shield Recharger & Shield Buffer
+    197, 199, 201, 202,           // Afterburner, Overdrive, Alluvial Dampener, Horizontal Booster
+    203, 212, 227,                // Sensor Boost, Marine Platoon
+    238, 239, 262,                // Civilian Jammers, Ion Dissipator
+    270, 271,                     // Asteroid Mining Laser, Asteroid Scoop
+    437,                          // Repair Droids
+]);
+
+const CONQUEST_SOL_EXCLUSIVE_OUTFITS = new Set<number>([
+    142, 143, 144,                // Raven Rocket Pod, Rocket, Rocket Turret
+    145, 146,                     // Stellar Grenade Launcher & Grenade
+    157, 158, 159, 160,           // Viper Bay & Anaconda Bay
+    165, 166,                     // Thunderhead Bay
+    175, 176,                     // EMP Torpedo Tube & Torpedo
+    235,                          // Matter/Antimatter Reactor
+    240, 241,                     // Military IR & Radar Jammers
+]);
+
+const CONQUEST_AURORA_EXCLUSIVE_OUTFITS = new Set<number>([
+    149, 150, 216,                // Fusion Pulse Cannon, Turret & Battery
+    161, 162, 163, 164,           // Firebird Bay & Phoenix Bay
+    169, 170, 215,                // Hail Chaingun, Ammo, Storm Chaingun
+    171, 172, 173, 174,           // 100mm / 150mm / 200mm Railguns
+    181,                          // Matrix Steel
+    242, 243,                     // Auroran IR & Radar Jammers
+]);
+
+function isAuroraPlanet(planet: PlanetData): boolean {
+    const bareId = Number((planet.id ?? '').replace(/^.*:/, ''));
+    const name = (planet.name ?? '').toLowerCase();
+    // In retail Nova_Data, Earth is spöb 128 (Sol); Aurora is in system 315.
+    if (bareId === 128 || name === 'earth' || name.includes('luna')) {
+        return false;
+    }
+    if (name.includes('aurora') || (planet.techLevel ?? 0) === 17
+        || (planet.specialTech ?? []).includes(17)
+        || (planet.specialTech ?? []).includes(10)
+        || (planet.specialTech ?? []).includes(11)) {
+        return true;
+    }
+    return bareId >= 300;
+}
+
+function isConquestPurchaseAvailable(
+    item: PurchaseData,
+    planet: PlanetData,
+): boolean {
     const id = item.id ?? '';
     if (id.startsWith('conquest:')) {
         return true;
@@ -29,25 +199,32 @@ function isConquestPurchaseAvailable(item: PurchaseData): boolean {
     if (item.displayWeight !== undefined && item.displayWeight <= 0) {
         return false;
     }
-    // Distinguish Ships (`cost` field) from Outfits (`price` field)
     const isShip = 'cost' in item || item.buyRandom !== undefined;
     const bareNum = Number(id.replace(/^.*:/, ''));
+    const onAurora = isAuroraPlanet(planet);
+
     if (isShip) {
-        // Only stock canonical base hulls (128..187) with techLevel <= 20
-        // (unlocks all Civilian, Federation Tech 14, Piracy Tech 16, Auroran
-        // Tech 17, and Polaris/Heavy Tech 18-20 ships without story rank locks).
-        if (Number.isFinite(bareNum) && bareNum > 187) {
-            return false;
+        if (!Number.isFinite(bareNum)) {
+            return true;
         }
-        return item.techLevel >= 0 && item.techLevel <= 20;
+        return onAurora
+            ? CONQUEST_AURORA_SHIPS.has(bareNum)
+            : CONQUEST_SOL_SHIPS.has(bareNum);
     }
-    // For Outfits: hide 0-cost story/token items, star maps (nova:215), and
-    // unbuyable alien/mission-only items (techLevel > 25).
+
     const price = item.price ?? 0;
-    if (price <= 0 || id === 'nova:215') {
+    if (price <= 0) {
         return false;
     }
-    return item.techLevel >= 0 && item.techLevel <= 25;
+    if (!Number.isFinite(bareNum)) {
+        return item.techLevel >= 0 && item.techLevel <= 15;
+    }
+    if (CONQUEST_SHARED_OUTFITS.has(bareNum)) {
+        return true;
+    }
+    return onAurora
+        ? CONQUEST_AURORA_EXCLUSIVE_OUTFITS.has(bareNum)
+        : CONQUEST_SOL_EXCLUSIVE_OUTFITS.has(bareNum);
 }
 
 /**
@@ -166,7 +343,7 @@ export function isPurchaseAvailable(
         && playerStateOrMissionBits.gameMode === 'conquest',
     );
     if (isConquest) {
-        return isConquestPurchaseAvailable(item);
+        return isConquestPurchaseAvailable(item, planet);
     }
     if ((item.id ?? '').startsWith('conquest:')) {
         return false;
@@ -242,7 +419,7 @@ export function isPurchaseUnlocked(
         && playerStateOrMissionBits.gameMode === 'conquest',
     );
     if (isConquest) {
-        return isConquestPurchaseAvailable(item);
+        return isConquestPurchaseAvailable(item, planet);
     }
     if ((item.id ?? '').startsWith('conquest:')) {
         return false;

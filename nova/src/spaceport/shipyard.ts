@@ -140,6 +140,9 @@ export class Shipyard extends Menu<Entity> {
     }
 
     private async makeShipsGrid() {
+        if (!this.planetData) {
+            return new ItemGrid<ShipData>(this.gameData, []);
+        }
         const ids = (await this.gameData.ids).Ship;
         let ships = await Promise.all(ids.map(id =>
             this.gameData.data.Ship.get(id, 100)));
@@ -178,9 +181,8 @@ export class Shipyard extends Menu<Entity> {
         }
         ships.sort((a, b) => b.displayWeight - a.displayWeight);
         for (const ship of ships) {
-            const pictId = shipyardInfoPictId(ship);
-            if (pictId) {
-                void this.gameData.textureFromPictAsync(pictId, 50).catch(() => {});
+            if (ship.pict) {
+                void this.gameData.textureFromPictAsync(ship.pict, 90).catch(() => {});
             }
         }
         const itemGrid = new ItemGrid(this.gameData, ships);
@@ -242,6 +244,10 @@ export class Shipyard extends Menu<Entity> {
 
         if (shipTile.largePict) {
             this.pictContainer.addChild(shipTile.largePict);
+        }
+        const infoPictId = shipyardInfoPictId(shipTile.item);
+        if (infoPictId) {
+            void this.gameData.textureFromPictAsync(infoPictId, 20).catch(() => {});
         }
 
         // Set Description
