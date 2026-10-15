@@ -14,6 +14,7 @@ import { TargetComponent } from "../nova_plugin/target_component";
 import { DisabledComponent } from "../nova_plugin/disabled_plugin";
 import { GovtComponent } from "../nova_plugin/npc_components";
 import { PlayerStateComponent } from "../nova_plugin/player_state";
+import { areWingmates } from "../nova_plugin/wing";
 import { HiredEscortComponent } from "../nova_plugin/escort_plugin";
 import { GovernmentRelationResource, relation } from "../nova_plugin/govt_relations";
 import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin";
@@ -316,8 +317,9 @@ const DrawTargetCornersSystem = new System({
         Optional(StatusBarResource),
         Optional(GovernmentRelationResource),
         Optional(GovtComponent),
+        Optional(PlayerStateComponent),
     ] as const,
-    step({ target }, time, targetCorners, entities, _playerShip, playerUuid, runQuery, playerMovement, statusBar, govts, playerGovt) {
+    step({ target }, time, targetCorners, entities, _playerShip, playerUuid, runQuery, playerMovement, statusBar, govts, playerGovt, playerState) {
         if (!target) {
             targetCorners.visible = false;
             targetCorners.targetUuid = undefined;
@@ -336,8 +338,14 @@ const DrawTargetCornersSystem = new System({
         const targetComponents = runQuery(TargetEntityQuery, target)[0];
         if (targetComponents) {
             const [disabled, targetGovt, targetLock, targetPlayer, targetEscort] = targetComponents;
+            const isWingmate = areWingmates(playerState, targetPlayer);
             if (disabled) {
                 targetCorners.setStyle("disabled");
+            } else if (isWingmate) {
+                targetCorners.setStyle("friendly");
+                callsign = targetPlayer?.pilotName
+                    ? `WING CMDR ${targetPlayer.pilotName}`
+                    : `WINGMATE`;
             } else if (targetLock?.target === playerUuid) {
                 targetCorners.setStyle("hostile");
                 if (targetPlayer?.pilotName) {

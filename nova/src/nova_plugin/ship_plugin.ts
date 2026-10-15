@@ -22,12 +22,8 @@ import { TargetComponent } from './target_component';
 import { System } from 'nova_ecs/system';
 import { PLANET_BUSTER, shipHitLayer } from './hit_types';
 
-export const ShipType = t.type({
-    id: t.string // Not a UUID. A nova id.
-});
-export type ShipType = t.TypeOf<typeof ShipType>;
-
-export const ShipComponent = new Component<ShipType>('Ship');
+import { ShipComponent, ShipType } from './ship_component';
+export { ShipComponent, ShipType };
 
 export const ShipDataComponent = new Component<ShipData>('ShipData');
 

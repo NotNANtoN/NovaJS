@@ -1,4 +1,4 @@
-import { NovaDataType } from "./NovaDataInterface";
+import { ALL_NOVA_DATA_TYPES, NovaDataType } from "./NovaDataInterface";
 
 export type NovaIDs = {
     [index in Exclude<NovaDataType, NovaDataType.Mission | NovaDataType.Govt
@@ -17,34 +17,9 @@ export type NovaIDs = {
 }
 
 export function getDefaultNovaIDs(): NovaIDs {
-    return {
-        Explosion: [],
-        Outfit: [],
-        Pict: [],
-        PictImage: [],
-        Cicn: [],
-        CicnImage: [],
-        Dude: [],
-        Planet: [],
-        Ship: [],
-        SpriteSheet: [],
-        SpriteSheetFrames: [],
-        SpriteSheetImage: [],
-        StatusBar: [],
-        System: [],
-        Mission: [],
-        TargetCorners: [],
-        Weapon: [],
-        SoundFile: [],
-        Govt: [],
-        Asteroid: [],
-        Nebula: [],
-        StringList: [],
-        Junk: [],
-        Pers: [],
-        Cron: [],
-        Rank: [],
-        Oops: [],
-        Char: [],
+    const ids = {} as Record<NovaDataType, Array<string>>;
+    for (const type of ALL_NOVA_DATA_TYPES) {
+        ids[type] = [];
     }
+    return ids;
 }

@@ -26,6 +26,67 @@ export function plainSnapshot<T>(value: T): T {
     return value;
 }
 
+/**
+ * Unwraps any top-level or nested Immer draft proxies in `value` while
+ * leaving non-draft class instances (such as PIXI display objects) intact.
+ */
+export function unwrapDraftsDeep<T>(value: T, seen = new WeakSet<object>()): T {
+    if (value === undefined || value === null || typeof value !== 'object') {
+        return value;
+    }
+    const recovered = recoverDraft(value);
+    if (recovered !== undefined) {
+        return clonePlainValue(recovered);
+    }
+    if (seen.has(value as object)) {
+        return value;
+    }
+    seen.add(value as object);
+    if (value instanceof Map) {
+        for (const [k, v] of value.entries()) {
+            const unwrapped = unwrapDraftsDeep(v, seen);
+            if (unwrapped !== v) {
+                value.set(k, unwrapped);
+            }
+        }
+        return value;
+    }
+    if (value instanceof Set) {
+        const items = [...value.values()];
+        let changed = false;
+        const next = items.map(item => {
+            const unwrapped = unwrapDraftsDeep(item, seen);
+            if (unwrapped !== item) changed = true;
+            return unwrapped;
+        });
+        if (changed) {
+            value.clear();
+            for (const item of next) value.add(item);
+        }
+        return value;
+    }
+    if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+            const unwrapped = unwrapDraftsDeep(value[i], seen);
+            if (unwrapped !== value[i]) {
+                value[i] = unwrapped;
+            }
+        }
+        return value;
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto === null || proto === Object.prototype) {
+        const record = value as Record<string, unknown>;
+        for (const [k, v] of Object.entries(record)) {
+            const unwrapped = unwrapDraftsDeep(v, seen);
+            if (unwrapped !== v) {
+                record[k] = unwrapped;
+            }
+        }
+    }
+    return value;
+}
+
 function recoverDraft<T>(value: T): T | undefined {
     try {
         if (isDraft(value)) {

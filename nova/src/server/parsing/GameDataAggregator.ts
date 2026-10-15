@@ -1,35 +1,17 @@
 import { GameDataInterface, PreloadData } from "novadatainterface/GameDataInterface";
-import { NovaDataInterface, NovaDataInterfaceWithMission, NovaDataType } from "novadatainterface/NovaDataInterface";
+import {
+    ALL_NOVA_DATA_TYPES,
+    NovaDataInterface,
+    NovaDataInterfaceWithMission,
+    NovaDataType,
+    NovaDataTypeMap,
+    PRELOAD_NOVA_DATA_TYPES,
+} from "novadatainterface/NovaDataInterface";
 import { Gettable, GettableData } from "novadatainterface/Gettable";
 import { BaseData } from "novadatainterface/BaseData";
-import { DudeData } from "novadatainterface/DudeData";
-import { ShipData } from "novadatainterface/ShipData";
-import { OutfitData } from "novadatainterface/OutfitData";
-import { WeaponData } from "novadatainterface/WeaponData";
-import { PictData } from "novadatainterface/PictData";
-import { PlanetData } from "novadatainterface/PlanetData";
-import { MissionData } from "novadatainterface/MissionData";
-import { SystemData } from "novadatainterface/SystemData";
-import { TargetCornersData } from "novadatainterface/TargetCornersData";
-import { SpriteSheetData, SpriteSheetImageData, SpriteSheetFramesData } from "novadatainterface/SpriteSheetData";
-import { StatusBarData } from "novadatainterface/StatusBarData";
-import { ExplosionData } from "novadatainterface/ExplosionData";
-import { AsteroidData } from "novadatainterface/AsteroidData";
-import { NebulaData } from "novadatainterface/NebulaData";
-import { StringListData } from "novadatainterface/StringListData";
-import { GovtData } from "novadatainterface/GovtData";
-import { PictImageData } from "novadatainterface/PictImage";
+import { SpriteSheetFramesData } from "novadatainterface/SpriteSheetData";
 import { getDefaultNovaIDs, NovaIDs } from "novadatainterface/NovaIDs";
 import { Defaults } from "novadatainterface/Defaults";
-import { CicnImageData } from "novadatainterface/CicnImage";
-import { CicnData } from "novadatainterface/CicnData";
-import { SoundFile } from "novadatainterface/SoundFile";
-import { JunkData } from "novadatainterface/JunkData";
-import { PersData } from "novadatainterface/PersData";
-import { CronData } from "novadatainterface/CronData";
-import { RankData } from "novadatainterface/RankData";
-import { OopsData } from "novadatainterface/OopsData";
-import { CharData } from "novadatainterface/CharData";
 
 /**
  * Combines multiple GameDataInterface instances into a single GameDataInterface
@@ -46,38 +28,12 @@ class GameDataAggregator implements GameDataInterface {
         this.dataSources = dataSources;
         this.warningReporter = warningReporter;
 
-        // Is there a better way?
-        this.data = {
-            Ship: this.makeAggregator<ShipData>(NovaDataType.Ship),
-            Outfit: this.makeAggregator<OutfitData>(NovaDataType.Outfit),
-            Weapon: this.makeAggregator<WeaponData>(NovaDataType.Weapon),
-            Pict: this.makeAggregator<PictData>(NovaDataType.Pict),
-            PictImage: this.makeAggregator<PictImageData>(NovaDataType.PictImage),
-            Cicn: this.makeAggregator<CicnData>(NovaDataType.Cicn),
-            CicnImage: this.makeAggregator<CicnImageData>(NovaDataType.CicnImage),
-            Dude: this.makeAggregator<DudeData>(NovaDataType.Dude),
-            Planet: this.makeAggregator<PlanetData>(NovaDataType.Planet),
-            System: this.makeAggregator<SystemData>(NovaDataType.System),
-            Mission: this.makeAggregator<MissionData>(NovaDataType.Mission),
-            TargetCorners: this.makeAggregator<TargetCornersData>(NovaDataType.TargetCorners),
-            SpriteSheet: this.makeAggregator<SpriteSheetData>(NovaDataType.SpriteSheet),
-            SpriteSheetImage: this.makeAggregator<SpriteSheetImageData>(NovaDataType.SpriteSheetImage),
-            SpriteSheetFrames: this.makeAggregator<SpriteSheetFramesData>(NovaDataType.SpriteSheetFrames),
-            StatusBar: this.makeAggregator<StatusBarData>(NovaDataType.StatusBar),
-            Explosion: this.makeAggregator<ExplosionData>(NovaDataType.Explosion),
-            Govt: this.makeAggregator<GovtData>(NovaDataType.Govt),
-            Asteroid: this.makeAggregator<AsteroidData>(NovaDataType.Asteroid),
-            Nebula: this.makeAggregator<NebulaData>(NovaDataType.Nebula),
-            StringList: this.makeAggregator<StringListData>(
-                NovaDataType.StringList),
-            Junk: this.makeAggregator<JunkData>(NovaDataType.Junk),
-            Pers: this.makeAggregator<PersData>(NovaDataType.Pers),
-            Cron: this.makeAggregator<CronData>(NovaDataType.Cron),
-            Rank: this.makeAggregator<RankData>(NovaDataType.Rank),
-            Oops: this.makeAggregator<OopsData>(NovaDataType.Oops),
-            Char: this.makeAggregator<CharData>(NovaDataType.Char),
-            SoundFile: this.makeAggregator<SoundFile>(NovaDataType.SoundFile),
-        };
+        const aggregated = {} as { [K in NovaDataType]: Gettable<NovaDataTypeMap[K]> };
+        for (const dataType of ALL_NOVA_DATA_TYPES) {
+            (aggregated as Record<NovaDataType, Gettable<unknown>>)[dataType] =
+                this.makeAggregator(dataType);
+        }
+        this.data = aggregated;
 
         this.ids = this.getAllIDs();
 
@@ -153,23 +109,10 @@ class GameDataAggregator implements GameDataInterface {
             }
         }
 
-        preloadData.Outfit = await this.preloadResource(NovaDataType.Outfit);
-        preloadData.Ship = await this.preloadResource(NovaDataType.Ship);
-        preloadData.System = await this.preloadResource(NovaDataType.System);
-        preloadData.Planet = await this.preloadResource(NovaDataType.Planet);
-        preloadData.Govt = await this.preloadResource(NovaDataType.Govt);
-        preloadData.Weapon = await this.preloadResource(NovaDataType.Weapon);
-        preloadData.Mission = await this.preloadResource(NovaDataType.Mission);
-        preloadData.StringList = await this.preloadResource(NovaDataType.StringList);
-        preloadData.Junk = await this.preloadResource(NovaDataType.Junk);
-        preloadData.Pers = await this.preloadResource(NovaDataType.Pers);
-        preloadData.Cron = await this.preloadResource(NovaDataType.Cron);
-        preloadData.Rank = await this.preloadResource(NovaDataType.Rank);
-        preloadData.Oops = await this.preloadResource(NovaDataType.Oops);
-        preloadData.Char = await this.preloadResource(NovaDataType.Char);
-        preloadData.Explosion = await this.preloadResource(NovaDataType.Explosion);
-        preloadData.SpriteSheetFrames = await this.preloadResource(NovaDataType.SpriteSheetFrames);
-        preloadData.TargetCorners = await this.preloadResource(NovaDataType.TargetCorners);
+        for (const dataType of PRELOAD_NOVA_DATA_TYPES) {
+            (preloadData as Record<NovaDataType, unknown>)[dataType] =
+                await this.preloadResource(dataType);
+        }
         return preloadData;
     }
 

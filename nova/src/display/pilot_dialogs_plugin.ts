@@ -141,7 +141,7 @@ export const CommsSystem = new AsyncSystem({
                 peerUuid: multiplayer.owner,
                 pilotName,
                 shipName: shipData.name,
-            }, world);
+            }, world, hailed);
             playerChatDialog.container.position.set(screenSize.x / 2, screenSize.y / 2);
             await playerChatDialog.show(entity);
             return;

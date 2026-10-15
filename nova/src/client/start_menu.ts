@@ -25,14 +25,17 @@ import {
     nextLogoFrame,
 } from './menu_logo_timing';
 import {
+    GAME_MODE_OPTIONS,
     MenuRolloverEvent,
     MenuRolloverState,
+    NovaGameMode,
     PilotStatBlock,
     PilotTargetPictureCache,
     RetailMenuAction,
     buildPilotStatBlock,
     menuRolloverFrame,
     nextMenuRolloverState,
+    normalizeGameMode,
     requestPilotTargetPicture,
 } from './start_menu_model';
 
@@ -349,6 +352,11 @@ export class StartMenu {
     private dialogs: RetailMenuDialogs | undefined;
     private dialogCleanup: (() => void) | undefined;
     private menuRenderVersion = 0;
+    private selectedGameMode: NovaGameMode = normalizeGameMode(
+        typeof localStorage !== 'undefined'
+            ? localStorage.getItem('novaGameMode')
+            : undefined,
+    );
     private readonly targetPictImages =
         new PilotTargetPictureCache<HTMLImageElement>();
     private readonly resizeScene = () => {
@@ -426,6 +434,7 @@ export class StartMenu {
                 window.removeEventListener('resize', this.resizeScene);
                 showEnteringOverlay();
                 this.root.remove();
+                state.gameMode = this.selectedGameMode;
                 resolvePromise({ playerState: state, ship, continued });
             };
             let showMainMenu: (focusLabel?: string) => void;
@@ -435,6 +444,7 @@ export class StartMenu {
                 const archive = shouldArchivePilot(
                     previous, currentIsNew, savedAt);
                 const applyNewPilot = () => {
+                    state.gameMode = this.selectedGameMode;
                     current = state;
                     currentShip = undefined;
                     savedAt = undefined;
@@ -727,6 +737,7 @@ export class StartMenu {
                 }
                 this.content.appendChild(button);
             }
+            this.content.appendChild(this.makeGameModeSelectorElement(true, existing));
             if (quarantineNotice) {
                 const notice = document.createElement('p');
                 notice.dataset.pilotQuarantine = '';
@@ -854,6 +865,7 @@ export class StartMenu {
                 actions.appendChild(button);
             }
             fallback.appendChild(actions);
+            fallback.appendChild(this.makeGameModeSelectorElement(false, existing));
             this.content.appendChild(fallback);
         }
         if (focusLabel) {
@@ -864,6 +876,63 @@ export class StartMenu {
                 button?.focus();
             });
         }
+    }
+
+    private makeGameModeSelectorElement(
+        retailLayout: boolean,
+        existing: PlayerState | undefined,
+    ): HTMLElement {
+        if (existing?.gameMode) {
+            this.selectedGameMode = normalizeGameMode(existing.gameMode);
+        }
+        const wrapper = document.createElement('div');
+        wrapper.dataset.gameModeSelector = '';
+        wrapper.style.cssText = retailLayout
+            ? `
+              position: absolute; left: 336px; top: 582px; width: 352px;
+              display: flex; align-items: center; justify-content: center;
+              gap: 6px; font: 10px/12px Geneva, Arial, sans-serif;
+              color: #d7b296;
+            `
+            : `
+              margin-top: 16px; padding-top: 12px;
+              border-top: 1px solid rgba(180, 120, 90, 0.25);
+              display: flex; align-items: center; justify-content: center;
+              gap: 8px; font: 12px/14px Geneva, Arial, sans-serif;
+              color: #e6c3a0;
+            `;
+        const label = document.createElement('label');
+        label.textContent = 'Realm / Mode:';
+        const select = document.createElement('select');
+        select.setAttribute('aria-label', 'Game mode selector');
+        select.style.cssText = `
+          background: #140808; color: #f4e2d0;
+          border: 1px solid #783028; border-radius: 2px;
+          padding: 2px 6px; font: inherit; cursor: pointer;
+        `;
+        for (const option of GAME_MODE_OPTIONS) {
+            const opt = document.createElement('option');
+            opt.value = option.id;
+            opt.textContent = option.label;
+            opt.title = option.description;
+            opt.selected = option.id === this.selectedGameMode;
+            select.appendChild(opt);
+        }
+        select.addEventListener('change', () => {
+            this.selectedGameMode = normalizeGameMode(select.value);
+            if (existing) {
+                existing.gameMode = this.selectedGameMode;
+            }
+            try {
+                if (typeof localStorage !== 'undefined') {
+                    localStorage.setItem('novaGameMode', this.selectedGameMode);
+                }
+            } catch {
+                // Ignore storage quota / privacy mode errors
+            }
+        });
+        wrapper.append(label, select);
+        return wrapper;
     }
 
     private stopLogoAnimation(removeArtwork = false) {

@@ -111,7 +111,14 @@ export const ChatMessageEntry = t.intersection([
         time: t.number,
     }),
     t.partial({
-        kind: t.union([t.literal('chat'), t.literal('sos'), t.literal('coords'), t.literal('security'), t.literal('chatter')]),
+        kind: t.union([
+            t.literal('chat'),
+            t.literal('sos'),
+            t.literal('coords'),
+            t.literal('security'),
+            t.literal('chatter'),
+            t.literal('wing'),
+        ]),
         system: t.string,
         coords: t.tuple([t.number, t.number]),
     }),
@@ -386,7 +393,7 @@ export interface ReplicationMergeContext {
     readonly owner: string;
 }
 
-export interface ReplicationPolicy<T = unknown> {
+export interface ReplicationPolicy<T = unknown, Intent = unknown> {
     readonly codec: t.Type<T, unknown, unknown>;
     readonly authority: ComponentAuthority;
     readonly merge?: (
@@ -394,6 +401,8 @@ export interface ReplicationPolicy<T = unknown> {
         remote: T,
         context: ReplicationMergeContext,
     ) => T;
+    readonly captureClientIntent?: (value: T) => Intent | undefined;
+    readonly restoreClientIntent?: (value: T, intent: Intent) => void;
     readonly acceptInitialOwnerState?: boolean;
     readonly allowOwnerRemoval?: boolean;
     readonly relayOwnerChanges?: boolean;
@@ -401,18 +410,20 @@ export interface ReplicationPolicy<T = unknown> {
 }
 
 export class ReplicationPolicyRegistry {
-    private readonly policies = new Map<string, ReplicationPolicy<any>>();
+    private readonly policies = new Map<string, ReplicationPolicy<any, any>>();
+    private readonly components = new Map<string, Component<any>>();
 
-    register<T>(
+    register<T, Intent = unknown>(
         component: Component<T>,
-        policy: ReplicationPolicy<T>,
+        policy: ReplicationPolicy<T, Intent>,
     ): this {
+        this.components.set(component.name, component);
         return this.registerName(component.name, policy);
     }
 
-    registerName<T>(
+    registerName<T, Intent = unknown>(
         componentName: string,
-        policy: ReplicationPolicy<T>,
+        policy: ReplicationPolicy<T, Intent>,
     ): this {
         this.policies.set(componentName, policy);
         return this;
@@ -420,6 +431,18 @@ export class ReplicationPolicyRegistry {
 
     get(componentName: string): ReplicationPolicy | undefined {
         return this.policies.get(componentName);
+    }
+
+    getComponent(componentName: string): Component<unknown> | undefined {
+        return this.components.get(componentName);
+    }
+
+    entriesWithIntent(): Array<readonly [string, ReplicationPolicy<any, any>]> {
+        return [...this.policies.entries()].filter(
+            ([, policy]) =>
+                policy.captureClientIntent !== undefined
+                && policy.restoreClientIntent !== undefined,
+        );
     }
 }
 
@@ -433,117 +456,68 @@ replicationPolicies.register(RemoteMovementPresentationComponent, {
     authority: 'local-only',
 });
 
-const WEAPONS_STATE_COMPONENT_NAME = 'WeaponsStateComponent';
-type WeaponStateLike = {
-    firing: boolean;
-    [key: string]: unknown;
-};
-
-function mergeWeaponStateIntent(
-    local: unknown,
-    remote: unknown,
-    context: ReplicationMergeContext,
-): unknown {
-    if (!(local instanceof Map) || !(remote instanceof Map)) {
-        return remote;
+function findEntityComponentByName(
+    entity: Entity,
+    componentName: string,
+): Component<unknown> | undefined {
+    const registered = replicationPolicies.getComponent(componentName);
+    if (registered && entity.components.has(registered)) {
+        return registered;
     }
-
-    if (context.peerIsAdmin && context.owner === context.localUuid) {
-        // The local owner keeps its live trigger edge while accepting all
-        // server-authored weapon inventory/result fields.
-        const merged = new Map(remote);
-        for (const [weaponId, localState] of local) {
-            const remoteState = merged.get(weaponId) as
-                WeaponStateLike | undefined;
-            if (remoteState && typeof remoteState === 'object'
-                && typeof (localState as WeaponStateLike).firing === 'boolean') {
-                merged.set(weaponId, {
-                    ...remoteState,
-                    firing: (localState as WeaponStateLike).firing,
-                });
-            }
-        }
-        return merged;
-    }
-
-    if (context.localIsAdmin && !context.peerIsAdmin
-        && context.source === context.owner) {
-        // A client may only update firing on weapons the server already knows.
-        // Counts, targets, additions, and other result fields remain server
-        // authored even if a malicious/old client sends a complete component.
-        const merged = new Map(local);
-        for (const [weaponId, remoteState] of remote) {
-            const localState = merged.get(weaponId) as
-                WeaponStateLike | undefined;
-            if (localState && typeof localState === 'object'
-                && typeof (remoteState as WeaponStateLike).firing === 'boolean') {
-                merged.set(weaponId, {
-                    ...localState,
-                    firing: (remoteState as WeaponStateLike).firing,
-                });
-            }
-        }
-        return merged;
-    }
-
-    return remote;
-}
-
-function weaponStateMap(entity: Entity): Map<string, WeaponStateLike> | undefined {
-    for (const [component, data] of entity.components) {
-        if (component.name === WEAPONS_STATE_COMPONENT_NAME
-            && data instanceof Map) {
-            return data as Map<string, WeaponStateLike>;
+    for (const component of entity.components.keys()) {
+        if (component.name === componentName) {
+            return component;
         }
     }
     return undefined;
 }
 
-function weaponStateComponent(entity: Entity): Component<unknown> | undefined {
-    return [...entity.components.keys()].find(
-        component => component.name === WEAPONS_STATE_COMPONENT_NAME);
-}
-
-function captureWeaponFiring(entity: Entity): Map<string, boolean> | undefined {
-    const states = weaponStateMap(entity);
-    if (!states) {
-        return undefined;
-    }
-    return new Map([...states].map(([id, state]) => [id, state.firing]));
-}
-
-function restoreWeaponFiring(
+function captureEntityClientIntents(
     entity: Entity,
-    firing: Map<string, boolean> | undefined,
-): void {
-    if (!firing) {
-        return;
-    }
-    const states = weaponStateMap(entity);
-    if (!states) {
-        return;
-    }
-    for (const [id, value] of firing) {
-        const state = states.get(id);
-        if (state) {
-            state.firing = value;
+): Map<string, unknown> | undefined {
+    let captured: Map<string, unknown> | undefined;
+    for (const [componentName, policy] of replicationPolicies.entriesWithIntent()) {
+        const component = findEntityComponentByName(entity, componentName);
+        if (!component) {
+            continue;
+        }
+        const value = entity.components.get(component);
+        if (value === undefined) {
+            continue;
+        }
+        const intent = policy.captureClientIntent!(value);
+        if (intent !== undefined) {
+            captured ??= new Map();
+            captured.set(componentName, intent);
         }
     }
+    return captured;
 }
 
-// WeaponsState is owned by the local client only for its `firing` field. Keep
-// the policy name-based so nova_ecs does not depend on the Nova game package.
-replicationPolicies.registerName(WEAPONS_STATE_COMPONENT_NAME, {
-    codec: t.any,
-    authority: 'entity-owner',
-    merge: mergeWeaponStateIntent,
-    // The server derives weapon result state from authoritative outfits. Keep
-    // only the trigger intent from a client's first entity state until that
-    // derived component exists.
-    acceptInitialOwnerState: false,
-    allowOwnerRemoval: false,
-    relayOwnerChanges: true,
-});
+function restoreEntityClientIntents(
+    entity: Entity,
+    intents: Map<string, unknown> | undefined,
+): boolean {
+    if (!intents) {
+        return false;
+    }
+    let allRestored = true;
+    for (const [componentName, intent] of intents) {
+        const policy = replicationPolicies.get(componentName);
+        const component = findEntityComponentByName(entity, componentName);
+        if (!policy?.restoreClientIntent || !component) {
+            allRestored = false;
+            continue;
+        }
+        const value = entity.components.get(component);
+        if (value === undefined) {
+            allRestored = false;
+            continue;
+        }
+        policy.restoreClientIntent(value, intent);
+    }
+    return allRestored;
+}
 
 function policyFor(componentName: string): ReplicationPolicy {
     // Components without a special policy retain the historical
@@ -1053,7 +1027,7 @@ export function multiplayer(communicator: Communicator,
     const lastOwnerMovementTime = new Map<string, { source: string; at: number }>();
     const lastClockReplyAt = new Map<string, number>();
     const interestedEntitiesByPeer = new Map<string, Set<string>>();
-    const deferredOwnerWeaponIntent = new Map<string, Map<string, boolean>>();
+    const deferredOwnerClientIntent = new Map<string, Map<string, unknown>>();
     const movementSnapshotIntervalMs = MOVEMENT_SNAPSHOT_INTERVAL_MS;
 
     // Client: own ships predicted from input. Sequence numbers are per
@@ -1251,7 +1225,7 @@ export function multiplayer(communicator: Communicator,
     const relayedChat: ChatMessageEntry[] = [];
     const added = new Map<string, string>();
     const removed = new Set<string>();
-    const localWeaponIntentChanges = new Set<string>();
+    const localIntentComponentChanges = new Map<string, Set<string>>();
     const fullStateRequests = new DefaultMap<string, Set<string>>(() => new Set());
     const inboundMultiplayerSystem = new System({
         name: 'InboundMultiplayer',
@@ -1267,7 +1241,7 @@ export function multiplayer(communicator: Communicator,
             relayedChat.length = 0;
             added.clear();
             removed.clear();
-            localWeaponIntentChanges.clear();
+            localIntentComponentChanges.clear();
             fullStateRequests.clear();
             if (comms.uuid && communicator.uuid && comms.uuid !== communicator.uuid) {
                 // Change the owner of all entities owned by our previous uuid
@@ -1500,32 +1474,37 @@ export function multiplayer(communicator: Communicator,
                 return computeInterest(entityMap, [peer],
                     interestedEntitiesByPeer).get(peer)!;
             }
-            // Capture local weapon edges before applying inbound state. A
+            // Capture local client-intent edges before applying inbound state. A
             // merge may make the eventual value equal to its new tracking
             // baseline; the edge must still be emitted (especially keyup).
             if (!isAdmin) {
                 for (const [uuid, { entity, data }] of entityMap) {
-                    const component = weaponStateComponent(entity);
-                    if (data.owner === comms.uuid
-                        && component
-                        && deltaMaker.isComponentDirty(entity, component)) {
-                        localWeaponIntentChanges.add(uuid);
+                    if (data.owner !== comms.uuid) {
+                        continue;
+                    }
+                    for (const [componentName] of replicationPolicies.entriesWithIntent()) {
+                        const component = findEntityComponentByName(entity, componentName);
+                        if (component && deltaMaker.isComponentDirty(entity, component)) {
+                            let changed = localIntentComponentChanges.get(uuid);
+                            if (!changed) {
+                                changed = new Set();
+                                localIntentComponentChanges.set(uuid, changed);
+                            }
+                            changed.add(componentName);
+                        }
                     }
                 }
             }
             if (isAdmin) {
-                for (const [uuid, firing] of deferredOwnerWeaponIntent) {
+                for (const [uuid, intents] of deferredOwnerClientIntent) {
                     const entry = entityMap.get(uuid);
                     if (!entry) {
-                        deferredOwnerWeaponIntent.delete(uuid);
+                        deferredOwnerClientIntent.delete(uuid);
                         continue;
                     }
-                    const states = weaponStateMap(entry.entity);
-                    if (!states) {
-                        continue;
+                    if (restoreEntityClientIntents(entry.entity, intents)) {
+                        deferredOwnerClientIntent.delete(uuid);
                     }
-                    restoreWeaponFiring(entry.entity, firing);
-                    deferredOwnerWeaponIntent.delete(uuid);
                 }
             }
 
@@ -1648,7 +1627,7 @@ export function multiplayer(communicator: Communicator,
                         removed.add(uuid);
                         entityMap.delete(uuid);
                         relayedStates.delete(uuid);
-                        deferredOwnerWeaponIntent.delete(uuid);
+                        deferredOwnerClientIntent.delete(uuid);
                         clearMovementLifecycle(uuid);
                     } else {
                         warn(`'${source}' tried to remove ${uuid}`);
@@ -1679,11 +1658,11 @@ export function multiplayer(communicator: Communicator,
                         && isAdmin
                         && !peerIsAdmin
                         && decodedOwnerBeforeSanitize === source) {
-                        const initialWeaponIntent =
-                            captureWeaponFiring(decodedEntity);
-                        if (initialWeaponIntent) {
-                            deferredOwnerWeaponIntent.set(
-                                uuid, initialWeaponIntent);
+                        const initialClientIntents =
+                            captureEntityClientIntents(decodedEntity);
+                        if (initialClientIntents) {
+                            deferredOwnerClientIntent.set(
+                                uuid, initialClientIntents);
                         }
                     }
                     sanitizeInboundEntity(
@@ -1772,8 +1751,8 @@ export function multiplayer(communicator: Communicator,
                     let entity: Entity;
                     if (preserveExistingEntity) {
                         entity = existingEntry!.entity;
-                        const localWeaponFiring = preserveClientState
-                            ? captureWeaponFiring(entity)
+                        const localClientIntents = preserveClientState
+                            ? captureEntityClientIntents(entity)
                             : undefined;
                         deltaMaker.applyRemoteUpdate(entity, () => {
                             mergeInboundState(
@@ -1789,7 +1768,7 @@ export function multiplayer(communicator: Communicator,
                         // The merge policy handles full states. Reapply the
                         // live intent after DeltaMaker replays any pending
                         // local deltas, too.
-                        restoreWeaponFiring(entity, localWeaponFiring);
+                        restoreEntityClientIntents(entity, localClientIntents);
                     } else {
                         entity = decodedEntity;
                     }
@@ -1942,9 +1921,9 @@ export function multiplayer(communicator: Communicator,
                             }
                         }
                         if (delta) {
-                            const localWeaponFiring = peerIsAdmin
+                            const localClientIntents = peerIsAdmin
                                 && owner === comms.uuid
-                                ? captureWeaponFiring(entity)
+                                ? captureEntityClientIntents(entity)
                                 : undefined;
                             const context = mergeContext(
                                 source,
@@ -1968,7 +1947,7 @@ export function multiplayer(communicator: Communicator,
                             // still pending. A held trigger can already have
                             // been sent, so preserve the current intent
                             // explicitly across every server delta.
-                            restoreWeaponFiring(entity, localWeaponFiring);
+                            restoreEntityClientIntents(entity, localClientIntents);
                             entityMap.set(uuid, {
                                 entity,
                                 data: entity.components.get(MultiplayerData)!,
@@ -2279,30 +2258,33 @@ export function multiplayer(communicator: Communicator,
                     )
                     : undefined;
                 deltaMaker.clearDirty(entity);
-                if (localWeaponIntentChanges.has(uuid)) {
-                    const component = weaponStateComponent(entity);
-                    const states = weaponStateMap(entity);
-                    const encoded = component && states
-                        ? encodeComponentSnapshot(
-                            serializer, component, states)
-                        : undefined;
-                    if (component && encoded !== undefined) {
-                        const componentStates = new Map(
-                            entityDelta?.componentStates ?? []);
-                        const componentDeltas = new Map(
-                            entityDelta?.componentDeltas ?? []);
-                        componentStates.set(
-                            component.name,
-                            encoded,
-                        );
-                        componentDeltas.delete(component.name);
-                        entityDelta = {
-                            ...entityDelta,
-                            componentStates,
-                            componentDeltas: componentDeltas.size > 0
-                                ? componentDeltas
-                                : undefined,
-                        };
+                const changedIntentComponents = localIntentComponentChanges.get(uuid);
+                if (changedIntentComponents) {
+                    for (const componentName of changedIntentComponents) {
+                        const component = findEntityComponentByName(entity, componentName);
+                        const value = component ? entity.components.get(component) : undefined;
+                        const encoded = component && value !== undefined
+                            ? encodeComponentSnapshot(
+                                serializer, component, value)
+                            : undefined;
+                        if (component && encoded !== undefined) {
+                            const componentStates = new Map(
+                                entityDelta?.componentStates ?? []);
+                            const componentDeltas = new Map(
+                                entityDelta?.componentDeltas ?? []);
+                            componentStates.set(
+                                component.name,
+                                encoded,
+                            );
+                            componentDeltas.delete(component.name);
+                            entityDelta = {
+                                ...entityDelta,
+                                componentStates,
+                                componentDeltas: componentDeltas.size > 0
+                                    ? componentDeltas
+                                    : undefined,
+                            };
+                        }
                     }
                 }
                 const predicted = predictions.get(uuid)?.entity === entity

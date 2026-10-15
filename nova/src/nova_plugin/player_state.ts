@@ -212,6 +212,20 @@ const PlayerStateFields = t.intersection([
          * room still see the stellar.
          */
         stellarRegen: t.record(t.string, t.number),
+        /**
+         * Co-op Wing identifier shared by pilots flying together. Wingmates
+         * in the same star system share combat mission goal progress and
+         * route into the same system variant when jumping to a shared fight.
+         */
+        wingId: t.string,
+        /**
+         * Selected server realm / game mode ('story' | 'sandbox' | 'conquest').
+         */
+        gameMode: t.union([
+            t.literal('story'),
+            t.literal('sandbox'),
+            t.literal('conquest'),
+        ]),
     }),
 ]);
 type PlayerStateFields = t.TypeOf<typeof PlayerStateFields>;

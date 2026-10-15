@@ -5,36 +5,19 @@ function joinPath(...parts: string[]): string {
     return isAbsolute ? "/" + joined : joined;
 }
 import { BaseData } from 'novadatainterface/BaseData';
-import { DudeData } from 'novadatainterface/DudeData';
-import { CicnData } from 'novadatainterface/CicnData';
-import { CicnImageData } from 'novadatainterface/CicnImage';
-import { ExplosionData } from 'novadatainterface/ExplosionData';
-import { AsteroidData } from 'novadatainterface/AsteroidData';
-import { NebulaData } from 'novadatainterface/NebulaData';
-import { StringListData } from 'novadatainterface/StringListData';
-import { GovtData } from 'novadatainterface/GovtData';
 import { GameDataInterface, PreloadData } from 'novadatainterface/GameDataInterface';
 import { Gettable } from 'novadatainterface/Gettable';
-import { NovaDataInterfaceWithMission, NovaDataType } from 'novadatainterface/NovaDataInterface';
+import {
+    ALL_NOVA_DATA_TYPES,
+    NOVA_DATA_REGISTRY,
+    NovaDataInterfaceWithMission,
+    NovaDataType,
+} from 'novadatainterface/NovaDataInterface';
 import { NovaIDs } from 'novadatainterface/NovaIDs';
-import { OutfitData } from 'novadatainterface/OutfitData';
-import { PictData } from 'novadatainterface/PictData';
 import { PictImageData } from 'novadatainterface/PictImage';
-import { PlanetData } from 'novadatainterface/PlanetData';
-import { MissionData } from 'novadatainterface/MissionData';
-import { ShipData } from 'novadatainterface/ShipData';
 import { SoundFile } from 'novadatainterface/SoundFile';
-import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from 'novadatainterface/SpriteSheetData';
-import { StatusBarData } from 'novadatainterface/StatusBarData';
-import { SystemData } from 'novadatainterface/SystemData';
-import { TargetCornersData } from 'novadatainterface/TargetCornersData';
+import { SpriteSheetFramesData } from 'novadatainterface/SpriteSheetData';
 import { WeaponData } from 'novadatainterface/WeaponData';
-import { JunkData } from 'novadatainterface/JunkData';
-import { PersData } from 'novadatainterface/PersData';
-import { CronData } from 'novadatainterface/CronData';
-import { RankData } from 'novadatainterface/RankData';
-import { OopsData } from 'novadatainterface/OopsData';
-import { CharData } from 'novadatainterface/CharData';
 import * as PIXI from 'pixi.js';
 import * as sound from '@pixi/sound';
 import { dataPath, idsPath } from '../../common/GameDataPaths';
@@ -73,38 +56,32 @@ export class GameData implements GameDataInterface {
     });
 
     constructor() {
-        // There should be a better way to do this. I'm repeating myself here.
-        this.data = {
-            Ship: this.addGettable<ShipData>(NovaDataType.Ship),
-            Outfit: this.addGettable<OutfitData>(NovaDataType.Outfit),
-            Weapon: this.addWeaponGettable(),
-            Pict: this.addGettable<PictData>(NovaDataType.Pict),
-            PictImage: this.addPictGettable<PictImageData>(NovaDataType.PictImage),
-            Cicn: this.addGettable<CicnData>(NovaDataType.Cicn),
-            CicnImage: this.addPictGettable<CicnImageData>(NovaDataType.CicnImage),
-            Dude: this.addGettable<DudeData>(NovaDataType.Dude),
-            Planet: this.addGettable<PlanetData>(NovaDataType.Planet),
-            System: this.addGettable<SystemData>(NovaDataType.System),
-            Mission: this.addGettable<MissionData>(NovaDataType.Mission),
-            TargetCorners: this.addGettable<TargetCornersData>(NovaDataType.TargetCorners),
-            SpriteSheet: this.addGettable<SpriteSheetData>(NovaDataType.SpriteSheet),
-            SpriteSheetImage: this.addPictGettable<SpriteSheetImageData>(NovaDataType.SpriteSheetImage),
-            SpriteSheetFrames: this.addTextureGettable<SpriteSheetFramesData>(NovaDataType.SpriteSheetFrames),
-            StatusBar: this.addGettable<StatusBarData>(NovaDataType.StatusBar),
-            Explosion: this.addGettable<ExplosionData>(NovaDataType.Explosion),
-            Govt: this.addGettable<GovtData>(NovaDataType.Govt),
-            Asteroid: this.addGettable<AsteroidData>(NovaDataType.Asteroid),
-            Nebula: this.addGettable<NebulaData>(NovaDataType.Nebula),
-            StringList: this.addGettable<StringListData>(
-                NovaDataType.StringList),
-            Junk: this.addGettable<JunkData>(NovaDataType.Junk),
-            Pers: this.addGettable<PersData>(NovaDataType.Pers),
-            Cron: this.addGettable<CronData>(NovaDataType.Cron),
-            Rank: this.addGettable<RankData>(NovaDataType.Rank),
-            Oops: this.addGettable<OopsData>(NovaDataType.Oops),
-            Char: this.addGettable<CharData>(NovaDataType.Char),
-            SoundFile: this.addSoundFileGettable(),
+        const table: Record<string, Gettable<unknown>> = {
             Sound: this.addSoundGettable(),
+        };
+        for (const dataType of ALL_NOVA_DATA_TYPES) {
+            const spec = NOVA_DATA_REGISTRY[dataType];
+            switch (spec.clientLoader) {
+                case 'weapon':
+                    table[dataType] = this.addWeaponGettable();
+                    break;
+                case 'pict':
+                    table[dataType] = this.addPictGettable<PictImageData>(dataType);
+                    break;
+                case 'frames':
+                    table[dataType] = this.addTextureGettable<SpriteSheetFramesData>(dataType);
+                    break;
+                case 'soundFile':
+                    table[dataType] = this.addSoundFileGettable();
+                    break;
+                case 'json':
+                default:
+                    table[dataType] = this.addGettable(dataType);
+                    break;
+            }
+        }
+        this.data = table as NovaDataInterfaceWithMission & {
+            Sound: Gettable<sound.Sound>,
         };
 
         this.preloadData = this.preload();

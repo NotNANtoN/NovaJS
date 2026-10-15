@@ -23,6 +23,39 @@ export const RETAIL_MENU_ACTIONS = [
 
 export type RetailMenuAction = typeof RETAIL_MENU_ACTIONS[number];
 
+export type NovaGameMode = 'story' | 'sandbox' | 'conquest';
+
+export interface GameModeOption {
+    readonly id: NovaGameMode;
+    readonly label: string;
+    readonly description: string;
+}
+
+export const GAME_MODE_OPTIONS: readonly GameModeOption[] = [
+    {
+        id: 'story',
+        label: 'Story & Co-op Universe',
+        description: 'Classic EV Nova storylines with multiplayer Wings and shared combat goals.',
+    },
+    {
+        id: 'sandbox',
+        label: 'Freelancer Sandbox',
+        description: 'Open galaxy without story locks — trade, pirate, and fight freely.',
+    },
+    {
+        id: 'conquest',
+        label: 'Galactic Conquest',
+        description: 'Faction warfare realm — capture planets and shift territory borders.',
+    },
+] as const;
+
+export function normalizeGameMode(value: unknown): NovaGameMode {
+    if (value === 'sandbox' || value === 'conquest') {
+        return value;
+    }
+    return 'story';
+}
+
 /**
  * rlëD 8020 is ordered like the six retail buttons. Its final frame is the
  * idle artwork containing the six narrow Nova marks seen in the retail menu.

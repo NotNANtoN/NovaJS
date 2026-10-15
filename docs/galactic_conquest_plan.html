@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NovaJS — Galactic Conquest & Multiplayer Modes Plan</title>
+  <style>
+    :root {
+      --bg: #0c0909;
+      --panel: #171010;
+      --panel-alt: #1f1515;
+      --border: #5c2822;
+      --accent: #e0533c;
+      --accent-soft: #f0b89a;
+      --text: #f3ece6;
+      --muted: #b9a99e;
+      --green: #38ff75;
+      --cyan: #00c8ff;
+      --amber: #ffea00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 36px 20px 64px;
+      background: radial-gradient(circle at top, #221010 0%, var(--bg) 60%);
+      color: var(--text);
+      font-family: Geneva, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 1020px;
+      margin: 0 auto;
+    }
+    header {
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, #281210 0%, #140a0a 100%);
+      padding: 28px 32px;
+      border-radius: 6px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+      margin-bottom: 28px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent-soft);
+      font-size: 26px;
+    }
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      background: rgba(224, 83, 60, 0.12);
+      color: var(--accent-soft);
+    }
+    section {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 6px;
+      padding: 24px 28px;
+      margin-bottom: 24px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    }
+    h2 {
+      margin-top: 0;
+      color: var(--accent-soft);
+      font-size: 20px;
+      border-bottom: 1px solid rgba(224, 83, 60, 0.28);
+      padding-bottom: 8px;
+    }
+    h3 {
+      color: #ffd8c2;
+      font-size: 16px;
+      margin-top: 20px;
+      margin-bottom: 6px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .card {
+      background: var(--panel-alt);
+      border: 1px solid rgba(160, 80, 68, 0.4);
+      border-radius: 5px;
+      padding: 16px 18px;
+    }
+    .card h4 {
+      margin: 0 0 8px;
+      color: var(--accent-soft);
+      font-size: 15px;
+    }
+    code, pre {
+      font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+      font-size: 13px;
+      background: #0d0707;
+      border-radius: 4px;
+    }
+    code {
+      padding: 2px 6px;
+      color: #ffb899;
+      border: 1px solid rgba(255, 184, 153, 0.18);
+    }
+    pre {
+      padding: 14px 16px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      color: #f3e5dc;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(160, 80, 68, 0.25);
+    }
+    th {
+      color: var(--accent-soft);
+      background: rgba(224, 83, 60, 0.1);
+    }
+    ul {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 6px;
+    }
+    .phase-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+      margin-right: 8px;
+      background: var(--accent);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>NovaJS — Galactic Conquest &amp; Multiplayer Realms Plan</h1>
+      <p class="subtitle">
+        Architectural blueprint for Mode 2 (Storyless Faction Conquest), Spaceport Bar Bounty Board, and Multi-Realm Server Isolation.
+      </p>
+      <div class="badges">
+        <span class="badge">Mode 1: Story &amp; Co-op Wings (Live)</span>
+        <span class="badge">Mode 2: Galactic Conquest (Planned)</span>
+        <span class="badge">Mode 3: Freelancer Sandbox &amp; Bounty Board</span>
+      </div>
+    </header>
+
+    <section>
+      <h2>1. Vision &amp; Realm Architecture</h2>
+      <p>
+        EV Nova combines rich single-player NCB storylines with a systemic sandbox of 6 major factions, planetary defense fleets, territory borders, and trade routes. By partitioning rooms by <strong>Game Mode / Realm</strong> on the Start Menu (<code>story</code>, <code>sandbox</code>, <code>conquest</code>), a single NovaJS server or cluster can host both purist co-op campaigns and persistent faction warfare without NCB bit collisions.
+      </p>
+      <div class="grid">
+        <div class="card">
+          <h4>Mode 1: Story &amp; Co-op Universe (<code>story</code>)</h4>
+          <p>
+            Full retail EV Nova storylines. Players can hail each other (`Y`) to <strong>Form a Wing</strong>, automatically route into the same system variant on jump, and share combat mission kills &amp; payouts when fighting in the same system.
+          </p>
+        </div>
+        <div class="card">
+          <h4>Mode 2: Galactic Conquest (<code>conquest</code>)</h4>
+          <p>
+            Storyline NCB locks disabled. Players pledge to a major faction (Federation, Auroran, Polaris, Rebel, Pirate, Vell-os) and fight alongside NPCs and wingmates to dominate planets and flip system ownership on the live starmap.
+          </p>
+        </div>
+        <div class="card">
+          <h4>Mode 3: Freelancer Sandbox (<code>sandbox</code>)</h4>
+          <p>
+            Open galaxy without storyline gating, featuring dynamic Spaceport Bar player/NPC bounty boards, piracy, trading, and escort rescues.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. Galactic Conquest Mode — Core Mechanics</h2>
+
+      <h3>2.1 Faction Allegiance &amp; Starting Loadouts</h3>
+      <ul>
+        <li>When creating or entering a pilot in <code>conquest</code> mode, the player chooses one of the primary factions:
+          <ul>
+            <li><strong>Federation</strong> (Sol / Earth, <code>gövt 128</code>)</li>
+            <li><strong>Auroran Empire</strong> ( Aurora, <code>gövt 129</code>)</li>
+            <li><strong>Polaris</strong> (Polarisin, <code>gövt 131</code>)</li>
+            <li><strong>Rebellion</strong> (New Ireland / Rebel space, <code>gövt 133</code>)</li>
+            <li><strong>Pirate Clans / Associated Guild</strong> (<code>gövt 130 / 135</code>)</li>
+          </ul>
+        </li>
+        <li>All non-story shipyards and outfitters are unlocked based on <strong>Faction Rank / Conquest Points</strong> and credits rather than story NCB bits.</li>
+        <li>Base canonical systems are used everywhere (no hidden storyline duplicate systems).</li>
+      </ul>
+
+      <h3>2.2 Shared Planetary Domination &amp; Territory Flipping</h3>
+      <p>
+        In single-player EV Nova, demanding tribute from a planet spawns its <code>spöb</code> defense fleet and records domination only in the local pilot's <code>dominatedStellars</code>. In <strong>Galactic Conquest</strong>, planetary ownership is stored in an authoritative server-side <code>ConquestWorldState</code>:
+      </p>
+      <pre>interface PlanetConquestState {
+    planetId: string;           // e.g. "nova:128" (Earth)
+    systemId: string;           // e.g. "nova:128" (Sol)
+    controllingGovt: number;    // Current owning gövt ID
+    capturedByWing?: string;    // Wing/Clan or pilot names that captured it
+    captureTimestamp: number;
+    fortificationLevel: number; // 1..3 (scales defense fleet waves)
+}</pre>
+      <ul>
+        <li><strong>Co-op Planetary Sieges:</strong> Multiple players in a Wing can hail an enemy planet (`Y`) and initiate a siege together.</li>
+        <li><strong>Capture &amp; Flip:</strong> When the planet's defense fleet is defeated, <code>controllingGovt</code> flips to the attackers' faction. If all inhabited stellars in a system are held by one faction, the system's effective government flips!</li>
+        <li><strong>Live Starmap Territory Borders:</strong> <code>nova/src/spaceport/territory_field.ts</code> already computes territory influence fields from each system's government color. Feeding the live <code>ConquestWorldState</code> overrides into <code>territory_field.ts</code> makes the starmap borders shift in real time for every connected player!</li>
+        <li><strong>War Chest &amp; Tribute:</strong> Controlled planets pay daily tribute split among online faction members and unlock that planet's tech tier for friendly pilots.</li>
+      </ul>
+
+      <h3>2.3 Dynamic Frontline War Missions</h3>
+      <p>
+        Instead of static <code>mïsn</code> story chains, the Mission BBS and Spaceport Bar in Conquest Mode generate dynamic frontline missions on border systems (systems with a hyperjump link to a rival faction's system):
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Mission Type</th>
+            <th>Objective</th>
+            <th>Conquest Effect</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Frontline Strike</strong></td>
+            <td>Destroy 4–8 enemy patrol ships in an adjacent rival system</td>
+            <td>Weakens target planet's <code>fortificationLevel</code> before a siege</td>
+          </tr>
+          <tr>
+            <td><strong>War Supply Convoy</strong></td>
+            <td>Deliver 30 tons of munitions/medical supplies to a contested planet</td>
+            <td>Increases friendly planet's <code>fortificationLevel</code> and restocks shipyard</td>
+          </tr>
+          <tr>
+            <td><strong>Fleet Interception</strong></td>
+            <td>Intercept an NPC invasion task force en route to a friendly system</td>
+            <td>Prevents automatic NPC territory flip and awards high faction rank points</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>3. Spaceport Bar Bounty Board &amp; Co-op Rescue</h2>
+      <ul>
+        <li><strong>Live Bounty Board in Spaceport Bar (<code>nova/src/spaceport/bar.ts</code>):</strong>
+          <ul>
+            <li>Tracks pilots (and notorious `përs` raiders) who have accumulated negative legal records or destroyed friendly ships.</li>
+            <li>Players can view the last known star system of wanted targets and accept a bounty contract.</li>
+            <li>Disabling or destroying a wanted target in-system awards the posted bounty from the server combat ledger.</li>
+          </ul>
+        </li>
+        <li><strong>Distress Beacons &amp; Crippled Friend Rescue:</strong>
+          <ul>
+            <li>Already supported by <code>assistance_plugin.ts</code> (boarding/assisting a disabled player repairs hull and transfers jump fuel so they can fly again).</li>
+            <li>Wingmates see a highlighted <strong>WING DISTRESS</strong> indicator in their HUD chat feed and starmap when a wingmate is disabled, making co-op rescue missions natural and immediate.</li>
+          </ul>
+        </li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. Implementation Roadmap</h2>
+      <p><span class="phase-tag">Phase 1 — Done</span> <strong>Start Menu Mode Switcher &amp; Co-op Wings:</strong> Selectable mode on the Start Menu, in-flight Wing formation via Player Hail (`Y`), friendly green Wing brackets, same-system variant jump routing, and shared combat mission goals.</p>
+      <p><span class="phase-tag">Phase 2</span> <strong>Realm Room Prefixing &amp; Conquest World Store:</strong> Namespace MultiRoom system channels by mode (<code>conquest:nova:128</code> vs <code>story:nova:128</code>) and add <code>nova/src/server/conquest_store.ts</code> for persistent planetary ownership.</p>
+      <p><span class="phase-tag">Phase 3</span> <strong>Planetary Siege &amp; Live Starmap Territory Broadcast:</strong> Broadcast <code>ConquestWorldState</code> diffs to clients so <code>starmap.ts</code> and <code>territory_field.ts</code> render live faction borders.</p>
+      <p><span class="phase-tag">Phase 4</span> <strong>Frontline War Mission Generator &amp; Bar Bounty Board:</strong> Add procedural border-war missions in <code>procedural_missions.ts</code> and the Bounty Board dialog in <code>bar.ts</code>.</p>
+    </section>
+  </div>
+</body>
+</html>

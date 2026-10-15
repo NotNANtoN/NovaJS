@@ -42,7 +42,13 @@ import {
 } from './player_state';
 import { MissionGoalEvent } from './mission_goals';
 import { PersBecomesSpecialShipComponent, PersComponent } from './pers_plugin';
-import { noteServerMissionBits, takePlayerStateEcho } from './combat_resources';
+import { noteServerMissionBits, takePlayerStateEcho, CombatAuthorityComponent } from './combat_resources';
+import {
+    areWingmates,
+    calculateWingCombatShare,
+    findCoopMissionGoalRecipients,
+    isCombatSharedMissionGoal,
+} from './wing';
 import { PlayerStoreResource } from './player_state';
 import { ShipComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
@@ -386,13 +392,47 @@ export function recordShipGoalDetached(
         const entity = entities.get(playerUuid);
         const current = entity?.components.get(PlayerStateComponent);
         if (!entity || !current) return;
-        entity.components.set(PlayerStateComponent,
-            applyGoalRecordingDelta(current, before.right, working));
+        const nextState = applyGoalRecordingDelta(current, before.right, working);
+        entity.components.set(PlayerStateComponent, nextState);
         const owner = entity.components.get(MultiplayerData)?.owner;
         if (owner) {
             noteServerMissionBits(owner, working.missionBits
                 .map((value, bit) => [bit, value] as const)
                 .filter(([bit, value]) => before.right.missionBits[bit] !== value));
+        }
+
+        // If a combat mission goal just completed in this system and the pilot
+        // has wingmates present in the same system, award assisting wingmates
+        // a Co-op Wing combat share.
+        const beforeEntry = before.right.activeMissions.find(
+            entry => activeEntryKey(entry) === missionUuid,
+        );
+        const afterEntry = working.activeMissions.find(
+            entry => activeEntryKey(entry) === missionUuid,
+        );
+        if (nextState.wingId
+            && !beforeEntry?.shipGoalProgress?.completed
+            && afterEntry?.shipGoalProgress?.completed
+            && isCombatSharedMissionGoal(afterEntry.shipGoalProgress.goal)) {
+            const share = calculateWingCombatShare(
+                (afterEntry.missionData as { payVal?: number } | undefined)?.payVal,
+            );
+            for (const [peerUuid, peerEntity] of entities) {
+                if (peerUuid === playerUuid) continue;
+                const peerState = peerEntity.components.get(PlayerStateComponent);
+                if (!peerState || !areWingmates(nextState, peerState)) continue;
+                const peerDecoded = decodePlayerState(plainSnapshot(peerState));
+                if (peerDecoded._tag !== 'Right') continue;
+                const updatedPeer = peerDecoded.right;
+                updatedPeer.credits = Math.max(0, updatedPeer.credits + share);
+                peerEntity.components.set(PlayerStateComponent, updatedPeer);
+                const authority = peerEntity.components.get(CombatAuthorityComponent);
+                if (authority && !authority.retired) {
+                    authority.state.credits = updatedPeer.credits;
+                    authority.commit();
+                    authority.project(peerEntity);
+                }
+            }
         }
     };
     const next = previous.then(work).catch(error => {
@@ -693,19 +733,31 @@ const MissionShipDeathSystem = new System({
         MissionRuntimeResource,
         PlatformResource,
         Entities,
+        Optional(SystemIdResource),
+        Optional(GameDataResource),
     ] as const,
-    step(missionShip, players, playerStore, runtime, platform, entities) {
+    step(missionShip, players, playerStore, runtime, platform, entities,
+        systemId, gameData) {
         if (platform !== 'node') {
             return;
         }
-        const store = playerStore;
-        const player = findPlayer(
-            players, missionShip.playerToken, store);
-        if (!player) {
-            return;
+        const recipients = findCoopMissionGoalRecipients(
+            players,
+            missionShip.playerToken,
+            missionShip.missionUuid,
+            playerStore,
+            systemId,
+            gameData?.data.System,
+        );
+        for (const recipient of recipients) {
+            void recordShipGoalDetached(
+                runtime,
+                entities,
+                recipient.playerUuid,
+                recipient.missionUuid,
+                'destroyed',
+            );
         }
-        void recordShipGoalDetached(runtime, entities, player[0],
-            missionShip.missionUuid, 'destroyed');
     },
 });
 
@@ -720,8 +772,11 @@ const MissionShipChaseOffSystem = new System({
         PlatformResource,
         SingletonComponent,
         Entities,
+        Optional(SystemIdResource),
+        Optional(GameDataResource),
     ] as const,
-    step(jump, players, playerStore, runtime, platform, _singleton, entities) {
+    step(jump, players, playerStore, runtime, platform, _singleton, entities,
+        systemId, gameData) {
         if (platform !== 'node') {
             return;
         }
@@ -729,15 +784,25 @@ const MissionShipChaseOffSystem = new System({
         if (!missionShip) {
             return;
         }
-        const player = findPlayer(
-            players, missionShip.playerToken, playerStore);
-        if (!player) {
-            return;
-        }
         // EV Nova Bible, mïsn/ShipGoal 6: "Chase them off (either kill them
         // or scare the into jumping out of the system)."
-        void recordShipGoalDetached(runtime, entities, player[0],
-            missionShip.missionUuid, 'chasedOff');
+        const recipients = findCoopMissionGoalRecipients(
+            players,
+            missionShip.playerToken,
+            missionShip.missionUuid,
+            playerStore,
+            systemId,
+            gameData?.data.System,
+        );
+        for (const recipient of recipients) {
+            void recordShipGoalDetached(
+                runtime,
+                entities,
+                recipient.playerUuid,
+                recipient.missionUuid,
+                'chasedOff',
+            );
+        }
     },
 });
 
@@ -780,19 +845,31 @@ const MissionShipDisabledSystem = new System({
         MissionRuntimeResource,
         PlatformResource,
         Entities,
+        Optional(SystemIdResource),
+        Optional(GameDataResource),
     ] as const,
     step(missionShip, _disabled, status, players, playerStore,
-        runtime, platform, entities) {
+        runtime, platform, entities, systemId, gameData) {
         if (platform !== 'node' || status.disabledRecorded) {
             return;
         }
         status.disabledRecorded = true;
-        const store = playerStore;
-        const player = findPlayer(
-            players, missionShip.playerToken, store);
-        if (player) {
-            void recordShipGoalDetached(runtime, entities, player[0],
-                missionShip.missionUuid, 'disabled');
+        const recipients = findCoopMissionGoalRecipients(
+            players,
+            missionShip.playerToken,
+            missionShip.missionUuid,
+            playerStore,
+            systemId,
+            gameData?.data.System,
+        );
+        for (const recipient of recipients) {
+            void recordShipGoalDetached(
+                runtime,
+                entities,
+                recipient.playerUuid,
+                recipient.missionUuid,
+                'disabled',
+            );
         }
     },
 });

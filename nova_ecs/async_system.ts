@@ -96,14 +96,10 @@ export class AsyncSystem<StepArgTypes extends readonly ArgTypes[] = readonly Arg
                     return arg;
                 }) as typeof stepArgs;
 
-                // TODO: This error handling is wrong.
+                let draftsFinished = false;
                 entityStatus.promise = systemArgs.step(...draftArgs)
                     .then(apply => {
-                        if (apply != null && !apply) {
-                            // Do not apply patches
-                            return;
-                        }
-
+                        const shouldApply = apply == null || Boolean(apply);
                         const patches: Patch[] = [];
                         for (let i = 0; i < draftArgs.length; i++) {
                             const arg = draftArgs[i];
@@ -116,19 +112,36 @@ export class AsyncSystem<StepArgTypes extends readonly ArgTypes[] = readonly Arg
                                 argPatches = forwardPatches;
                             });
 
+                            if (!shouldApply) {
+                                continue;
+                            }
                             if (!argPatches) {
                                 throw new Error('Got no patches when calling async system');
                             }
-                            for (let patch of argPatches) {
+                            for (const patch of argPatches) {
                                 // Edit the patch path to include the index
                                 // of the argument.
                                 patch.path.unshift(i);
                             }
                             patches.push(...argPatches);
                         }
+                        draftsFinished = true;
 
-                        if (patches.length > 0) {
+                        if (shouldApply && patches.length > 0) {
                             entityStatus.patches.push(patches);
+                        }
+                    })
+                    .finally(() => {
+                        if (!draftsFinished) {
+                            for (const arg of draftArgs) {
+                                try {
+                                    if (isDraft(arg)) {
+                                        finishDraft(arg);
+                                    }
+                                } catch {
+                                    // Ignore cleanup errors on failed drafts
+                                }
+                            }
                         }
                         entityStatus.running = false;
                     });

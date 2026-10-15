@@ -5,10 +5,12 @@ import * as PIXI from 'pixi.js';
 import { GameData } from '../client/gamedata/GameData';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
+import { areWingmates, deriveWingId } from '../nova_plugin/wing';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import {
     broadcastChat,
     ChatMessageEntry,
+    Comms as MultiplayerComms,
 } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Button } from './button';
 import { COMMS_LAYOUT } from './comms_panel_layout';
@@ -43,7 +45,9 @@ export class PlayerChatDialog extends Menu<Entity> {
     private readonly logText: PIXI.Text;
     private readonly inputBox = new PIXI.Graphics();
     private readonly inputText: PIXI.Text;
+    private readonly wingButton: Button;
     private target?: PlayerChatTarget;
+    private targetEntity?: Entity;
     private world?: World;
     private currentDraft = '';
     private cursorVisible = true;
@@ -83,11 +87,18 @@ export class PlayerChatDialog extends Menu<Entity> {
         this.container.addChild(this.inputText);
 
         const sendButton = new Button(gameData, 'Send', 55, { x: 105, y: 26 });
+        this.wingButton = new Button(gameData, 'Form Wing', 85, { x: -125, y: 74 });
         const shareCoordsButton = new Button(gameData, 'Share Coords', 85, { x: -25, y: 74 });
         const closeButton = new Button(gameData, 'Close Channel', 85, { x: 75, y: 74 });
-        this.addButtons({ send: sendButton, shareCoords: shareCoordsButton, close: closeButton });
+        this.addButtons({
+            send: sendButton,
+            wing: this.wingButton,
+            shareCoords: shareCoordsButton,
+            close: closeButton,
+        });
 
         sendButton.click.subscribe(() => this.sendMessage());
+        this.wingButton.click.subscribe(() => this.toggleWing());
         shareCoordsButton.click.subscribe(() => this.shareCoordinates());
         closeButton.click.subscribe(() => this.done());
 
@@ -97,9 +108,10 @@ export class PlayerChatDialog extends Menu<Entity> {
         });
     }
 
-    setTarget(target: PlayerChatTarget, world: World) {
+    setTarget(target: PlayerChatTarget, world: World, targetEntity?: Entity) {
         this.target = target;
         this.world = world;
+        this.targetEntity = targetEntity;
         this.updateView();
     }
 
@@ -122,7 +134,12 @@ export class PlayerChatDialog extends Menu<Entity> {
             return;
         }
         const name = this.target.pilotName;
-        this.headerText.text = `Channel open to ${name} (${this.target.shipName})`;
+        const myState = this.input?.components.get(PlayerStateComponent);
+        const peerState = this.targetEntity?.components.get(PlayerStateComponent);
+        const inWingTogether = areWingmates(myState, peerState);
+        this.headerText.text = inWingTogether
+            ? `Wing Channel: ${name} (${this.target.shipName}) [IN WING]`
+            : `Channel open to ${name} (${this.target.shipName})`;
 
         const historyMap = this.world?.resources.get(ChatHistoryResource);
         const history: ChatMessageEntry[] = historyMap?.get(this.target.peerUuid) ?? [];
@@ -186,6 +203,44 @@ export class PlayerChatDialog extends Menu<Entity> {
             system: systemId,
             coords,
         });
+        this.updateView();
+    }
+
+    private toggleWing() {
+        if (!this.target || !this.world || !this.input) {
+            return;
+        }
+        const myState = this.input.components.get(PlayerStateComponent);
+        if (!myState) {
+            return;
+        }
+        const peerState = this.targetEntity?.components.get(PlayerStateComponent);
+        const myName = myState.pilotName || 'Captain';
+        const myUuid = this.world.singletonEntity.components.get(MultiplayerComms)?.uuid
+            ?? myName;
+
+        if (areWingmates(myState, peerState)) {
+            myState.wingId = undefined;
+            broadcastChat(this.world, {
+                to: this.target.peerUuid,
+                fromName: myName,
+                text: `${myName} has left the Wing.`,
+                kind: 'wing',
+            });
+        } else {
+            const wingId = deriveWingId(
+                peerState?.wingId ?? myState.wingId,
+                myUuid,
+                this.target.peerUuid,
+            );
+            myState.wingId = wingId;
+            broadcastChat(this.world, {
+                to: this.target.peerUuid,
+                fromName: myName,
+                text: `${myName} formed a tactical Wing (${wingId}). Hail and click Form Wing to link combat missions & jump routing!`,
+                kind: 'wing',
+            });
+        }
         this.updateView();
     }
 

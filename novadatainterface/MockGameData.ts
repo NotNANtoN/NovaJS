@@ -1,31 +1,8 @@
-import { getDefaultRankData } from "./RankData";
-import { getDefaultCharData } from "./CharData";
-import { getDefaultOopsData } from "./OopsData";
-import { getDefaultCronData } from "./CronData";
-import { getDefaultCicnData } from "./CicnData";
-import { getDefaultExplosionData } from "./ExplosionData";
-import { getDefaultDudeData } from "./DudeData";
-import { getDefaultGovtData } from "./GovtData";
+import { DEFAULT_FACTORIES } from "./Defaults";
 import { GameDataInterface } from "./GameDataInterface";
 import { Gettable } from "./Gettable";
-import { NovaDataInterface } from "./NovaDataInterface";
+import { ALL_NOVA_DATA_TYPES, NovaDataInterface, NovaDataType } from "./NovaDataInterface";
 import { NovaIDs } from "./NovaIDs";
-import { getDefaultOutfitData } from "./OutfitData";
-import { getDefaultPictData } from "./PictData";
-import { getDefaultPlanetData } from "./PlanetData";
-import { getDefaultMissionData } from "./MissionData";
-import { getDefaultShipData } from "./ShipData";
-import { getDefaultSoundFile } from "./SoundFile";
-import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./SpriteSheetData";
-import { getDefaultStatusBarData } from "./StatusBarData";
-import { getDefaultSystemData } from "./SystemData";
-import { getDefaultTargetCornersData } from "./TargetCornersData";
-import { getDefaultProjectileWeaponData } from "./WeaponData";
-import { getDefaultAsteroidData } from "./AsteroidData";
-import { getDefaultNebulaData } from "./NebulaData";
-import { getDefaultStringListData } from "./StringListData";
-import { getDefaultJunkData } from "./JunkData";
-import { getDefaultPersData } from "./PersData";
 
 // TODO: Make gettable an interface so you
 // don't have to do this awkward extension
@@ -66,37 +43,25 @@ type MockNovaDataInterface = {
     [P in keyof NovaDataInterface]-?: MockGettable<ExtractGettableType<NovaDataInterface[P]>>
 }
 
+const IMAGE_DATA_TYPES = new Set<NovaDataType>([
+    NovaDataType.PictImage,
+    NovaDataType.CicnImage,
+    NovaDataType.SpriteSheetImage,
+]);
+
+function buildMockData(): MockNovaDataInterface {
+    const data = {} as Record<NovaDataType, MockGettable<unknown>>;
+    for (const type of ALL_NOVA_DATA_TYPES) {
+        const defaultVal = IMAGE_DATA_TYPES.has(type)
+            ? (new Uint8Array(0).buffer as ArrayBuffer)
+            : DEFAULT_FACTORIES[type]();
+        data[type] = new MockGettable(defaultVal);
+    }
+    return data as MockNovaDataInterface;
+}
+
 export class MockGameData implements GameDataInterface {
-    data: MockNovaDataInterface = {
-        Explosion: new MockGettable(getDefaultExplosionData()),
-        Govt: new MockGettable(getDefaultGovtData()),
-        Asteroid: new MockGettable(getDefaultAsteroidData()),
-        Nebula: new MockGettable(getDefaultNebulaData()),
-        StringList: new MockGettable(getDefaultStringListData()),
-        Junk: new MockGettable(getDefaultJunkData()),
-        Pers: new MockGettable(getDefaultPersData()),
-        Cron: new MockGettable(getDefaultCronData()),
-        Rank: new MockGettable(getDefaultRankData()),
-        Oops: new MockGettable(getDefaultOopsData()),
-        Char: new MockGettable(getDefaultCharData()),
-        Outfit: new MockGettable(getDefaultOutfitData()),
-        Pict: new MockGettable(getDefaultPictData()),
-        PictImage: new MockGettable(new Uint8Array(0).buffer as ArrayBuffer),
-        Cicn: new MockGettable(getDefaultCicnData()),
-        CicnImage: new MockGettable(new Uint8Array(0).buffer as ArrayBuffer),
-        Dude: new MockGettable(getDefaultDudeData()),
-        Planet: new MockGettable(getDefaultPlanetData()),
-        Ship: new MockGettable(getDefaultShipData()),
-        SpriteSheet: new MockGettable(getDefaultSpriteSheetData()),
-        SpriteSheetFrames: new MockGettable(getDefaultSpriteSheetFrames()),
-        SpriteSheetImage: new MockGettable(new Uint8Array(0).buffer as ArrayBuffer),
-        StatusBar: new MockGettable(getDefaultStatusBarData()),
-        System: new MockGettable(getDefaultSystemData()),
-        Mission: new MockGettable(getDefaultMissionData()),
-        TargetCorners: new MockGettable(getDefaultTargetCornersData()),
-        Weapon: new MockGettable(getDefaultProjectileWeaponData()),
-        SoundFile: new MockGettable(getDefaultSoundFile()),
-    };
+    data: MockNovaDataInterface = buildMockData();
     get ids(): Promise<NovaIDs> {
         const ids: NovaIDs = {} as NovaIDs;
         for (const [key, val] of Object.entries(this.data)) {

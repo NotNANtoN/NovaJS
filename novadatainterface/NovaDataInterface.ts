@@ -27,7 +27,7 @@ import { JunkData } from "./JunkData";
 import { PersData } from "./PersData";
 
 
-enum NovaDataType {
+export enum NovaDataType {
     Ship = "Ship",
     Outfit = "Outfit",
     Weapon = "Weapon",
@@ -56,55 +56,125 @@ enum NovaDataType {
     Oops = "Oops",
     Char = "Char",
     SoundFile = "SoundFile",
+}
+
+export const ALL_NOVA_DATA_TYPES = Object.values(NovaDataType) as readonly NovaDataType[];
+
+/**
+ * Single source of truth mapping every NovaDataType to its runtime value type.
+ */
+export interface NovaDataTypeMap {
+    [NovaDataType.Ship]: ShipData;
+    [NovaDataType.Outfit]: OutfitData;
+    [NovaDataType.Weapon]: WeaponData;
+    [NovaDataType.Pict]: PictData;
+    [NovaDataType.PictImage]: PictImageData;
+    [NovaDataType.Cicn]: CicnData;
+    [NovaDataType.CicnImage]: CicnImageData;
+    [NovaDataType.Dude]: DudeData;
+    [NovaDataType.Planet]: PlanetData;
+    [NovaDataType.System]: SystemData;
+    [NovaDataType.Mission]: MissionData;
+    [NovaDataType.TargetCorners]: TargetCornersData;
+    [NovaDataType.SpriteSheet]: SpriteSheetData;
+    [NovaDataType.SpriteSheetImage]: SpriteSheetImageData;
+    [NovaDataType.SpriteSheetFrames]: SpriteSheetFramesData;
+    [NovaDataType.StatusBar]: StatusBarData;
+    [NovaDataType.Explosion]: ExplosionData;
+    [NovaDataType.Govt]: GovtData;
+    [NovaDataType.Asteroid]: AsteroidData;
+    [NovaDataType.Nebula]: NebulaData;
+    [NovaDataType.StringList]: StringListData;
+    [NovaDataType.Junk]: JunkData;
+    [NovaDataType.Pers]: PersData;
+    [NovaDataType.Cron]: CronData;
+    [NovaDataType.Rank]: RankData;
+    [NovaDataType.Oops]: OopsData;
+    [NovaDataType.Char]: CharData;
+    [NovaDataType.SoundFile]: SoundFile;
+}
+
+export type NovaAssetExtension = "json" | "png" | "mp3";
+export type ClientLoaderKind = "json" | "weapon" | "pict" | "frames" | "soundFile";
+
+export interface NovaDataTypeSpec<K extends NovaDataType = NovaDataType> {
+    readonly type: K;
+    readonly extension: NovaAssetExtension;
+    readonly clientLoader: ClientLoaderKind;
+    readonly preload: boolean;
+}
+
+/**
+ * Canonical per-type metadata for filesystem storage, client loading, and
+ * preload bundle generation. Adding a new NovaDataType here automatically
+ * wires it across Aggregator, FilesystemData, Client GameData, IDs, and Mocks.
+ */
+export const NOVA_DATA_REGISTRY: { readonly [K in NovaDataType]: NovaDataTypeSpec<K> } = {
+    [NovaDataType.Ship]: { type: NovaDataType.Ship, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Outfit]: { type: NovaDataType.Outfit, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Weapon]: { type: NovaDataType.Weapon, extension: "json", clientLoader: "weapon", preload: true },
+    [NovaDataType.Pict]: { type: NovaDataType.Pict, extension: "json", clientLoader: "json", preload: false },
+    [NovaDataType.PictImage]: { type: NovaDataType.PictImage, extension: "png", clientLoader: "pict", preload: false },
+    [NovaDataType.Cicn]: { type: NovaDataType.Cicn, extension: "json", clientLoader: "json", preload: false },
+    [NovaDataType.CicnImage]: { type: NovaDataType.CicnImage, extension: "png", clientLoader: "pict", preload: false },
+    [NovaDataType.Dude]: { type: NovaDataType.Dude, extension: "json", clientLoader: "json", preload: false },
+    [NovaDataType.Planet]: { type: NovaDataType.Planet, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.System]: { type: NovaDataType.System, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Mission]: { type: NovaDataType.Mission, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.TargetCorners]: { type: NovaDataType.TargetCorners, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.SpriteSheet]: { type: NovaDataType.SpriteSheet, extension: "json", clientLoader: "json", preload: false },
+    [NovaDataType.SpriteSheetImage]: { type: NovaDataType.SpriteSheetImage, extension: "png", clientLoader: "pict", preload: false },
+    [NovaDataType.SpriteSheetFrames]: { type: NovaDataType.SpriteSheetFrames, extension: "json", clientLoader: "frames", preload: true },
+    [NovaDataType.StatusBar]: { type: NovaDataType.StatusBar, extension: "json", clientLoader: "json", preload: false },
+    [NovaDataType.Explosion]: { type: NovaDataType.Explosion, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Govt]: { type: NovaDataType.Govt, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Asteroid]: { type: NovaDataType.Asteroid, extension: "json", clientLoader: "json", preload: false },
+    [NovaDataType.Nebula]: { type: NovaDataType.Nebula, extension: "json", clientLoader: "json", preload: false },
+    [NovaDataType.StringList]: { type: NovaDataType.StringList, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Junk]: { type: NovaDataType.Junk, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Pers]: { type: NovaDataType.Pers, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Cron]: { type: NovaDataType.Cron, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Rank]: { type: NovaDataType.Rank, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Oops]: { type: NovaDataType.Oops, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.Char]: { type: NovaDataType.Char, extension: "json", clientLoader: "json", preload: true },
+    [NovaDataType.SoundFile]: { type: NovaDataType.SoundFile, extension: "mp3", clientLoader: "soundFile", preload: false },
 };
 
-// index: NovaDataType
-type NovaDataInterface = {
-    Ship: Gettable<ShipData>,
-    Outfit: Gettable<OutfitData>,
-    Weapon: Gettable<WeaponData>,
-    Pict: Gettable<PictData>,
-    PictImage: Gettable<PictImageData>,
-    Cicn: Gettable<CicnData>,
-    CicnImage: Gettable<CicnImageData>,
-    Dude?: Gettable<DudeData>,
-    Planet: Gettable<PlanetData>,
-    System: Gettable<SystemData>,
-    Mission?: Gettable<MissionData>,
-    TargetCorners: Gettable<TargetCornersData>,
-    SpriteSheet: Gettable<SpriteSheetData>,
-    SpriteSheetImage: Gettable<SpriteSheetImageData>,
-    SpriteSheetFrames: Gettable<SpriteSheetFramesData>,
-    StatusBar: Gettable<StatusBarData>,
-    Explosion: Gettable<ExplosionData>,
-    /** Optional for legacy generated-data providers. */
-    Govt?: Gettable<GovtData>,
-    /** Optional for legacy generated-data providers. */
-    Asteroid?: Gettable<AsteroidData>,
-    /** Optional for legacy generated-data providers. */
-    Nebula?: Gettable<NebulaData>,
-    /** Optional for legacy generated-data providers. */
-    StringList?: Gettable<StringListData>,
-    /** Optional for legacy generated-data providers. */
-    Junk?: Gettable<JunkData>,
-    /** Optional for legacy generated-data providers. */
-    Pers?: Gettable<PersData>,
-    Cron?: Gettable<CronData>,
-    Rank?: Gettable<RankData>,
-    Oops?: Gettable<OopsData>,
-    Char?: Gettable<CharData>,
-    SoundFile: Gettable<SoundFile>,
-}
+export const PRELOAD_NOVA_DATA_TYPES: readonly NovaDataType[] = ALL_NOVA_DATA_TYPES.filter(
+    type => NOVA_DATA_REGISTRY[type].preload,
+);
+
+type OptionalNovaDataTypes =
+    | NovaDataType.Dude
+    | NovaDataType.Mission
+    | NovaDataType.Govt
+    | NovaDataType.Asteroid
+    | NovaDataType.Nebula
+    | NovaDataType.StringList
+    | NovaDataType.Junk
+    | NovaDataType.Pers
+    | NovaDataType.Cron
+    | NovaDataType.Rank
+    | NovaDataType.Oops
+    | NovaDataType.Char;
+
+export type FullNovaDataInterface = {
+    [K in NovaDataType]: Gettable<NovaDataTypeMap[K]>;
+};
+
+export type NovaDataInterface = {
+    [K in Exclude<NovaDataType, OptionalNovaDataTypes>]: Gettable<NovaDataTypeMap[K]>;
+} & {
+    [K in OptionalNovaDataTypes]?: Gettable<NovaDataTypeMap[K]>;
+};
 
 // Some legacy GameDataInterface implementations do not serve mission data.
 // The parser, aggregator, and browser implementations do, so expose a
 // required form for callers that use one of those implementations.
-type NovaDataInterfaceWithMission =
+export type NovaDataInterfaceWithMission =
     Omit<NovaDataInterface, "Mission" | "Junk"> & {
         Mission: Gettable<MissionData>,
         Junk: Gettable<JunkData>,
     };
 
-class NovaIDNotFoundError extends Error { };
-
-export { NovaDataInterface, NovaDataInterfaceWithMission, NovaDataType, NovaIDNotFoundError };
+export class NovaIDNotFoundError extends Error { }

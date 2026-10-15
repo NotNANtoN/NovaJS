@@ -1,6 +1,6 @@
 import 'jasmine';
 import { createDraft, finishDraft } from 'immer';
-import { plainSnapshot } from './draft_snapshot';
+import { plainSnapshot, unwrapDraftsDeep } from './draft_snapshot';
 
 describe('plainSnapshot', () => {
     it('survives the draft it was taken from being finished', () => {
@@ -53,5 +53,22 @@ describe('plainSnapshot', () => {
         expect([...copy.outfits.keys()]).toEqual(['nova:128']);
         expect(copy.keys instanceof Set).toBeTrue();
         expect([...copy.keys.values()]).toEqual(['one', 'two']);
+    });
+
+    it('unwraps nested child drafts inside a plain wrapper object', () => {
+        const draft = createDraft({
+            physics: { speed: 300, turnRate: 40 },
+            outfits: { 'nova:128': 2 },
+        });
+        draft.physics.speed = 350;
+        // Wrapper is a plain object, but `physics` is a child draft of `draft`.
+        const wrapper = {
+            nestedPhysics: draft.physics,
+        };
+        const unwrapped = unwrapDraftsDeep(wrapper);
+        finishDraft(draft);
+
+        expect(unwrapped.nestedPhysics.speed).toBe(350);
+        expect(unwrapped.nestedPhysics.turnRate).toBe(40);
     });
 });

@@ -1,24 +1,16 @@
 import * as fs from "fs";
 import { BaseData } from "novadatainterface/BaseData";
-import { DudeData } from "novadatainterface/DudeData";
-import { CicnData } from "novadatainterface/CicnData";
-import { CicnImageData } from "novadatainterface/CicnImage";
-import { ExplosionData } from "novadatainterface/ExplosionData";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import { Gettable } from "novadatainterface/Gettable";
-import { NovaDataInterface } from "novadatainterface/NovaDataInterface";
-import { NovaIDs } from "novadatainterface/NovaIDs";
-import { OutfitData } from "novadatainterface/OutfitData";
-import { PictData } from "novadatainterface/PictData";
+import {
+    ALL_NOVA_DATA_TYPES,
+    NOVA_DATA_REGISTRY,
+    NovaDataInterface,
+    NovaDataType,
+} from "novadatainterface/NovaDataInterface";
+import { getDefaultNovaIDs, NovaIDs } from "novadatainterface/NovaIDs";
 import { PictImageData } from "novadatainterface/PictImage";
-import { PlanetData } from "novadatainterface/PlanetData";
-import { ShipData } from "novadatainterface/ShipData";
-import { SoundFile } from "novadatainterface/SoundFile";
-import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "novadatainterface/SpriteSheetData";
-import { StatusBarData } from "novadatainterface/StatusBarData";
-import { SystemData } from "novadatainterface/SystemData";
-import { TargetCornersData } from "novadatainterface/TargetCornersData";
-import { WeaponData } from "novadatainterface/WeaponData";
+import { SpriteSheetFramesData } from "novadatainterface/SpriteSheetData";
 import * as path from "path";
 
 
@@ -45,25 +37,12 @@ export function idForFilename(name: string): string | undefined {
     }
 }
 
-const Paths = {
-    Ship: { path: "Ship", extension: "json" } as PathInfo,
-    Outfit: { path: "Outfit", extension: "json" } as PathInfo,
-    Weapon: { path: "Weapon", extension: "json" } as PathInfo,
-    Pict: { path: "Pict", extension: "json" } as PathInfo,
-    PictImage: { path: "PictImage", extension: "png" } as PathInfo,
-    Cicn: { path: "Cicn", extension: "json" } as PathInfo,
-    CicnImage: { path: "CicnImage", extension: "png" } as PathInfo,
-    Dude: { path: "Dude", extension: "json" } as PathInfo,
-    Planet: { path: "Planet", extension: "json" } as PathInfo,
-    System: { path: "System", extension: "json" } as PathInfo,
-    TargetCorners: { path: "TargetCorners", extension: "json" } as PathInfo,
-    SpriteSheet: { path: "SpriteSheet", extension: "json" } as PathInfo,
-    SpriteSheetImage: { path: "SpriteSheetImage", extension: "png" } as PathInfo,
-    SpriteSheetFrames: { path: "SpriteSheetFrames", extension: "json" } as PathInfo,
-    StatusBar: { path: "StatusBar", extension: "json" } as PathInfo,
-    Explosion: { path: "Explosion", extension: "json" } as PathInfo,
-    SoundFile: { path: "SoundFile", extension: "mp3" } as PathInfo,
-};
+const Paths: { readonly [K in NovaDataType]: PathInfo } = Object.fromEntries(
+    ALL_NOVA_DATA_TYPES.map(type => [
+        type,
+        { path: type, extension: NOVA_DATA_REGISTRY[type].extension },
+    ]),
+) as { readonly [K in NovaDataType]: PathInfo };
 
 export interface FilesystemDataOptions {
     /**
@@ -80,25 +59,11 @@ class FilesystemData implements GameDataInterface {
 
     constructor(private rootPath: string, options: FilesystemDataOptions = {}) {
         this.excludeIdPrefixes = options.excludeIdPrefixes ?? [];
-        this.data = {
-            Ship: this.getFunction<ShipData>(Paths.Ship),
-            Outfit: this.getFunction<OutfitData>(Paths.Outfit),
-            Weapon: this.getFunction<WeaponData>(Paths.Weapon),
-            Pict: this.getFunction<PictData>(Paths.Pict),
-            PictImage: this.getFunction<PictImageData>(Paths.PictImage),
-            Cicn: this.getFunction<CicnData>(Paths.Cicn),
-            CicnImage: this.getFunction<CicnImageData>(Paths.CicnImage),
-            Dude: this.getFunction<DudeData>(Paths.Dude),
-            Planet: this.getFunction<PlanetData>(Paths.Planet),
-            System: this.getFunction<SystemData>(Paths.System),
-            TargetCorners: this.getFunction<TargetCornersData>(Paths.TargetCorners),
-            SpriteSheet: this.getFunction<SpriteSheetData>(Paths.SpriteSheet),
-            SpriteSheetImage: this.getFunction<SpriteSheetImageData>(Paths.SpriteSheetImage),
-            SpriteSheetFrames: this.getFunction<SpriteSheetFramesData>(Paths.SpriteSheetFrames),
-            StatusBar: this.getFunction<StatusBarData>(Paths.StatusBar),
-            Explosion: this.getFunction<ExplosionData>(Paths.Explosion),
-            SoundFile: this.getFunction<SoundFile>(Paths.SoundFile),
+        const data = {} as Record<NovaDataType, Gettable<unknown>>;
+        for (const type of ALL_NOVA_DATA_TYPES) {
+            data[type] = this.getFunction(Paths[type]);
         }
+        this.data = data as NovaDataInterface;
         this.ids = this.buildIDs();
     }
 
@@ -132,29 +97,11 @@ class FilesystemData implements GameDataInterface {
     }
 
     async buildIDs(): Promise<NovaIDs> {
-        return {
-            Ship: await this.buildIDsForPath(Paths.Ship),
-            Outfit: await this.buildIDsForPath(Paths.Outfit),
-            Weapon: await this.buildIDsForPath(Paths.Weapon),
-            Pict: await this.buildIDsForPath(Paths.Pict),
-            PictImage: await this.buildIDsForPath(Paths.PictImage),
-            Cicn: await this.buildIDsForPath(Paths.Cicn),
-            CicnImage: await this.buildIDsForPath(Paths.CicnImage),
-            Dude: await this.buildIDsForPath(Paths.Dude),
-            Planet: await this.buildIDsForPath(Paths.Planet),
-            System: await this.buildIDsForPath(Paths.System),
-            TargetCorners: await this.buildIDsForPath(Paths.TargetCorners),
-            SpriteSheet: await this.buildIDsForPath(Paths.SpriteSheet),
-            SpriteSheetImage: await this.buildIDsForPath(Paths.SpriteSheetImage),
-            SpriteSheetFrames: await this.buildIDsForPath(Paths.SpriteSheetFrames),
-            StatusBar: await this.buildIDsForPath(Paths.StatusBar),
-            Explosion: await this.buildIDsForPath(Paths.Explosion),
-            SoundFile: await this.buildIDsForPath(Paths.SoundFile),
-            Cron: [],
-            Rank: [],
-            Oops: [],
-            Char: [],
-        }
+        const ids = getDefaultNovaIDs();
+        await Promise.all(ALL_NOVA_DATA_TYPES.map(async type => {
+            ids[type] = await this.buildIDsForPath(Paths[type]);
+        }));
+        return ids;
     }
 
     private isExcluded(id: string): boolean {

@@ -25,35 +25,48 @@ import { getDefaultTargetCornersData } from "./TargetCornersData";
 import { getDefaultProjectileWeaponData } from "./WeaponData";
 import { getDefaultJunkData } from "./JunkData";
 import { getDefaultPersData } from "./PersData";
+import { ALL_NOVA_DATA_TYPES, NovaDataType, NovaDataTypeMap } from "./NovaDataInterface";
 
-// Should have one for every NovaDataType
-export const Defaults = {
-    get Ship() { return getDefaultShipData() },
-    get Outfit() { return getDefaultOutfitData() },
-    get Weapon() { return getDefaultProjectileWeaponData() },
-    get Pict() { return getDefaultPictData() },
-    get PictImage() { return getDefaultPictImageData() },
-    get Cicn() { return getDefaultCicnData() },
-    get CicnImage() { return getDefaultCicnImageData() },
-    get Dude() { return getDefaultDudeData() },
-    get Planet() { return getDefaultPlanetData() },
-    get System() { return getDefaultSystemData() },
-    get Mission() { return getDefaultMissionData() },
-    get TargetCorners() { return getDefaultTargetCornersData() },
-    get SpriteSheet() { return getDefaultSpriteSheetData() },
-    get SpriteSheetImage() { return getDefaultSpriteSheetImage() },
-    get SpriteSheetFrames() { return getDefaultSpriteSheetFrames() },
-    get StatusBar() { return getDefaultStatusBarData() },
-    get Explosion() { return getDefaultExplosionData() },
-    get Govt() { return getDefaultGovtData() },
-    get SoundFile() { return getDefaultSoundFile() },
-    get Asteroid() { return getDefaultAsteroidData() },
-    get Nebula() { return getDefaultNebulaData() },
-    get StringList() { return getDefaultStringListData() },
-    get Junk() { return getDefaultJunkData() },
-    get Pers() { return getDefaultPersData() },
-    get Cron() { return getDefaultCronData() },
-    get Rank() { return getDefaultRankData() },
-    get Oops() { return getDefaultOopsData() },
-    get Char() { return getDefaultCharData() },
+export const DEFAULT_FACTORIES: { readonly [K in NovaDataType]: () => NovaDataTypeMap[K] } = {
+    [NovaDataType.Ship]: getDefaultShipData,
+    [NovaDataType.Outfit]: getDefaultOutfitData,
+    [NovaDataType.Weapon]: getDefaultProjectileWeaponData,
+    [NovaDataType.Pict]: getDefaultPictData,
+    [NovaDataType.PictImage]: getDefaultPictImageData,
+    [NovaDataType.Cicn]: getDefaultCicnData,
+    [NovaDataType.CicnImage]: getDefaultCicnImageData,
+    [NovaDataType.Dude]: getDefaultDudeData,
+    [NovaDataType.Planet]: getDefaultPlanetData,
+    [NovaDataType.System]: getDefaultSystemData,
+    [NovaDataType.Mission]: getDefaultMissionData,
+    [NovaDataType.TargetCorners]: getDefaultTargetCornersData,
+    [NovaDataType.SpriteSheet]: getDefaultSpriteSheetData,
+    [NovaDataType.SpriteSheetImage]: getDefaultSpriteSheetImage,
+    [NovaDataType.SpriteSheetFrames]: getDefaultSpriteSheetFrames,
+    [NovaDataType.StatusBar]: getDefaultStatusBarData,
+    [NovaDataType.Explosion]: getDefaultExplosionData,
+    [NovaDataType.Govt]: getDefaultGovtData,
+    [NovaDataType.SoundFile]: getDefaultSoundFile,
+    [NovaDataType.Asteroid]: getDefaultAsteroidData,
+    [NovaDataType.Nebula]: getDefaultNebulaData,
+    [NovaDataType.StringList]: getDefaultStringListData,
+    [NovaDataType.Junk]: getDefaultJunkData,
+    [NovaDataType.Pers]: getDefaultPersData,
+    [NovaDataType.Cron]: getDefaultCronData,
+    [NovaDataType.Rank]: getDefaultRankData,
+    [NovaDataType.Oops]: getDefaultOopsData,
+    [NovaDataType.Char]: getDefaultCharData,
+};
+
+function buildDefaults(): { readonly [K in NovaDataType]: NovaDataTypeMap[K] } {
+    const obj = {} as { [K in NovaDataType]: NovaDataTypeMap[K] };
+    for (const type of ALL_NOVA_DATA_TYPES) {
+        Object.defineProperty(obj, type, {
+            enumerable: true,
+            get: DEFAULT_FACTORIES[type],
+        });
+    }
+    return obj;
 }
+
+export const Defaults = buildDefaults();

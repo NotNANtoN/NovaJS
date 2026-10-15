@@ -1,4 +1,5 @@
 import { isDraft, original } from "immer";
+import { unwrapDraftsDeep } from "./draft_snapshot";
 import { ArgsToData, ArgTypes, Entities, GetEntity, UUID } from "./arg_types";
 import { AsyncSystem } from "./async_system";
 import { Component } from "./component";
@@ -81,7 +82,7 @@ export function ProvideAsync<Data, Args extends readonly ArgTypes[]>({ name, pro
                         return;
                     }
                     entity.components.set(
-                        provided, originalIfDraft(providedValue));
+                        provided, unwrapDraftsDeep(originalIfDraft(providedValue)));
                 } else {
                     dispose?.(providedValue);
                 }

@@ -40,6 +40,7 @@ import { NpcAIComponent, NpcDepartureComponent } from "./npc_components";
 import { PlatformResource } from "./platform_plugin";
 import { AppliedDamageEvent } from "./damage_events";
 import { areSystemsSameOrVariants, variantIndexForCatalog, visibleJumpTarget, type SystemLookup } from "./system_variants";
+import { resolveWingJumpTarget } from "./wing";
 export { areSystemsSameOrVariants, type SystemLookup };
 
 export const JUMP_SPOOL_MS = 1_200;
@@ -490,9 +491,9 @@ const PlayerJumpControl = new System({
         Optional(JumpStateComponent), Optional(ArmorComponent),
         GameDataResource, GetEntity, TimeResource,
         Optional(PlayerStateComponent), Optional(ShipDataComponent),
-        PlayerShipSelector, Optional(MovementStateComponent)] as const,
+        PlayerShipSelector, Optional(MovementStateComponent), Entities] as const,
     step(controlState, emit, uuid, systemId, jumpRoute, jumpState, armor,
-        gameData, entity, time, playerState, shipData, _playerShip, movement) {
+        gameData, entity, time, playerState, shipData, _playerShip, movement, entities) {
         if (controlState.get('hyperjump') !== 'start'
             || armor && armor.current <= 0) {
             return;
@@ -533,10 +534,16 @@ const PlayerJumpControl = new System({
             emit(SoundEvent, { id: 'nova:153' });
             return;
         }
-        // Never arrive in a hidden storyline clone of the destination.
-        const visibleTarget = visibleJumpTarget(nextSystem, currentSystem.links,
-            playerState?.missionBits, id => gameData.data.System.getCached(id),
-            variantIndexForCatalog(gameData.data.System));
+        // Never arrive in a hidden storyline clone of the destination, and
+        // prefer a wingmate's active system variant when jumping together.
+        const visibleTarget = resolveWingJumpTarget(
+            nextSystem,
+            currentSystem.links,
+            playerState,
+            entities,
+            gameData.data.System,
+            peer => peer.components.get(JumpStateComponent)?.to,
+        );
         if (visibleTarget !== nextSystem) {
             jumpRoute.route = [visibleTarget, ...jumpRoute.route.slice(1)];
             nextSystem = visibleTarget;
