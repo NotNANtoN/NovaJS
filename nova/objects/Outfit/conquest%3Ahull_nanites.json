@@ -1,0 +1,34 @@
+{
+  "id": "conquest:hull_nanites",
+  "name": "Nano-Armor Plating",
+  "prefix": "conquest",
+  "weapons": {},
+  "repairSystem": true,
+  "cloak": false,
+  "cargoScoop": false,
+  "physics": {
+    "freeMass": 5,
+    "armor": 220,
+    "armorRecharge": 50
+  },
+  "pict": "conquest:hull_nanites",
+  "price": 40000,
+  "desc": " Bonds self-healing ablative tritanium plates and active repair nanites to your hull. Adds +220 armor integrity and +50 continuous in-flight armor regeneration per unit.",
+  "displayWeight": 90,
+  "flags": 0,
+  "max": 4,
+  "techLevel": 1,
+  "availabilityNCB": "",
+  "onPurchase": "",
+  "onSell": "",
+  "contribute": [
+    0,
+    0
+  ],
+  "require": [
+    0,
+    0
+  ],
+  "isEscapePod": false,
+  "isAutoRecharger": false
+}

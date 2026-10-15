@@ -9,11 +9,46 @@ import { meetsRequire } from "../nova_plugin/contribute";
 type PurchaseData = Pick<ShipData | OutfitData, "techLevel" | "availabilityNCB">
     & {
         readonly id?: string;
+        readonly name?: string;
+        readonly cost?: number;
+        readonly price?: number;
         readonly displayWeight?: number;
         readonly buyRandom?: number;
         readonly flags3?: number;
         readonly require?: readonly number[];
     };
+
+function isConquestPurchaseAvailable(item: PurchaseData): boolean {
+    const id = item.id ?? '';
+    if (id.startsWith('conquest:')) {
+        return true;
+    }
+    if (id.startsWith('debug:')) {
+        return false;
+    }
+    if (item.displayWeight !== undefined && item.displayWeight <= 0) {
+        return false;
+    }
+    // Distinguish Ships (`cost` field) from Outfits (`price` field)
+    const isShip = 'cost' in item || item.buyRandom !== undefined;
+    const bareNum = Number(id.replace(/^.*:/, ''));
+    if (isShip) {
+        // Only stock canonical base hulls (128..187) with techLevel <= 20
+        // (unlocks all Civilian, Federation Tech 14, Piracy Tech 16, Auroran
+        // Tech 17, and Polaris/Heavy Tech 18-20 ships without story rank locks).
+        if (Number.isFinite(bareNum) && bareNum > 187) {
+            return false;
+        }
+        return item.techLevel >= 0 && item.techLevel <= 20;
+    }
+    // For Outfits: hide 0-cost story/token items, star maps (nova:215), and
+    // unbuyable alien/mission-only items (techLevel > 25).
+    const price = item.price ?? 0;
+    if (price <= 0 || id === 'nova:215') {
+        return false;
+    }
+    return item.techLevel >= 0 && item.techLevel <= 25;
+}
 
 /**
  * EV Nova Bible, oütf/shïp Require: every 1 bit of the item's Require must be
@@ -118,12 +153,24 @@ export function isPurchaseAvailable(
     planet: PlanetData,
     playerStateOrMissionBits:
         | (Pick<PlayerState, 'missionBits' | 'gender' | 'exploredSystems'> &
-            Partial<Pick<PlayerState, 'gameDate' | 'registered' | 'daysSinceRegistration'>>)
+            Partial<Pick<PlayerState, 'gameDate' | 'registered' | 'daysSinceRegistration' | 'gameMode'>>)
         | ReadonlySet<number>
         | readonly boolean[] = new Set(),
     outfits?: ReadonlyMap<string, unknown>,
     contribute?: readonly number[],
 ): boolean {
+    const isConquest = Boolean(
+        playerStateOrMissionBits
+        && typeof playerStateOrMissionBits === 'object'
+        && 'gameMode' in playerStateOrMissionBits
+        && playerStateOrMissionBits.gameMode === 'conquest',
+    );
+    if (isConquest) {
+        return isConquestPurchaseAvailable(item);
+    }
+    if ((item.id ?? '').startsWith('conquest:')) {
+        return false;
+    }
     // Retail orders a shipyard by display weight and never stocks an entry
     // whose weight is zero. Those entries are the NPC-only variant hulls.
     if (item.displayWeight !== undefined && item.displayWeight <= 0) {
@@ -182,12 +229,24 @@ export function isPurchaseUnlocked(
     planet: PlanetData,
     playerStateOrMissionBits:
         | (Pick<PlayerState, 'missionBits' | 'gender' | 'exploredSystems'> &
-            Partial<Pick<PlayerState, 'gameDate' | 'registered' | 'daysSinceRegistration'>>)
+            Partial<Pick<PlayerState, 'gameDate' | 'registered' | 'daysSinceRegistration' | 'gameMode'>>)
         | ReadonlySet<number>
         | readonly boolean[] = new Set(),
     outfits?: ReadonlyMap<string, unknown>,
     contribute?: readonly number[],
 ): boolean {
+    const isConquest = Boolean(
+        playerStateOrMissionBits
+        && typeof playerStateOrMissionBits === 'object'
+        && 'gameMode' in playerStateOrMissionBits
+        && playerStateOrMissionBits.gameMode === 'conquest',
+    );
+    if (isConquest) {
+        return isConquestPurchaseAvailable(item);
+    }
+    if ((item.id ?? '').startsWith('conquest:')) {
+        return false;
+    }
     if (item.displayWeight !== undefined && item.displayWeight <= 0) {
         return false;
     }

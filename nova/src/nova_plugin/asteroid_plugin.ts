@@ -50,6 +50,7 @@ import { CombatAuthorityComponent } from './combat_resources';
 import {
     CONQUEST_BASE_MAGNET_RADIUS,
     CONQUEST_MAGNET_ACCEL,
+    CONQUEST_ORE_SCATTER_DELAY_MS,
     CONQUEST_UPGRADED_MAGNET_RADIUS,
     conquestOreCreditValue,
     isConquestMode,
@@ -65,7 +66,7 @@ const ASTEROID_BELT_RADIUS = 4_000;
  */
 const ASTEROIDS_PER_DENSITY = 3.2;
 /** Per-system asteroid limit for modern viewports. */
-export const MAX_ASTEROIDS_PER_SYSTEM = 32;
+export const MAX_ASTEROIDS_PER_SYSTEM = 48;
 /** Radians per second an asteroid tumbles. */
 const ASTEROID_MAX_SPIN = 0.6;
 /** Ore floats slower than the rock it came from. */
@@ -90,13 +91,19 @@ export const AsteroidComponent = new Component<AsteroidType>('Asteroid');
 export const AsteroidDataComponent =
     new Component<AsteroidData>('AsteroidData');
 
-export const OreType = t.type({
-    /** The asteroid this came from, used to look up the ore artwork. */
-    asteroidId: t.string,
-    commodity: t.string,
-    tons: t.number,
-    spin: t.number,
-});
+export const OreType = t.intersection([
+    t.type({
+        /** The asteroid this came from, used to look up the ore artwork. */
+        asteroidId: t.string,
+        commodity: t.string,
+        tons: t.number,
+        spin: t.number,
+    }),
+    t.partial({
+        /** Server timestamp when spawned; lets chunks scatter before pickup. */
+        spawnedAt: t.number,
+    }),
+]);
 export type OreType = t.TypeOf<typeof OreType>;
 export const OreComponent = new Component<OreType>('Ore');
 
@@ -160,7 +167,12 @@ export function makeAsteroid(
 }
 
 export function makeOre(
-    asteroidId: string, commodity: string, tons: number, position: Position,
+    asteroidId: string,
+    commodity: string,
+    tons: number,
+    position: Position,
+    velocity = randomDrift(ORE_DRIFT_SPEED),
+    spawnedAt?: number,
 ): Entity {
     const ore = new Entity(`ore ${commodity}`);
     ore.components.set(OreComponent, {
@@ -168,6 +180,7 @@ export function makeOre(
         commodity,
         tons,
         spin: randomSpin(ASTEROID_MAX_SPIN * 2),
+        ...(spawnedAt !== undefined ? { spawnedAt } : {}),
     });
     ore.components.set(MovementStateComponent, {
         accelerating: 0,
@@ -175,7 +188,7 @@ export function makeOre(
         rotation: new Angle(Math.random() * 2 * Math.PI),
         turnBack: false,
         turning: 0,
-        velocity: randomDrift(ORE_DRIFT_SPEED),
+        velocity,
     });
     return ore;
 }
@@ -298,61 +311,6 @@ export const OreTumbleSystem = new System({
     step: tumble,
 });
 
-const AsteroidDestroyedSystem = new System({
-    name: 'AsteroidDestroyedSystem',
-    args: [AsteroidComponent, AsteroidDataComponent, ArmorComponent,
-        MovementStateComponent, UUID, Entities, MultiplayerData,
-        PlatformResource, EntityBudgetResource] as const,
-    step(asteroid, data, armor, movement, selfUuid, entities, multiplayer,
-        platform, budget) {
-        if (platform !== 'node' || multiplayer.owner !== 'server') {
-            return;
-        }
-        // Armour is inspected directly rather than through a death event,
-        // because asteroids are not ships and take no part in the death
-        // plugin's explosion and respawn sequence.
-        if (armor.current > 0 || !entities.has(selfUuid)) {
-            return;
-        }
-
-        // The dying asteroid's position is an Immer draft that is revoked when
-        // this step ends, so anything handed to a new entity has to be a plain
-        // copy or the draft leaks into that entity and throws when the
-        // multiplayer serializer next touches it. Each new entity also needs
-        // its own instance, because the movement system mutates it in place.
-        const origin = () => new Position(
-            movement.position.x, movement.position.y);
-
-        for (let index = 0; index < data.fragmentCount; index++) {
-            const fragmentId = data.fragments[index % data.fragments.length];
-            if (!fragmentId) {
-                break;
-            }
-            const fragment = makeAsteroid(fragmentId, origin());
-            if (!reserveEntity(budget, fragment, 'asteroid')) {
-                break;
-            }
-            fragment.components.set(MultiplayerData, { owner: 'server' });
-            entities.set(uuid(), fragment);
-        }
-
-        const commodity = data.yield.commodity;
-        if (commodity) {
-            for (const tons of oreChunkTons(data.yield.quantity)) {
-                const ore = makeOre(asteroid.id, commodity, tons, origin());
-                if (!reserveEntity(budget, ore, 'asteroid')) {
-                    break;
-                }
-                ore.components.set(MultiplayerData, { owner: 'server' });
-                entities.set(uuid(), ore);
-            }
-        }
-
-        // The budget for this entity is released by the delete handler.
-        entities.delete(selfUuid);
-    },
-});
-
 export const CargoScoopOutfitComponent =
     new Component<{ enabled: boolean }>('CargoScoopOutfitComponent');
 
@@ -387,12 +345,119 @@ const OreCollectorsQuery = new Query([
     Optional(ShieldComponent),
 ] as const, 'OreCollectors');
 
+const AsteroidDestroyedSystem = new System({
+    name: 'AsteroidDestroyedSystem',
+    args: [AsteroidComponent, AsteroidDataComponent, ArmorComponent,
+        MovementStateComponent, UUID, Entities, MultiplayerData,
+        PlatformResource, EntityBudgetResource, TimeResource,
+        OreCollectorsQuery] as const,
+    step(asteroid, data, armor, movement, selfUuid, entities, multiplayer,
+        platform, budget, time, collectors) {
+        if (platform !== 'node' || multiplayer.owner !== 'server') {
+            return;
+        }
+        // Armour is inspected directly rather than through a death event,
+        // because asteroids are not ships and take no part in the death
+        // plugin's explosion and respawn sequence.
+        if (armor.current > 0 || !entities.has(selfUuid)) {
+            return;
+        }
+
+        const conquestActive = collectors.some(([, pState]) => isConquestMode(pState));
+
+        // The dying asteroid's position is an Immer draft that is revoked when
+        // this step ends, so anything handed to a new entity has to be a plain
+        // copy or the draft leaks into that entity and throws when the
+        // multiplayer serializer next touches it. Each new entity also needs
+        // its own instance, because the movement system mutates it in place.
+        const origin = () => new Position(
+            movement.position.x, movement.position.y);
+
+        for (let index = 0; index < data.fragmentCount; index++) {
+            const fragmentId = data.fragments[index % data.fragments.length];
+            if (!fragmentId) {
+                break;
+            }
+            let fragment: Entity;
+            if (conquestActive) {
+                const angle = (index / Math.max(1, data.fragmentCount)) * Math.PI * 2
+                    + (Math.random() - 0.5) * 0.5;
+                const fragPos = new Position(
+                    movement.position.x + Math.cos(angle) * 20,
+                    movement.position.y + Math.sin(angle) * 20,
+                );
+                const fragVel = new Vector(
+                    Math.cos(angle) * (ASTEROID_DRIFT_SPEED * 1.2),
+                    Math.sin(angle) * (ASTEROID_DRIFT_SPEED * 1.2),
+                );
+                fragment = makeAsteroid(fragmentId, fragPos, fragVel);
+            } else {
+                fragment = makeAsteroid(fragmentId, origin());
+            }
+            if (!reserveEntity(budget, fragment, 'asteroid')) {
+                break;
+            }
+            fragment.components.set(MultiplayerData, { owner: 'server' });
+            entities.set(uuid(), fragment);
+        }
+
+        const commodity = data.yield.commodity || (conquestActive ? 'Metal' : '');
+        const yieldQty = data.yield.quantity > 0
+            ? data.yield.quantity
+            : (conquestActive ? 3 : 0);
+        if (commodity && yieldQty > 0) {
+            const chunks = oreChunkTons(yieldQty);
+            for (let idx = 0; idx < chunks.length; idx++) {
+                const tons = chunks[idx];
+                let ore: Entity;
+                if (conquestActive) {
+                    const angle = (idx / Math.max(1, chunks.length)) * Math.PI * 2
+                        + (Math.random() - 0.5) * 0.6;
+                    const speed = 36 + Math.random() * 28;
+                    const chunkPos = new Position(
+                        movement.position.x + Math.cos(angle) * 22,
+                        movement.position.y + Math.sin(angle) * 22,
+                    );
+                    const chunkVel = new Vector(
+                        Math.cos(angle) * speed,
+                        Math.sin(angle) * speed,
+                    );
+                    ore = makeOre(
+                        asteroid.id,
+                        commodity,
+                        tons,
+                        chunkPos,
+                        chunkVel,
+                        time.time,
+                    );
+                } else {
+                    ore = makeOre(asteroid.id, commodity, tons, origin());
+                }
+                if (!reserveEntity(budget, ore, 'asteroid')) {
+                    break;
+                }
+                ore.components.set(MultiplayerData, { owner: 'server' });
+                entities.set(uuid(), ore);
+            }
+        }
+
+        // The budget for this entity is released by the delete handler.
+        entities.delete(selfUuid);
+    },
+});
+
 const OrePickupSystem = new System({
     name: 'OrePickupSystem',
     args: [OreComponent, MovementStateComponent, UUID, Entities,
-        OreCollectorsQuery, MultiplayerData, PlatformResource, Emit] as const,
-    step(ore, movement, selfUuid, entities, collectors, multiplayer, platform, emit) {
+        OreCollectorsQuery, MultiplayerData, PlatformResource, Emit,
+        TimeResource] as const,
+    step(ore, movement, selfUuid, entities, collectors, multiplayer, platform, emit, time) {
         if (platform !== 'node' || multiplayer.owner !== 'server') {
+            return;
+        }
+        // Let newly shattered ore chunks burst outward before being scooped
+        if (ore.spawnedAt !== undefined
+            && time.time - ore.spawnedAt < CONQUEST_ORE_SCATTER_DELAY_MS) {
             return;
         }
         for (const [collectorMovement, playerState, cargoScoop, collectorEntity, shield] of collectors) {

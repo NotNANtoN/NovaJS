@@ -22,7 +22,11 @@ import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { GameDataResource } from './game_data_resource';
 import { pickWeighted } from './npc_spawn_plugin';
 import { SystemIdResource } from './system_id_resource';
-import { effectiveAsteroidDensity, isConquestMode } from './conquest_config';
+import {
+    CONQUEST_ASTEROID_RESPAWN_MS,
+    effectiveAsteroidDensity,
+    isConquestMode,
+} from './conquest_config';
 
 /** How often the belt is topped back up after asteroids are mined out. */
 export const ASTEROID_RESPAWN_INTERVAL_MS = 20_000;
@@ -150,7 +154,8 @@ const AsteroidSpawnSystem = new AsyncSystem({
             return;
         }
 
-        if (players.some(([, pState]) => isConquestMode(pState))) {
+        const hasConquest = players.some(([, pState]) => isConquestMode(pState));
+        if (hasConquest) {
             const conquestTarget = asteroidCountForDensity(
                 effectiveAsteroidDensity(systemId, 0, true),
             );
@@ -166,10 +171,14 @@ const AsteroidSpawnSystem = new AsyncSystem({
         }
 
         // The initial belt appears at once; afterwards a mined out belt
-        // refills slowly so it cannot be farmed on the spot.
+        // refills slowly in normal mode or briskly in Conquest mode.
         const missing = state.spawnedInitialBelt
-            ? 1 : state.target - asteroids.length;
-        state.nextSpawnAt = time.time + ASTEROID_RESPAWN_INTERVAL_MS;
+            ? (hasConquest ? Math.min(4, state.target - asteroids.length) : 1)
+            : state.target - asteroids.length;
+        state.spawnedInitialBelt = true;
+        state.nextSpawnAt = time.time + (
+            hasConquest ? CONQUEST_ASTEROID_RESPAWN_MS : ASTEROID_RESPAWN_INTERVAL_MS
+        );
         state.spawnedInitialBelt = true;
 
         // Place the field around the pilot when there is one, so the rocks

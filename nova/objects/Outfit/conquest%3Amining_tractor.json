@@ -1,0 +1,32 @@
+{
+  "id": "conquest:mining_tractor",
+  "name": "Magnetic Ore Attractor",
+  "prefix": "conquest",
+  "weapons": {},
+  "repairSystem": false,
+  "cloak": false,
+  "cargoScoop": true,
+  "physics": {
+    "freeMass": 3
+  },
+  "pict": "conquest:mining_tractor",
+  "price": 25000,
+  "desc": "Projects a wide-area gravimetric tractor field that pulls scattered asteroid ore and ship salvage packages into your collector from 380 units away, while refining mineral purity for a +50% credit bonus on every scooped package.",
+  "displayWeight": 90,
+  "flags": 0,
+  "max": 1,
+  "techLevel": 1,
+  "availabilityNCB": "",
+  "onPurchase": "",
+  "onSell": "",
+  "contribute": [
+    0,
+    0
+  ],
+  "require": [
+    0,
+    0
+  ],
+  "isEscapePod": false,
+  "isAutoRecharger": false
+}

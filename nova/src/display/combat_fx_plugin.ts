@@ -1,4 +1,5 @@
 import { Plugin } from 'nova_ecs/plugin';
+import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
@@ -6,10 +7,12 @@ import { Optional } from 'nova_ecs/optional';
 import * as PIXI from 'pixi.js';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { AsteroidComponent } from '../nova_plugin/asteroid_plugin';
 import { AppliedDamageEvent, DisabledComponent } from '../nova_plugin/death_plugin';
 import { HitFeedbackEvent } from '../nova_plugin/damage_events';
-import { ShieldComponent } from '../nova_plugin/health_plugin';
+import { ArmorComponent, ShieldComponent } from '../nova_plugin/health_plugin';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin';
+import { AnimationGraphicComponent } from './animation_graphic_plugin';
 import { Space } from './space_resource';
 import { attachGraphic, ManagedGraphic } from './managed_graphic';
 
@@ -181,6 +184,13 @@ export const DisabledSmokeSystem = new System({
     },
 });
 
+const DamagedAsteroidsQuery = new Query([
+    AsteroidComponent,
+    ArmorComponent,
+    MovementStateComponent,
+    Optional(AnimationGraphicComponent),
+] as const, 'DamagedAsteroids');
+
 export const DrawCombatFxSystem = new System({
     name: 'DrawCombatFxSystem',
     after: [ClearCombatFx],
@@ -188,9 +198,10 @@ export const DrawCombatFxSystem = new System({
         CombatFxGraphics,
         CombatFxResource,
         TimeResource,
+        DamagedAsteroidsQuery,
         SingletonComponent,
     ] as const,
-    step(graphicsHandle, state, time) {
+    step(graphicsHandle, state, time, asteroids) {
         const g = graphicsHandle.root as PIXI.Graphics;
         const now = time.time;
         const dt = time.delta_s;
@@ -261,6 +272,30 @@ export const DrawCombatFxSystem = new System({
         // Clean stale smoke spatial keys
         if (state.lastSmokeAt.size > 200) {
             state.lastSmokeAt.clear();
+        }
+
+        // 4. Render Asteroid Health Bars for damaged rocks
+        for (const [, armor, movement, graphic] of asteroids) {
+            if (armor.max <= 0 || armor.current <= 0 || armor.current >= armor.max) {
+                continue;
+            }
+            const ratio = Math.max(0, Math.min(1, armor.current / armor.max));
+            const barWidth = 34;
+            const barHeight = 4;
+            const halfH = (graphic?.size.y ?? 36) / 2;
+            const bx = movement.position.x - barWidth / 2;
+            const by = movement.position.y + halfH + 6;
+            const fillColor = ratio > 0.55
+                ? 0x38ff75
+                : ratio > 0.25
+                    ? 0xffcc00
+                    : 0xff3838;
+
+            g.roundRect(bx - 1, by - 1, barWidth + 2, barHeight + 2, 2)
+                .fill({ color: 0x050505, alpha: 0.85 })
+                .stroke({ width: 1, color: 0x444444, alpha: 0.9 });
+            g.roundRect(bx, by, Math.max(2, barWidth * ratio), barHeight, 1)
+                .fill({ color: fillColor, alpha: 0.95 });
         }
     },
 });

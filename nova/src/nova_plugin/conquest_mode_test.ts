@@ -15,6 +15,7 @@ import { EntityBudgetPlugin } from './entity_budget';
 import {
     applyConquestPocketSystems,
     CONQUEST_AURORA_SYSTEM,
+    CONQUEST_ORE_SCATTER_DELAY_MS,
     CONQUEST_SOL_SYSTEM,
     conquestOreCreditValue,
     ensureConquestPocketState,
@@ -27,6 +28,9 @@ import {
     createInitialPlayerState,
     PlayerStateComponent,
 } from './player_state';
+import { isPurchaseAvailable } from '../spaceport/availability';
+import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 
 describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
     it('preserves lateral offset when hyperjumping from a lower or upper point in System A to System B', () => {
@@ -125,5 +129,99 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(player.components.get(PlayerStateComponent)!.credits).toBe(20_800);
         expect(player.components.get(PlayerStateComponent)!.holds.length).toBe(0);
         expect(world.entities.has('ore-1')).toBeFalse();
+    });
+
+    it('lets freshly shattered asteroid ore scatter for CONQUEST_ORE_SCATTER_DELAY_MS before being scooped', () => {
+        const world = new World();
+        world.resources.set(GameDataResource, new MockGameData());
+        world.resources.set(PlatformResource, 'node');
+        world.addPlugin(TimePlugin);
+        world.addPlugin(EntityBudgetPlugin);
+        world.addPlugin(DeltaPlugin);
+        world.addPlugin(MovementPlugin);
+        world.addPlugin(AsteroidPlugin);
+
+        const time = world.resources.get(TimeResource)!;
+        time.fixedDelta_ms = 16;
+        time.time = 1_000;
+
+        const state = createInitialPlayerState();
+        state.gameMode = 'conquest';
+        state.credits = 5_000;
+
+        const player = new Entity('player')
+            .addComponent(PlayerStateComponent, state)
+            .addComponent(MultiplayerData, { owner: 'peer-1' })
+            .addComponent(MovementStateComponent, {
+                position: new Position(0, 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                accelerating: 0,
+                turning: 0,
+                turnBack: false,
+            });
+        world.entities.set('player', player);
+
+        const ore = makeOre(
+            'nova:128',
+            'Metal',
+            2,
+            new Position(15, 0),
+            new Vector(0, 0),
+            1_000,
+        );
+        ore.components.set(MultiplayerData, { owner: 'server' });
+        world.entities.set('ore-fresh', ore);
+
+        // Immediately after shatter (t = 1,100ms), ore is still scattering
+        time.time = 1_100;
+        world.step();
+        expect(world.entities.has('ore-fresh')).toBeTrue();
+        expect(player.components.get(PlayerStateComponent)!.credits).toBe(5_000);
+
+        // After scatter delay elapses, flying over the package scoops it
+        time.time = 1_000 + CONQUEST_ORE_SCATTER_DELAY_MS + 50;
+        world.step();
+        expect(world.entities.has('ore-fresh')).toBeFalse();
+        expect(player.components.get(PlayerStateComponent)!.credits).toBe(9_800);
+    });
+
+    it('unlocks Federation/Auroran military ships and custom conquest outfits in Conquest mode while hiding zero-cost story items', () => {
+        const earth = { ...getDefaultPlanetData(), id: 'nova:128', techLevel: 10 };
+        const state = createInitialPlayerState();
+        state.gameMode = 'conquest';
+
+        const fedDestroyer = {
+            id: 'nova:141',
+            techLevel: 14,
+            cost: 2_500_000,
+            displayWeight: 50,
+            buyRandom: 50,
+            availabilityNCB: 'b4000',
+            require: [1, 0],
+        };
+        const hyperthrusters = {
+            id: 'conquest:hyperthrusters',
+            techLevel: 1,
+            price: 35_000,
+            displayWeight: 90,
+            availabilityNCB: '',
+        };
+        const storyToken = {
+            id: 'nova:350',
+            techLevel: 1,
+            price: 0,
+            displayWeight: 10,
+            availabilityNCB: '',
+        };
+
+        expect(isPurchaseAvailable(fedDestroyer, earth, state)).toBeTrue();
+        expect(isPurchaseAvailable(hyperthrusters, earth, state)).toBeTrue();
+        expect(isPurchaseAvailable(storyToken, earth, state)).toBeFalse();
+
+        // In Story mode, conquest outfits stay hidden and Fed Destroyer requires NCB/tech
+        state.gameMode = 'story';
+        expect(isPurchaseAvailable(hyperthrusters, earth, state)).toBeFalse();
+        expect(isPurchaseAvailable(fedDestroyer, earth, state)).toBeFalse();
     });
 });

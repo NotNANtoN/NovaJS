@@ -182,10 +182,10 @@ const DamageSystem = new System({
         Optional(IonizationComponent), Optional(IonizationColorComponent),
         Optional(ProjectileComponent), Optional(PlayerDeathComponent),
         TimeResource, UUID, PlatformResource,
-        Optional(MultiplayerData)] as const,
+        Optional(MultiplayerData), GetEntity, Entities] as const,
     step(emit, emitNow, { damage, scale = 1, damager, fromExplosion },
         shield, armor, ionization, ionizationColor, isProjectile, playerDeath,
-        time, uuid, platform, multiplayer) {
+        time, uuid, platform, multiplayer, entity, entities) {
         // A shot is not replicated: every world derives it from the same fire
         // event and flies its own copy, so the world holding one is the only
         // one that can resolve what happens to it. That is what lets point
@@ -196,11 +196,23 @@ const DamageSystem = new System({
         }
 
         const hasShield = shield && shield.max > 0;
-        if (isProjectile && !hasShield) {
-            // This is a projectile, so use point defense damage scaling.
+        const isShip = entity.components.has(ShipComponent);
+        if ((isProjectile || !isShip) && !hasShield) {
+            // Unshielded targets (projectiles and asteroids) absorb half of
+            // the weapon's shield energy into armor damage so energy blasters
+            // can effectively mine rocks as well as swat missiles.
+            let asteroidBonus = 1;
+            if (!isProjectile && !isShip && damager) {
+                const shooterOutfits = entities.get(damager)
+                    ?.components.get(OutfitsStateComponent);
+                const drillCount = shooterOutfits?.get('conquest:seismic_drill')?.count ?? 0;
+                if (drillCount > 0) {
+                    asteroidBonus += 1.5 * drillCount;
+                }
+            }
             damage = {
                 ...damage,
-                armor: damage.armor + damage.shield / 2,
+                armor: (damage.armor + damage.shield / 2) * asteroidBonus,
             };
         }
 

@@ -23,28 +23,43 @@ export const AURORAN_GOVT = 129;
 
 export const FEDERATION_UPGRADE_TIERS = [
     'nova:128', // Shuttle
-    'nova:142', // Viper
-    'nova:143', // Valkyrie
-    'nova:130', // Starbridge
-    'nova:141', // Fed Patrol Boat
+    'nova:187', // Fed Scout Ship
+    'nova:144', // Fed Viper
+    'nova:135', // Lightning
+    'nova:145', // Fed Anaconda
+    'nova:137', // Valkyrie
+    'nova:142', // Fed Patrol Boat
+    'nova:133', // Starbridge
+    'nova:141', // Fed Destroyer
+    'nova:143', // Fed Carrier
 ] as const;
 
 export const AURORAN_UPGRADE_TIERS = [
-    'nova:152', // Firebird
-    'nova:153', // Phoenix
-    'nova:154', // Argosy
-    'nova:156', // Abomination
+    'nova:155', // Firebird
+    'nova:156', // Phoenix
+    'nova:138', // Argosy
+    'nova:152', // Abomination
+    'nova:154', // Aurora Cruiser
+    'nova:153', // Aurora Carrier
 ] as const;
 
-export const CONQUEST_BASE_MAGNET_RADIUS = 260;
-export const CONQUEST_UPGRADED_MAGNET_RADIUS = 420;
-export const CONQUEST_MAGNET_ACCEL = 260;
-export const CONQUEST_MIN_ASTEROID_DENSITY = 8;
-export const MAX_CONQUEST_BOTS_PER_SYSTEM = 4;
-export const CONQUEST_BOT_SPAWN_INTERVAL_MS = 8_000;
-export const CONQUEST_BOT_GATHER_CREDIT_RATE_PER_SEC = 900;
-export const CONQUEST_BOT_UPGRADE_BASE_COST = 12_000;
-export const CONQUEST_BOT_RAID_IDLE_MS = 28_000;
+/**
+ * Default collector pull radius in Conquest mode: small enough that shattered
+ * asteroid packages scatter outward and the player flies into them to scoop,
+ * while buying the Magnetic Ore Attractor (`conquest:mining_tractor`) or
+ * Asteroid Scoop expands the tractor field to 380 units.
+ */
+export const CONQUEST_BASE_MAGNET_RADIUS = 95;
+export const CONQUEST_UPGRADED_MAGNET_RADIUS = 380;
+export const CONQUEST_MAGNET_ACCEL = 220;
+export const CONQUEST_ORE_SCATTER_DELAY_MS = 650;
+export const CONQUEST_MIN_ASTEROID_DENSITY = 15;
+export const CONQUEST_ASTEROID_RESPAWN_MS = 2_500;
+export const MAX_CONQUEST_BOTS_PER_SYSTEM = 8;
+export const CONQUEST_BOT_SPAWN_INTERVAL_MS = 4_000;
+export const CONQUEST_BOT_GATHER_CREDIT_RATE_PER_SEC = 1_100;
+export const CONQUEST_BOT_UPGRADE_BASE_COST = 10_000;
+export const CONQUEST_BOT_RAID_IDLE_MS = 24_000;
 
 export function isConquestMode(
     state: Pick<PlayerState, 'gameMode'> | undefined,

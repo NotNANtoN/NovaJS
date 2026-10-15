@@ -1,0 +1,34 @@
+{
+  "id": "conquest:shield_overcharger",
+  "name": "Aegis Shield Matrix",
+  "prefix": "conquest",
+  "weapons": {},
+  "repairSystem": false,
+  "cloak": false,
+  "cargoScoop": false,
+  "physics": {
+    "freeMass": 5,
+    "shield": 250,
+    "shieldRecharge": 80
+  },
+  "pict": "conquest:shield_overcharger",
+  "price": 45000,
+  "desc": "A heavy military-grade shield emitter matrix developed by Federation and Auroran fleet engineers. Adds +250 maximum shield capacity and +80 shield regeneration per unit.",
+  "displayWeight": 90,
+  "flags": 0,
+  "max": 4,
+  "techLevel": 1,
+  "availabilityNCB": "",
+  "onPurchase": "",
+  "onSell": "",
+  "contribute": [
+    0,
+    0
+  ],
+  "require": [
+    0,
+    0
+  ],
+  "isEscapePod": false,
+  "isAutoRecharger": false
+}

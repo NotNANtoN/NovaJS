@@ -1,0 +1,32 @@
+{
+  "id": "conquest:seismic_drill",
+  "name": "Seismic Mining Capacitor",
+  "prefix": "conquest",
+  "weapons": {},
+  "repairSystem": false,
+  "cloak": false,
+  "cargoScoop": false,
+  "physics": {
+    "freeMass": 3
+  },
+  "pict": "conquest:seismic_drill",
+  "price": 30000,
+  "desc": "Modulates your ship’s weapon frequency to match the crystalline fracture harmonics of asteroid rock. Each installed capacitor increases your weapon damage against asteroids by +150%, letting you shatter huge motherlodes in seconds.",
+  "displayWeight": 90,
+  "flags": 0,
+  "max": 3,
+  "techLevel": 1,
+  "availabilityNCB": "",
+  "onPurchase": "",
+  "onSell": "",
+  "contribute": [
+    0,
+    0
+  ],
+  "require": [
+    0,
+    0
+  ],
+  "isEscapePod": false,
+  "isAutoRecharger": false
+}

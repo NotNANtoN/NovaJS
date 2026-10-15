@@ -24,6 +24,7 @@ import { SystemIdResource } from './system_id_resource';
 import { DisabledComponent, PlayerDeathComponent } from './death_plugin';
 import { DestructionStartedComponent } from './destruction_state';
 import { JumpStateComponent } from './jump_plugin';
+import { isConquestMode } from './conquest_config';
 import { v4 } from 'uuid';
 import type { ShipData } from 'novadatainterface/ShipData';
 import type { NpcTrafficState } from './npc_traffic';
@@ -32,8 +33,17 @@ import type { Entity } from 'nova_ecs/entity';
 
 const SCAN_DISTANCE = 480;
 const SCAN_COOLDOWN_MS = 90_000;
-const CHATTER_INTERVAL_MIN_MS = 22_000;
-const CHATTER_INTERVAL_MAX_MS = 40_000;
+const CHATTER_INTERVAL_MIN_MS = 45_000;
+const CHATTER_INTERVAL_MAX_MS = 75_000;
+
+function cleanEntityDisplayName(rawName: string | undefined, fallback: string): string {
+    if (!rawName) return fallback;
+    const cleaned = rawName
+        .replace(/^(asteroid|planet|ore)\s+/i, '')
+        .replace(/\bnova:\d+\b/gi, '')
+        .trim();
+    return cleaned || fallback;
+}
 
 interface SecurityScanState {
     lastScanByPatrol: Map<string /* patrolUuid */, number /* time */>;
@@ -129,8 +139,8 @@ function generateContextualChatter(
     entities: EntityMap,
     planetNames: Map<string, string>,
 ): { text: string; sender: string; kind: 'chatter' | 'security' } {
-    const sender = entity.name || shipData.name || 'Merchant';
-    const shipName = shipData.name || 'Vessel';
+    const sender = cleanEntityDisplayName(shipData.name || entity.name, 'Merchant');
+    const shipName = cleanEntityDisplayName(shipData.name, 'Vessel');
 
     // 1. Combat engagement / hunting chatter
     if (targetUuid && entities.has(targetUuid)) {
@@ -141,7 +151,11 @@ function generateContextualChatter(
             || (targetArmor && targetArmor.current <= 0);
 
         if (targetEntity && !targetDestroyed) {
-            const targetName = targetEntity.name || 'target';
+            const targetShipData = targetEntity.components.get(ShipDataComponent);
+            const targetName = cleanEntityDisplayName(
+                targetShipData?.name || targetEntity.name,
+                'target vessel',
+            );
 
             if (targetDisabled) {
                 const plunderLines = [
@@ -172,20 +186,12 @@ function generateContextualChatter(
 
     // 2. Mining ship operations
     if (miner?.mining) {
-        if (targetUuid && entities.has(targetUuid)) {
-            const asteroidName = entities.get(targetUuid)?.name || 'asteroid';
-            const miningLines = [
-                `Excavation beam locked on ${asteroidName}. Harvesting high-grade metallic ore.`,
-                `Excavating mineral veins on ${asteroidName}. Core integrity stable.`,
-                `Drill laser active on ${asteroidName}. Extracting industrial minerals.`,
-            ];
-            return { text: pickRandom(miningLines), sender, kind: 'chatter' };
-        }
-        return {
-            text: 'Mining laser engaged on dense asteroid core. Commencing excavation.',
-            sender,
-            kind: 'chatter',
-        };
+        const miningLines = [
+            'Excavation beam locked on asteroid deposit. Harvesting high-grade metallic ore.',
+            'Excavating mineral veins in the belt. Core integrity stable.',
+            'Drill laser active on mineral cluster. Extracting industrial ore.',
+        ];
+        return { text: pickRandom(miningLines), sender, kind: 'chatter' };
     }
     if (miner) {
         const prospectingLines = [
@@ -282,6 +288,9 @@ export const NpcSecurityScanSystem = new System({
             playerJump,
             playerDeath,
         ] of players) {
+            if (isConquestMode(playerState)) {
+                continue;
+            }
             if (!isShipOperational(
                 playerDisabled,
                 playerDestructionStarted,
@@ -383,6 +392,7 @@ export const NpcAmbientChatterSystem = new System({
     args: [
         NpcShipQuery,
         PlanetQuery,
+        PlayerQuery,
         Entities,
         AmbientChatterStateResource,
         TimeResource,
@@ -390,7 +400,10 @@ export const NpcAmbientChatterSystem = new System({
         Optional(SystemIdResource),
         SingletonComponent,
     ] as const,
-    step(npcs, planets, entities, chatterState, time, emit, systemId) {
+    step(npcs, planets, players, entities, chatterState, time, emit, systemId) {
+        if (players.some(([, , , state]) => isConquestMode(state))) {
+            return;
+        }
         const now = time.time;
         if (now < chatterState.nextChatterAt) {
             return;
@@ -468,6 +481,9 @@ export const NpcDistressSystem = new System({
         SingletonComponent,
     ] as const,
     step(npcs, entities, chatterState, time, emit, _systemId, players, world) {
+        if (players.some(([, , , state]) => isConquestMode(state))) {
+            return;
+        }
         const governments = world.resources.get(GovernmentRelationResource);
         const now = time.time;
         const playerEntry = players[0];
@@ -545,8 +561,15 @@ export const NpcDistressSystem = new System({
             }
             chatterState.lastDistressByShip.set(uuid, now);
 
-            const attackerName = attacker.name || 'hostiles';
-            const senderName = entity.name || shipData.name || 'Merchant';
+            const attackerShipData = attacker.components.get(ShipDataComponent);
+            const attackerName = cleanEntityDisplayName(
+                attackerShipData?.name || attacker.name,
+                'hostiles',
+            );
+            const senderName = cleanEntityDisplayName(
+                shipData.name || entity.name,
+                'Merchant',
+            );
             const pct = Math.max(0, Math.round(shieldPct * 100));
 
             const distressLines = [

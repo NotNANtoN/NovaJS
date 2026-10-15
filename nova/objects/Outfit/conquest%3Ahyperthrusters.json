@@ -1,0 +1,35 @@
+{
+  "id": "conquest:hyperthrusters",
+  "name": "Overdrive Thruster Pack",
+  "prefix": "conquest",
+  "weapons": {},
+  "repairSystem": false,
+  "cloak": false,
+  "cargoScoop": false,
+  "physics": {
+    "freeMass": 4,
+    "speed": 95,
+    "acceleration": 140,
+    "turnRate": 18
+  },
+  "pict": "conquest:hyperthrusters",
+  "price": 35000,
+  "desc": "Designed for the Sol-Aurora border conflict, the Overdrive Thruster Pack couples twin plasma injectors directly to your sublight drive. Each unit dramatically boosts top speed, thrust acceleration, and combat turn rate. Up to five packs can be stacked.",
+  "displayWeight": 90,
+  "flags": 0,
+  "max": 5,
+  "techLevel": 1,
+  "availabilityNCB": "",
+  "onPurchase": "",
+  "onSell": "",
+  "contribute": [
+    0,
+    0
+  ],
+  "require": [
+    0,
+    0
+  ],
+  "isEscapePod": false,
+  "isAutoRecharger": false
+}
