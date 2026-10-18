@@ -10,8 +10,8 @@
     "freeMass": 0
   },
   "pict": "conquest:vellos_arrow_license",
-  "price": 250000,
-  "desc": "Awakens second-order Vell-os telepathic mastery. Once attuned, you may manifest a Vell-os Arrow (or Dart) in the Sol Shipyard at zero credit cost.",
+  "price": 1800000,
+  "desc": "Awakens second-order Vell-os telepathic mastery. Once attuned, you may manifest a Vell-os Arrow (990 shields, Summer Bloom turret beam, and Flower of Spring) or Dart in the Sol Shipyard at zero credit cost.",
   "displayWeight": 90,
   "flags": 0,
   "max": 1,

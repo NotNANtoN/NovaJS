@@ -10,8 +10,8 @@
     "freeMass": 0
   },
   "pict": "conquest:vellos_dart_license",
-  "price": 80000,
-  "desc": "Awakens third-order Vell-os telepathic resonance. Once attuned, you may manifest a Vell-os Dart in the Sol Shipyard at zero credit cost.",
+  "price": 450000,
+  "desc": "Awakens third-order Vell-os telepathic resonance. Once attuned, you may manifest a Vell-os Dart (600 top speed, regenerating psionic energy, and built-in Flower of Spring beam) in the Sol Shipyard at zero credit cost.",
   "displayWeight": 90,
   "flags": 0,
   "max": 1,
