@@ -13,6 +13,7 @@ import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import {
     MovementPhysicsComponent,
     MovementPhysics,
+    MovementType,
     RemoteMovementPresentationComponent,
     MovementState,
     MovementStateComponent,
@@ -395,7 +396,23 @@ export function applyJumpBrakingControls(
     movement: MovementState,
     maxVelocity: number,
     targetDirection?: Vector,
+    movementType: MovementType = MovementType.INERTIAL,
 ): void {
+    // Inertialess ships (such as Vell-os Dart, Arrow, and Javelin) do not
+    // turn 180 degrees to retro-thrust: in inertialess physics, positive
+    // `accelerating` increases `targetSpeed` and `velocity` rotates with the
+    // nose, which would make `turnBack` spin forever at full speed! Instead,
+    // an inertialess ship bleeds speed immediately and turns straight toward
+    // the jump vector.
+    if (movementType === MovementType.INERTIALESS) {
+        movement.accelerating = -1;
+        movement.targetSpeed = 0;
+        movement.velocity = new Vector(0, 0);
+        movement.turning = 0;
+        movement.turnBack = false;
+        movement.turnTo = targetDirection ? targetDirection.angle : null;
+        return;
+    }
     const brakeSpeed = Math.max(0, maxVelocity)
         * JUMP_BRAKE_SPEED_THRESHOLD;
     if (movement.velocity.length <= brakeSpeed) {
@@ -681,7 +698,12 @@ const JumpBrakeControlSystem = new System({
                     }
                 }
             }
-            applyJumpBrakingControls(movement, physics.maxVelocity, direction);
+            applyJumpBrakingControls(
+                movement,
+                physics.maxVelocity,
+                direction,
+                physics.movementType,
+            );
         }
     },
 });

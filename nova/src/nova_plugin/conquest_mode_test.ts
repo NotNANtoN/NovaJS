@@ -3,7 +3,7 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Entity } from 'nova_ecs/entity';
-import { MovementPlugin, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { MovementPlugin, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
 import { TimePlugin } from 'nova_ecs/plugins/time_plugin';
@@ -22,7 +22,8 @@ import {
     oppositeConquestSystem,
 } from './conquest_mode';
 import { GameDataResource } from './game_data_resource';
-import { calculateJumpArrival, isValidNextHop } from './jump_plugin';
+import { applyJumpBrakingControls, calculateJumpArrival, isValidNextHop } from './jump_plugin';
+import { artworkUrl } from '../client/artwork_url';
 import { PlatformResource } from './platform_plugin';
 import {
     createInitialPlayerState,
@@ -279,5 +280,32 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(classifyOutfitCategory(lightBlaster)).toBe('weapons');
         expect(classifyOutfitCategory(shieldMatrix)).toBe('defenses');
         expect(classifyOutfitCategory(hyperthrusters)).toBe('upgrades');
+    });
+
+    it('turns inertialess Vell-os ships directly toward the jump vector without spinning around to retro-thrust', () => {
+        const movement = {
+            position: new Position(1500, 0),
+            velocity: new Vector(-200, 150),
+            rotation: new Angle(Math.PI),
+            accelerating: 1,
+            turning: 0,
+            turnBack: false,
+            turnTo: null,
+            targetSpeed: 250,
+        };
+        const destVector = new Vector(1, 0);
+        applyJumpBrakingControls(movement, 375, destVector, MovementType.INERTIALESS);
+
+        expect(movement.turnBack).toBeFalse();
+        expect(movement.velocity.length).toBe(0);
+        expect(movement.targetSpeed).toBe(0);
+        expect(movement.turnTo?.angle).toBeCloseTo(destVector.angle.angle, 6);
+    });
+
+    it('appends cache-busting version query string to conquest:* artwork URLs', () => {
+        expect(artworkUrl('PictImage', 'conquest:hyperthrusters'))
+            .toContain('?v=4');
+        expect(artworkUrl('PictImage', 'nova:6000'))
+            .not.toContain('?v=');
     });
 });

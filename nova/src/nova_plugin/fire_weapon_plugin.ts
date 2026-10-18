@@ -30,6 +30,8 @@ import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 import { ArmorComponent } from './health_plugin';
 import { DestructionStartedComponent } from './destruction_state';
+import { PlayerShipSelector } from './player_ship_plugin';
+import { PlayerStateComponent } from './player_state';
 import { FireLogShot, fireLogReplayTiming, loggedShotEntityId } from './fire_sync';
 import { createShotRng, ShotRng } from './shot_rng';
 
@@ -371,8 +373,15 @@ export abstract class WeaponEntry {
 
         let angle = movement.rotation;
         if ('guidance' in this.data) {
-            if (!target && (this.data.guidance === 'beamTurret'
-                || this.data.guidance === 'turret')) {
+            // Player ships can fire turrets/beamTurrets straight ahead when no
+            // target is locked (for example when blasting asteroids or firing
+            // Vell-os Summer Bloom / Autumn Petal untargeted). NPCs still
+            // require a target before firing turrets.
+            if (!target
+                && !entity.components.has(PlayerShipSelector)
+                && !entity.components.has(PlayerStateComponent)
+                && (this.data.guidance === 'beamTurret'
+                    || this.data.guidance === 'turret')) {
                 return undefined;
             }
 

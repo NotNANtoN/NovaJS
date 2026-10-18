@@ -28,9 +28,14 @@ export function artworkExtension(): ArtworkExtension {
     return detectedExtension;
 }
 
+export const CONQUEST_ARTWORK_VERSION = '4';
+
 export function artworkUrl(type: string, id: string): string {
-    return `${dataPath}/${type}/${encodeURIComponent(id)}${
+    const base = `${dataPath}/${type}/${encodeURIComponent(id)}${
         artworkExtension()}`;
+    return id.startsWith('conquest:')
+        ? `${base}?v=${CONQUEST_ARTWORK_VERSION}`
+        : base;
 }
 
 export function preferredArtworkPath(path: string): string {

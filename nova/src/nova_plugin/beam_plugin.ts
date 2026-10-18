@@ -228,6 +228,10 @@ class BeamWeaponEntry extends WeaponEntry {
         if (!shot) {
             throw new Error('Beam shots require deterministic creation data');
         }
+        const beamCreatedAt = !shot.reconcile
+            && (shot.fastForwardMs ?? 0) >= this.data.shotDuration
+            ? shot.createdAt + Math.max(0, shot.fastForwardMs ?? 0)
+            : shot.createdAt;
         if (shot.entityId && this.entities.has(shot.entityId)) {
             const existing = this.entities.get(shot.entityId)!;
             if (shot.reconcile) {
@@ -277,7 +281,7 @@ class BeamWeaponEntry extends WeaponEntry {
             }).addComponent(BeamDataComponent, this.data)
             .addComponent(ShotPresentationDelayComponent, shot.presentationDelayMs ?? 0)
             .addComponent(ShotSeedComponent, { seed: shot.seed })
-            .addComponent(CreateTime, shot.createdAt);
+            .addComponent(CreateTime, beamCreatedAt);
 
         if (shot.playback) beam.addComponent(MovementPlaybackComponent, shot.playback);
         if (target) {
@@ -497,15 +501,15 @@ const BeamCollisionSystem = new System({
             }
         }
 
-        const timeSinceFire = Math.max(0, time - fireTime);
-        const previousTimeSinceFire = Math.max(
-            0, timeSinceFire - Math.max(0, delta_ms));
+        const dtMs = Math.max(1, delta_ms);
+        const activeStart = Math.max(0, time - fireTime);
+        const activeEnd = activeStart + dtMs;
         // Weapon damage is specified per original EV Nova 1/30-second tick.
         // Convert active milliseconds to ticks so damage is independent of
         // the simulation/render frame rate.
         const damageTime = Math.max(0, Math.min(
-            timeSinceFire, beamData.shotDuration)
-            - Math.min(previousTimeSinceFire, beamData.shotDuration));
+            activeEnd, beamData.shotDuration)
+            - Math.min(activeStart, beamData.shotDuration));
         const scale = damageTime * 30 / 1000;
         if (scale === 0) {
             return;

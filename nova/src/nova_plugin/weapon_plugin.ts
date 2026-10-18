@@ -282,7 +282,14 @@ function addShotsOwed(weapon: WeaponData, state: WeaponState,
     localState: WeaponLocalState, time: Time, reloadingBurst: boolean,
     maxFireCalls: number) {
     const count = getWeaponCount(state);
-    const reloadTime = reloadingBurst ? weapon.burstReload : weapon.reload;
+    // In EV Nova, continuous 1-frame beams (Flower of Spring, Summer Bloom,
+    // Autumn Petal, Winter Tempest, BioRelay Laser) have Reload = 0 and
+    // Duration = 1 frame (33.33ms). Using 0ms reload would spawn 16 beams per
+    // single frame (960/sec), exhausting EntityBudget and overflowing cadence.
+    const baseReload = weapon.type === 'BeamWeaponData' && weapon.reload <= 0
+        ? Math.max(1000 / 30, weapon.shotDuration || 1000 / 30)
+        : weapon.reload;
+    const reloadTime = reloadingBurst ? weapon.burstReload : baseReload;
     const callsPerReload = reloadingBurst || weapon.fireSimultaneously ? 1 : count;
     const deltaMs = Math.max(0, time.delta_ms);
     const added = reloadTime > 0
