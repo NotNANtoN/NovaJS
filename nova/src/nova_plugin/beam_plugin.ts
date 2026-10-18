@@ -38,7 +38,7 @@ import { FireSubs, OwnerComponent, ShotCreation, ShotSeedComponent, ShotPresenta
 import { zeroOrderGuidance } from './guidance';
 import { SoundEvent } from './sound_event';
 import { TargetComponent } from './target_component';
-import { WeaponsSystem, FireLogSpawnSystem } from './weapon_plugin';
+import { WeaponsSystem, ServerFireIntentSystem, FireLogSpawnSystem } from './weapon_plugin';
 import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { GetEntity } from 'nova_ecs/arg_types';
 import { PlatformResource } from './platform_plugin';
@@ -228,10 +228,9 @@ class BeamWeaponEntry extends WeaponEntry {
         if (!shot) {
             throw new Error('Beam shots require deterministic creation data');
         }
-        const beamCreatedAt = !shot.reconcile
-            && (shot.fastForwardMs ?? 0) >= this.data.shotDuration
-            ? shot.createdAt + Math.max(0, shot.fastForwardMs ?? 0)
-            : shot.createdAt;
+        const beamCreatedAt = shot.reconcile
+            ? shot.createdAt
+            : shot.createdAt + Math.max(0, shot.fastForwardMs ?? 0);
         if (shot.entityId && this.entities.has(shot.entityId)) {
             const existing = this.entities.get(shot.entityId)!;
             if (shot.reconcile) {
@@ -260,6 +259,11 @@ class BeamWeaponEntry extends WeaponEntry {
             new SAT.Vector(width / 2, 0),
         ]);
 
+        const beamHull = new CompositeHull([beamPoly]);
+        beamHull.pos.x = position.x;
+        beamHull.pos.y = position.y;
+        beamHull.angle = angle.angle;
+
         const beam = new Entity()
             .setName(this.data.name)
             .addComponent(MovementStateComponent, {
@@ -271,7 +275,7 @@ class BeamWeaponEntry extends WeaponEntry {
                 turning: 0,
             }).addComponent(CollisionHitterComponent, {
                 hitTypes: this.hitTypes,
-            }).addComponent(HurtboxHullComponent, new CompositeHull([beamPoly])
+            }).addComponent(HurtboxHullComponent, beamHull
             ).addComponent(BeamStateComponent, {
                 exitPointData,
                 pointToTarget: this.data.guidance === "beamTurret" ||
@@ -320,8 +324,14 @@ class BeamWeaponEntry extends WeaponEntry {
 
 export const BeamSystem = new System({
     name: 'BeamSystem',
-    before: [UpdateHitboxHullSystem],
-    after: [MovementSystem, RemoteMovementPresentationSystem, WeaponsSystem, FireLogSpawnSystem],
+    before: [UpdateHitboxHullSystem, UpdateHurtboxHullSystem],
+    after: [
+        MovementSystem,
+        RemoteMovementPresentationSystem,
+        WeaponsSystem,
+        ServerFireIntentSystem,
+        FireLogSpawnSystem,
+    ],
     args: [BeamDataComponent, BeamStateComponent, MovementStateComponent, FireSubs,
         CreateTimeArgProvider, TimeResource, UUID, Entities, Optional(SourceComponent),
         Optional(TargetComponent), Optional(MovementPlaybackComponent), Emit] as const,

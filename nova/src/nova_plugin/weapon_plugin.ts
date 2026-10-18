@@ -597,7 +597,11 @@ export function fireScheduledIntent(
     const fire = () => {
         const fired = fireIntentShot(weapon, source, shot, now);
         const viewDelayMs = clampLagMs(shot.viewDelayMs);
-        if (fired && viewDelayMs > 0) {
+        const isTrackedBeam = weapon.data.type === 'BeamWeaponData'
+            && (weapon.data.guidance === 'beamTurret'
+                || weapon.data.guidance === 'pointDefenseBeam')
+            && Boolean(fired?.target);
+        if (fired && viewDelayMs > 0 && !isTrackedBeam) {
             fired.entity.components.set(LagCompensationComponent, { viewDelayMs });
         }
         return fired;

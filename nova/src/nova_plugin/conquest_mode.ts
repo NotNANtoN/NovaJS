@@ -400,9 +400,23 @@ export const ConquestModePlugin: Plugin = {
         world.addSystem(ConquestSalvageDropSystem);
         world.addSystem(VellosFuelRegenSystem);
     },
+    remove(world) {
+        world.removeSystem(VellosFuelRegenSystem);
+        world.removeSystem(ConquestSalvageDropSystem);
+        world.removeSystem(ConquestBotLifecycleSystem);
+    },
 };
 
 const VELLOS_SHIP_IDS = new Set(['nova:173', 'nova:174', 'nova:175', 'nova:381', 'nova:382', 'nova:383']);
+
+const VELLOS_FUEL_REGEN_PER_SEC: Readonly<Record<string, number>> = {
+    'nova:173': 90,
+    'nova:381': 90,
+    'nova:174': 180,
+    'nova:382': 180,
+    'nova:175': 800,
+    'nova:383': 800,
+};
 
 /**
  * Regenerates jump/weapon energy (`playerState.fuel`) for Vell-os psychic ships
@@ -420,14 +434,20 @@ const VellosFuelRegenSystem = new System({
         GetEntity,
     ] as const,
     step(playerState, ship, shipData, shipPhysics, time, entity) {
-        const isVellos = VELLOS_SHIP_IDS.has(ship.id);
-        const regenPerSec = isVellos
-            ? Math.max(25, shipPhysics?.energyRecharge ?? 25)
-            : (shipPhysics?.energyRecharge ?? 0);
+        const vellosRegen = VELLOS_FUEL_REGEN_PER_SEC[ship.id];
+        const rawEnergyRecharge = shipPhysics?.energyRecharge ?? 0;
+        const finiteEnergyRecharge = Number.isFinite(rawEnergyRecharge) ? rawEnergyRecharge : 0;
+        const regenPerSec = vellosRegen !== undefined
+            ? Math.max(vellosRegen, finiteEnergyRecharge)
+            : finiteEnergyRecharge;
         if (regenPerSec <= 0) {
             return;
         }
-        const maxFuel = shipData?.fuelCapacity ?? shipPhysics?.energy ?? 1_000;
+        const maxFuel = Math.max(
+            shipData?.fuelCapacity ?? 0,
+            shipPhysics?.energy ?? 0,
+            vellosRegen !== undefined ? 1_000 : 0,
+        );
         const currentFuel = playerState.fuel ?? 0;
         if (currentFuel >= maxFuel) {
             return;
@@ -437,10 +457,12 @@ const VellosFuelRegenSystem = new System({
             currentFuel + regenPerSec * (time.delta_s || 0.016),
         );
         playerState.fuel = nextFuel;
+        if (playerState.combatResources) {
+            playerState.combatResources.fuel = nextFuel;
+        }
         const authority = entity.components.get(CombatAuthorityComponent);
         if (authority && !authority.retired) {
-            authority.balance.fuel = nextFuel;
-            authority.state.fuel = nextFuel;
+            authority.regenFuel(nextFuel);
         }
     },
 });

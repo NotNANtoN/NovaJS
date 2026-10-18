@@ -138,6 +138,18 @@ export class CombatAuthority {
         this.balance.revision = Math.max(this.balance.revision, revision + 1);
         this.commit();
     }
+    regenFuel(nextFuel: number): void {
+        if (this.retired || !Nonnegative.is(nextFuel) || nextFuel <= this.balance.fuel) return;
+        this.balance.fuel = nextFuel;
+        this.state.fuel = nextFuel;
+        if (this.state.combatResources) {
+            this.state.combatResources.fuel = nextFuel;
+        }
+        const basis = this.issuedFuel.get(this.balance.revision);
+        if (basis && nextFuel > basis.fuel) {
+            basis.fuel = nextFuel;
+        }
+    }
     acceptOwnerFuel(state: PlayerState): number {
         if (!Nonnegative.is(state.fuel)) return 0;
         const rev = state.combatResources?.revision;
@@ -622,6 +634,12 @@ export class CombatLedger {
                     ? Math.max(0, item.fuelCapacity)
                     : clampFuel(authority.balance.fuel, item.fuelCapacity);
                 for (const id of ammoIds) authority.balance.ammo[id] = item.outfits[id] ?? 0;
+                if (item.id === 'nova:175') {
+                    authority.balance.ammo['nova:226'] = Math.max(
+                        authority.balance.ammo['nova:226'] ?? 0,
+                        3,
+                    );
+                }
             } else if (outfit && ammoIds.has(outfit.id)) {
                 if (!hasSpaceportService(planet, 'outfitter')) throw new Error('No outfitter');
                 const held = authority.balance.ammo[outfit.id] ?? 0;

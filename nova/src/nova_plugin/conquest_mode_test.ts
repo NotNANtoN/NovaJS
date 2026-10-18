@@ -17,11 +17,13 @@ import {
     CONQUEST_AURORA_SYSTEM,
     CONQUEST_ORE_SCATTER_DELAY_MS,
     CONQUEST_SOL_SYSTEM,
+    ConquestModePlugin,
     conquestOreCreditValue,
     ensureConquestPocketState,
     oppositeConquestSystem,
 } from './conquest_mode';
 import { GameDataResource } from './game_data_resource';
+import { SystemIdResource } from './system_id_resource';
 import { applyJumpBrakingControls, calculateJumpArrival, isValidNextHop } from './jump_plugin';
 import { artworkUrl } from '../client/artwork_url';
 import { PlatformResource } from './platform_plugin';
@@ -307,5 +309,19 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
             .toContain('?v=4');
         expect(artworkUrl('PictImage', 'nova:6000'))
             .not.toContain('?v=');
+    });
+
+    it('cleanly removes ConquestModePlugin before EntityBudgetPlugin during world.removeAllPlugins() on hyperjump', async () => {
+        const world = new World();
+        world.resources.set(GameDataResource, new MockGameData());
+        world.resources.set(SystemIdResource, CONQUEST_SOL_SYSTEM);
+        world.resources.set(PlatformResource, 'node');
+        await world.addPlugin(TimePlugin);
+        await world.addPlugin(EntityBudgetPlugin);
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(MovementPlugin);
+        await world.addPlugin(ConquestModePlugin);
+
+        await expectAsync(world.removeAllPlugins()).toBeResolved();
     });
 });

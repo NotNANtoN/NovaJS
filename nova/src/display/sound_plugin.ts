@@ -208,15 +208,10 @@ const SoundSystem = new System({
                 pendingSounds.clear();
             }
             if (id) {
-                const count = (loopingRefs.get(id) ?? 1) - 1;
-                if (count <= 0) {
-                    loopingRefs.delete(id);
-                    loadedSounds.get(id)?.stop();
-                    loopingSounds.get(id)?.stop();
-                    loopingSounds.delete(id);
-                } else {
-                    loopingRefs.set(id, count);
-                }
+                loopingRefs.delete(id);
+                loadedSounds.get(id)?.stop();
+                loopingSounds.get(id)?.stop();
+                loopingSounds.delete(id);
             } else {
                 for (const sound of loopingSounds.values()) {
                     sound.stop();
