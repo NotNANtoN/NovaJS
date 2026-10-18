@@ -34,6 +34,8 @@ import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { SystemPlugin } from '../nova_plugin/system_plugin';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state';
 import { CloakStateComponent } from '../nova_plugin/cloaking_plugin';
+import { isConquestMode } from '../nova_plugin/conquest_config';
+import { deImmerify } from '../util/deimmerify';
 import { Button } from './button';
 import {
     SERVICE_COLUMN,
@@ -254,6 +256,7 @@ export class Spaceport extends Menu<Entity> {
                 // shipyard writes the state back itself when a hull is bought.
                 this.shipyard.setPlayerState(plainSnapshot(
                     this.input.components.get(PlayerStateComponent)));
+                const previousInput = this.input;
                 const newInput = await this.shipyard.show(this.input);
                 if (newInput !== this.input) {
                     // Construct a fake system and run providers so that outfits of the new
@@ -262,13 +265,33 @@ export class Spaceport extends Menu<Entity> {
                     shipBuildWorld.resources.set(GameDataResource, gameData);
                     shipBuildWorld.resources.set(SystemIdResource, 'nova:128');
                     await shipBuildWorld.addPlugin(SystemPlugin);
+                    const preservedOutfits = plainSnapshot(
+                        newInput.components.get(OutfitsStateComponent));
                     shipBuildWorld.entities.set('ship', newInput);
                     shipBuildWorld.step();
                     await shipBuildWorld.resources.get(AsyncSystemResource)?.done;
                     shipBuildWorld.step();
+                    await shipBuildWorld.resources.get(AsyncSystemResource)?.done;
+                    shipBuildWorld.step();
                     shipBuildWorld.entities.delete('ship');
+                    deImmerify(newInput);
+                    if (preservedOutfits && preservedOutfits.size > 0) {
+                        const currentOutfits = newInput.components.get(OutfitsStateComponent)
+                            ?? new Map<string, { count: number }>();
+                        for (const [id, val] of preservedOutfits) {
+                            if (id.startsWith('conquest:vellos_')) {
+                                currentOutfits.set(id, { count: val.count });
+                            }
+                        }
+                        newInput.components.set(OutfitsStateComponent, currentOutfits);
+                    }
                 }
                 this.input = newInput;
+                const updatedState = newInput.components.get(PlayerStateComponent);
+                const origState = previousInput?.components.get(PlayerStateComponent);
+                if (updatedState && origState && updatedState !== origState) {
+                    Object.assign(origState, plainSnapshot(updatedState));
+                }
             } catch (error) {
                 reportDialogFailure('shipyard', error);
             } finally {
@@ -432,6 +455,10 @@ export class Spaceport extends Menu<Entity> {
             return;
         }
         const available = SPACEPORT_SERVICES.filter(service => {
+            if (service === "missionBBS"
+                && isConquestMode(this.input?.components.get(PlayerStateComponent))) {
+                return false;
+            }
             if (service === "tradeCenter") {
                 return this.tradeCenterAvailable;
             }
@@ -550,6 +577,9 @@ export class Spaceport extends Menu<Entity> {
         location: MissionOfferLocation,
         returnToDialog?: PIXI.Container,
     ): Promise<void> {
+        if (isConquestMode(this.input?.components.get(PlayerStateComponent))) {
+            return;
+        }
         try {
             const { offers, destinationOptions } = await getConcourseMissionOffers(
                 this.gameData, this.input, this.id, location);

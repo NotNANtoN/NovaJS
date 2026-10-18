@@ -33,7 +33,8 @@ import { makeNpc } from './npc_plugin';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { PlatformResource } from './platform_plugin';
 import { PlayerState, PlayerStateComponent } from './player_state';
-import { ShipComponent, ShipDataComponent } from './ship_plugin';
+import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin';
+import { CombatAuthorityComponent } from './combat_resources';
 import { SystemIdResource } from './system_id_resource';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
@@ -397,5 +398,49 @@ export const ConquestModePlugin: Plugin = {
         world.addComponent(ConquestBotComponent);
         world.addSystem(ConquestBotLifecycleSystem);
         world.addSystem(ConquestSalvageDropSystem);
+        world.addSystem(VellosFuelRegenSystem);
     },
 };
+
+const VELLOS_SHIP_IDS = new Set(['nova:173', 'nova:174', 'nova:175', 'nova:381', 'nova:382', 'nova:383']);
+
+/**
+ * Regenerates jump/weapon energy (`playerState.fuel`) for Vell-os psychic ships
+ * and ships with positive `energyRecharge` so fuel-powered psychic beams and
+ * hyperspace jumps work continuously in flight.
+ */
+const VellosFuelRegenSystem = new System({
+    name: 'VellosFuelRegen',
+    args: [
+        PlayerStateComponent,
+        ShipComponent,
+        Optional(ShipDataComponent),
+        Optional(ShipPhysicsComponent),
+        TimeResource,
+        GetEntity,
+    ] as const,
+    step(playerState, ship, shipData, shipPhysics, time, entity) {
+        const isVellos = VELLOS_SHIP_IDS.has(ship.id);
+        const regenPerSec = isVellos
+            ? Math.max(25, shipPhysics?.energyRecharge ?? 25)
+            : (shipPhysics?.energyRecharge ?? 0);
+        if (regenPerSec <= 0) {
+            return;
+        }
+        const maxFuel = shipData?.fuelCapacity ?? shipPhysics?.energy ?? 1_000;
+        const currentFuel = playerState.fuel ?? 0;
+        if (currentFuel >= maxFuel) {
+            return;
+        }
+        const nextFuel = Math.min(
+            maxFuel,
+            currentFuel + regenPerSec * (time.delta_s || 0.016),
+        );
+        playerState.fuel = nextFuel;
+        const authority = entity.components.get(CombatAuthorityComponent);
+        if (authority && !authority.retired) {
+            authority.balance.fuel = nextFuel;
+            authority.state.fuel = nextFuel;
+        }
+    },
+});

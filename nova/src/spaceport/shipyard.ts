@@ -135,8 +135,14 @@ export class Shipyard extends Menu<Entity> {
 
     override async show(input: Entity): Promise<Entity> {
         await this.buildPromise;
+        this.setInput(input);
+        this.refreshPromise = this.refreshGrid();
         await this.refreshPromise;
         return super.show(input);
+    }
+
+    private currentOutfits(): Map<string, { count: number }> | undefined {
+        return plainSnapshot(this.input?.components?.get(OutfitsStateComponent));
     }
 
     private async makeShipsGrid() {
@@ -147,12 +153,13 @@ export class Shipyard extends Menu<Entity> {
         let ships = await Promise.all(ids.map(id =>
             this.gameData.data.Ship.get(id, 100)));
         const contribute = await this.contribute();
+        const outfits = this.currentOutfits();
         if (this.planetData) {
             ships = ships.filter(ship => isPurchaseAvailable(
                 ship,
                 this.planetData!,
                 this.playerState,
-                undefined,
+                outfits,
                 contribute,
             ));
             // Flags3 0x4000: When this ship is available for sale, it prevents
@@ -275,11 +282,12 @@ export class Shipyard extends Menu<Entity> {
             console.warn('Cannot buy ship without player state.');
             return;
         }
+        const previousOutfits = this.currentOutfits();
         if (this.planetData && !isPurchaseAvailable(
             selection,
             this.planetData,
             this.playerState,
-            undefined,
+            previousOutfits,
             await this.contribute(),
         )) {
             console.warn(`Ship ${selection.id} is not available here.`);
@@ -303,13 +311,23 @@ export class Shipyard extends Menu<Entity> {
         if (this.playerState.combatResources) {
             this.combatBusy = true;
             try {
-                await combatShopTransaction(this.playerState, this.planetData!.id, 'ship', selection.id);
+                await combatShopTransaction(
+                    this.playerState,
+                    this.planetData!.id,
+                    'ship',
+                    selection.id,
+                    previousOutfits,
+                );
             } catch (error) {
                 console.warn('Ship purchase rejected', error);
                 return;
             } finally { this.combatBusy = false; }
         } else {
             this.playerState.credits -= netCost;
+            this.playerState.fuel = Math.max(
+                this.playerState.fuel ?? 0,
+                selection.fuelCapacity ?? 0,
+            );
         }
         this.combatBusy = true;
         try {
@@ -337,6 +355,20 @@ export class Shipyard extends Menu<Entity> {
         this.input.components.set(PlayerShipSelector, undefined);
         this.input.components.set(MultiplayerData, multiplayerData);
         this.input.components.set(PlayerStateComponent, this.playerState);
+        // Carry over persistent Vell-os attunement licenses onto the new hull
+        if (previousOutfits) {
+            const carriedLicenses = [...previousOutfits.entries()]
+                .filter(([id, val]) => id.startsWith('conquest:vellos_') && val.count > 0);
+            if (carriedLicenses.length > 0) {
+                const baseOutfits = new Map<string, { count: number }>(
+                    Object.entries(selection.outfits ?? {}).map(([id, count]) => [id, { count }]),
+                );
+                for (const [id, val] of carriedLicenses) {
+                    baseOutfits.set(id, { count: val.count });
+                }
+                this.input.components.set(OutfitsStateComponent, baseOutfits);
+            }
+        }
         // For convenience
         (window as any).myShip = this.input;
         this.updateCreditsText();

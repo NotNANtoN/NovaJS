@@ -185,11 +185,48 @@ function isAuroraPlanet(planet: PlanetData): boolean {
     return bareId >= 300;
 }
 
+function hasInstalledOutfit(
+    outfits: ReadonlyMap<string, unknown> | undefined,
+    id: string,
+): boolean {
+    if (!outfits) return false;
+    const entry = outfits.get(id);
+    if (typeof entry === 'number') return entry > 0;
+    if (entry && typeof entry === 'object' && 'count' in entry) {
+        return Number((entry as { count: number }).count) > 0;
+    }
+    return false;
+}
+
+function hasVellosAttunement(
+    shipBareNum: number,
+    outfits: ReadonlyMap<string, unknown> | undefined,
+): boolean {
+    const hasT1 = hasInstalledOutfit(outfits, 'conquest:vellos_javelin_license');
+    const hasT2 = hasInstalledOutfit(outfits, 'conquest:vellos_arrow_license');
+    const hasT3 = hasInstalledOutfit(outfits, 'conquest:vellos_dart_license');
+    if (shipBareNum === 175) {
+        return hasT1;
+    }
+    if (shipBareNum === 174) {
+        return hasT1 || hasT2;
+    }
+    if (shipBareNum === 173) {
+        return hasT1 || hasT2 || hasT3;
+    }
+    return true;
+}
+
 function isConquestPurchaseAvailable(
     item: PurchaseData,
     planet: PlanetData,
+    outfits?: ReadonlyMap<string, unknown>,
 ): boolean {
     const id = item.id ?? '';
+    const onAurora = isAuroraPlanet(planet);
+    if (id.startsWith('conquest:vellos_')) {
+        return !onAurora;
+    }
     if (id.startsWith('conquest:')) {
         return true;
     }
@@ -201,11 +238,13 @@ function isConquestPurchaseAvailable(
     }
     const isShip = 'cost' in item || item.buyRandom !== undefined;
     const bareNum = Number(id.replace(/^.*:/, ''));
-    const onAurora = isAuroraPlanet(planet);
 
     if (isShip) {
         if (!Number.isFinite(bareNum)) {
             return true;
+        }
+        if (bareNum === 173 || bareNum === 174 || bareNum === 175) {
+            return !onAurora && hasVellosAttunement(bareNum, outfits);
         }
         return onAurora
             ? CONQUEST_AURORA_SHIPS.has(bareNum)
@@ -343,7 +382,7 @@ export function isPurchaseAvailable(
         && playerStateOrMissionBits.gameMode === 'conquest',
     );
     if (isConquest) {
-        return isConquestPurchaseAvailable(item, planet);
+        return isConquestPurchaseAvailable(item, planet, outfits);
     }
     if ((item.id ?? '').startsWith('conquest:')) {
         return false;
@@ -419,7 +458,7 @@ export function isPurchaseUnlocked(
         && playerStateOrMissionBits.gameMode === 'conquest',
     );
     if (isConquest) {
-        return isConquestPurchaseAvailable(item, planet);
+        return isConquestPurchaseAvailable(item, planet, outfits);
     }
     if ((item.id ?? '').startsWith('conquest:')) {
         return false;

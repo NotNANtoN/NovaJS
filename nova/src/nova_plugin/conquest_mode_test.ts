@@ -255,16 +255,18 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
             weapons: { 'nova:128': 1 },
         };
 
-        // Sol (Earth) stocks Federation + Vell-os, blocks Auroran & Polaris
+        // Sol (Earth) stocks Federation, gates 0-cr Vell-os behind Attunement license, and blocks Auroran & Polaris
         expect(isPurchaseAvailable(fedDestroyer, earth, state)).toBeTrue();
-        expect(isPurchaseAvailable(vellosDart, earth, state)).toBeTrue();
+        expect(isPurchaseAvailable(vellosDart, earth, state)).toBeFalse();
+        const attunedOutfits = new Map([['conquest:vellos_dart_license', { count: 1 }]]);
+        expect(isPurchaseAvailable(vellosDart, earth, state, attunedOutfits)).toBeTrue();
         expect(isPurchaseAvailable(auroraCruiser, earth, state)).toBeFalse();
         expect(isPurchaseAvailable(polarisManta, earth, state)).toBeFalse();
 
         // Aurora stocks Auroran, blocks Federation/Vell-os & Polaris
         expect(isPurchaseAvailable(auroraCruiser, aurora, state)).toBeTrue();
         expect(isPurchaseAvailable(fedDestroyer, aurora, state)).toBeFalse();
-        expect(isPurchaseAvailable(vellosDart, aurora, state)).toBeFalse();
+        expect(isPurchaseAvailable(vellosDart, aurora, state, attunedOutfits)).toBeFalse();
         expect(isPurchaseAvailable(polarisManta, aurora, state)).toBeFalse();
 
         // Outfitter blocks Polaris organic gear, stocks Conquest & faction items

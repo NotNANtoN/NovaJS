@@ -126,8 +126,53 @@ const CONQUEST_ASSETS: readonly ConquestAssetSpec[] = [
             armor: 220,
             armorRecharge: 50,
         },
-        desc: ' Bonds self-healing ablative tritanium plates and active repair nanites to your hull. Adds +220 armor integrity and +50 continuous in-flight armor regeneration per unit.',
+        desc: 'Bonds self-healing ablative tritanium plates and active repair nanites to your hull. Adds +220 armor integrity and +50 continuous in-flight armor regeneration per unit.',
     } as ConquestAssetSpec & { repairSystem?: boolean },
+    {
+        id: 'conquest:vellos_dart_license',
+        name: 'Vell-os T3 Attunement (Dart)',
+        basePictId: 6025, // Capacitor Pulse Laser (Vell-os flower)
+        tint: [0.95, 0.75, 1.5],
+        accent: [190, 90, 255],
+        prompt: 'Create a 200x200 pre-rendered 3D sci-fi psychic telepathic crystal blossom artifact in the exact early-2000s LightWave 3D style of Escape Velocity Nova, isolated on a pure black background with violet-cyan psionic energy.',
+        price: 80_000,
+        max: 1,
+        freeMass: 0,
+        physics: {
+            freeMass: 0,
+        },
+        desc: 'Awakens third-order Vell-os telepathic resonance. Once attuned, you may manifest a Vell-os Dart in the Sol Shipyard at zero credit cost.',
+    },
+    {
+        id: 'conquest:vellos_arrow_license',
+        name: 'Vell-os T2 Attunement (Arrow)',
+        basePictId: 6026, // BioRelay Laser (Vell-os)
+        tint: [1.35, 0.65, 1.45],
+        accent: [255, 80, 220],
+        prompt: 'Create a 200x200 pre-rendered 3D sci-fi psychic telepathic neural spire in the exact early-2000s LightWave 3D style of Escape Velocity Nova, isolated on a pure black background with magenta-violet psionic energy.',
+        price: 250_000,
+        max: 1,
+        freeMass: 0,
+        physics: {
+            freeMass: 0,
+        },
+        desc: 'Awakens second-order Vell-os telepathic mastery. Once attuned, you may manifest a Vell-os Arrow (or Dart) in the Sol Shipyard at zero credit cost.',
+    },
+    {
+        id: 'conquest:vellos_javelin_license',
+        name: 'Vell-os T1 Attunement (Javelin)',
+        basePictId: 6066, // Organic Shield (Vell-os)
+        tint: [1.4, 1.1, 1.55],
+        accent: [230, 160, 255],
+        prompt: 'Create a 200x200 pre-rendered 3D sci-fi supreme Vell-os telepathic mandala core in the exact early-2000s LightWave 3D style of Escape Velocity Nova, isolated on a pure black background with radiant white-violet psionic energy.',
+        price: 600_000,
+        max: 1,
+        freeMass: 0,
+        physics: {
+            freeMass: 0,
+        },
+        desc: 'Awakens first-order Vell-os ruling-caste telepathy. Once attuned, you may manifest the mighty Vell-os Javelin (as well as the Arrow and Dart) in the Sol Shipyard at zero credit cost.',
+    },
 ];
 
 async function extractRetailPictPng(pictId: number): Promise<PNG | undefined> {

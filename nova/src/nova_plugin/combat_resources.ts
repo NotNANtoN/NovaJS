@@ -609,14 +609,18 @@ export class CombatLedger {
                 authority.balance.fuel = result.fuel;
                 credits = result.credits;
             } else if (item) {
-                if (!hasSpaceportService(planet, 'shipyard') || !isPurchaseAvailable(item, planet, request.state, undefined, contribute)) {
+                if (!hasSpaceportService(planet, 'shipyard') || !isPurchaseAvailable(item, planet, request.state, inventory, contribute)) {
                     throw new Error('Ship unavailable');
                 }
                 const price = Math.max(0, Math.floor(item.cost) - Math.floor(hull.cost * 0.8));
                 if (credits < price) throw new Error('Insufficient credits');
                 credits -= price;
                 authority.balance.shipId = item.id;
-                authority.balance.fuel = clampFuel(authority.balance.fuel, item.fuelCapacity);
+                const isVellosOrConquest = request.state.gameMode === 'conquest'
+                    || ['nova:173', 'nova:174', 'nova:175'].includes(item.id);
+                authority.balance.fuel = isVellosOrConquest
+                    ? Math.max(0, item.fuelCapacity)
+                    : clampFuel(authority.balance.fuel, item.fuelCapacity);
                 for (const id of ammoIds) authority.balance.ammo[id] = item.outfits[id] ?? 0;
             } else if (outfit && ammoIds.has(outfit.id)) {
                 if (!hasSpaceportService(planet, 'outfitter')) throw new Error('No outfitter');
@@ -738,9 +742,15 @@ export async function requestShipGrant(state: PlayerState, shipId: string,
  * requests and reconcile its receipt before allowing the dialog to continue. */
 export async function combatShopTransaction(state: PlayerState, planet: string,
     action: CombatShopRequest['action'], item?: string,
-    outfits?: ReadonlyMap<string, number>): Promise<CombatShopResult> {
+    outfits?: ReadonlyMap<string, number | { count: number }>): Promise<CombatShopResult> {
+    const normalizedOutfits: Array<[string, number]> | undefined = outfits
+        ? [...outfits].map(([id, val]) => [
+            id,
+            typeof val === 'number' ? val : val.count,
+        ])
+        : undefined;
     const request = { token: getPersistentPlayerToken(), action, planet, item,
-        outfits: outfits ? [...outfits] : undefined,
+        outfits: normalizedOutfits,
         revision: state.combatResources?.revision ?? -1, state: toPersistentPlayerState(state) };
     const body = JSON.stringify(request);
     try {

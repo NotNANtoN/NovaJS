@@ -1,0 +1,32 @@
+{
+  "id": "conquest:vellos_arrow_license",
+  "name": "Vell-os T2 Attunement (Arrow)",
+  "prefix": "conquest",
+  "weapons": {},
+  "repairSystem": false,
+  "cloak": false,
+  "cargoScoop": false,
+  "physics": {
+    "freeMass": 0
+  },
+  "pict": "conquest:vellos_arrow_license",
+  "price": 250000,
+  "desc": "Awakens second-order Vell-os telepathic mastery. Once attuned, you may manifest a Vell-os Arrow (or Dart) in the Sol Shipyard at zero credit cost.",
+  "displayWeight": 90,
+  "flags": 0,
+  "max": 1,
+  "techLevel": 1,
+  "availabilityNCB": "",
+  "onPurchase": "",
+  "onSell": "",
+  "contribute": [
+    0,
+    0
+  ],
+  "require": [
+    0,
+    0
+  ],
+  "isEscapePod": false,
+  "isAutoRecharger": false
+}

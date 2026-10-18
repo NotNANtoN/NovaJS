@@ -13,7 +13,7 @@
   },
   "pict": "conquest:hull_nanites",
   "price": 40000,
-  "desc": " Bonds self-healing ablative tritanium plates and active repair nanites to your hull. Adds +220 armor integrity and +50 continuous in-flight armor regeneration per unit.",
+  "desc": "Bonds self-healing ablative tritanium plates and active repair nanites to your hull. Adds +220 armor integrity and +50 continuous in-flight armor regeneration per unit.",
   "displayWeight": 90,
   "flags": 0,
   "max": 4,

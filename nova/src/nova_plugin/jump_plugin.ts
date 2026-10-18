@@ -63,6 +63,7 @@ export const JUMP_DEPARTURE_PEAK_SPEED_MULTIPLIER = 100;
 export const JUMP_ARRIVAL_SPEED_MULTIPLIER = 3;
 export const JUMP_ARRIVAL_END_SPEED_MULTIPLIER = 1.0;
 export const JUMP_MIN_DISTANCE = 1_000;
+export const CONQUEST_JUMP_MIN_DISTANCE = 350;
 /** Retail STR# 2002 string 41: distance refusal */
 export const TOO_CLOSE_TO_CENTER_MESSAGE =
     "Can't initiate hyperspace jump - not yet far enough away from system center.";
@@ -562,7 +563,10 @@ const PlayerJumpControl = new System({
             emit(SoundEvent, { id: 'nova:153' });
             return;
         }
-        if (movement && distanceFromSystemOrigin(movement.position) < JUMP_MIN_DISTANCE) {
+        const minJumpDist = isConquestMode(playerState)
+            ? CONQUEST_JUMP_MIN_DISTANCE
+            : JUMP_MIN_DISTANCE;
+        if (movement && distanceFromSystemOrigin(movement.position) < minJumpDist) {
             emit(JumpRefusedEvent, { reason: 'distance' });
             emit(SoundEvent, { id: 'nova:153' });
             return;
@@ -651,17 +655,26 @@ const JumpBrakeControlSystem = new System({
         MovementStateComponent,
         MovementPhysicsComponent,
         Optional(GameDataResource),
+        Optional(PlayerStateComponent),
     ] as const,
-    step(state, movement, physics, gameData) {
+    step(state, movement, physics, gameData, playerState) {
         if (state.phase === 'braking') {
             let direction: Vector | undefined;
             if (gameData) {
                 const source = gameData.data.System.getCached(state.from);
                 const destination = gameData.data.System.getCached(state.to);
                 if (source && destination) {
+                    const sourcePos = isConquestMode(playerState)
+                        && CONQUEST_SYSTEM_POSITIONS[state.from]
+                        ? CONQUEST_SYSTEM_POSITIONS[state.from]
+                        : source.position;
+                    const destPos = isConquestMode(playerState)
+                        && CONQUEST_SYSTEM_POSITIONS[state.to]
+                        ? CONQUEST_SYSTEM_POSITIONS[state.to]
+                        : destination.position;
                     const delta = new Vector(
-                        destination.position[0] - source.position[0],
-                        destination.position[1] - source.position[1],
+                        destPos[0] - sourcePos[0],
+                        destPos[1] - sourcePos[1],
                     );
                     if (delta.lengthSquared > 0) {
                         direction = delta.normalize();

@@ -3,5 +3,8 @@ import defaultPict from 'novadatainterface/default_pict';
 export type PictImageData = ArrayBuffer;
 
 export function getDefaultPictImageData(): PictImageData {
-    return Buffer.from(defaultPict.buffer).buffer as ArrayBuffer;
+    return defaultPict.buffer.slice(
+        defaultPict.byteOffset,
+        defaultPict.byteOffset + defaultPict.byteLength,
+    ) as ArrayBuffer;
 }

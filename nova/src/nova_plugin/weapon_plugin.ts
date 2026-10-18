@@ -979,8 +979,27 @@ const ControlPlayerWeapons = new System({
         }
 
         const firing = Boolean(controlState.get('firePrimary'));
-        for (const [id, weaponState] of weaponsState) {
+        let hasPrimaryWeapon = false;
+        for (const [id] of weaponsState) {
             if (gameData.data.Weapon.getCached(id)?.fireGroup === 'primary') {
+                hasPrimaryWeapon = true;
+                break;
+            }
+        }
+        for (const [id, weaponState] of weaponsState) {
+            const weap = gameData.data.Weapon.getCached(id);
+            if (!weap) {
+                continue;
+            }
+            // Vell-os hulls (Dart, Arrow, Javelin) have no primary-grouped
+            // weapons in retail data; their psychic beams are all secondary.
+            // When a ship has no primary weapons at all, Spacebar fires its
+            // non-bay offensive weapons directly.
+            const isPrimaryOrFallback = weap.fireGroup === 'primary'
+                || (!hasPrimaryWeapon
+                    && weap.fireGroup === 'secondary'
+                    && weap.type !== 'BayWeaponData');
+            if (isPrimaryOrFallback) {
                 applyWeaponTrigger(weaponState,
                     weaponsLocalState.get(id), firing);
             }

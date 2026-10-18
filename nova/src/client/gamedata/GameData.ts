@@ -24,7 +24,7 @@ import { dataPath, idsPath } from '../../common/GameDataPaths';
 import PQueue from 'p-queue';
 import { artworkUrl } from '../artwork_url';
 
-const METADATA_SCHEMA_VERSION = '2';
+const METADATA_SCHEMA_VERSION = '3';
 
 class WeaponGettable extends Gettable<WeaponData> {
     override async get(id: string, priority = 0) {
@@ -155,7 +155,15 @@ export class GameData implements GameDataInterface {
         try {
             const cached = await getCachedPayload<unknown>(url);
             if (cached) {
-                return { data: cached.data, etag: cached.etag };
+                try {
+                    const headRes = await fetch(url, { method: 'HEAD' });
+                    const serverEtag = headRes.headers.get('ETag');
+                    if (serverEtag && serverEtag === cached.etag) {
+                        return { data: cached.data, etag: cached.etag };
+                    }
+                } catch {
+                    return { data: cached.data, etag: cached.etag };
+                }
             }
         } catch {
             // Fallback to network fetch
