@@ -57,6 +57,9 @@ import { Platform, PlatformPlugin, PlatformResource } from './platform_plugin';
 import { Stat } from './stat';
 import { makeShipExplosionBlast } from './ship_death_blast';
 import { authorExternalImpulse, ExternalImpulsePlugin } from './external_impulse';
+import { OwnerComponent, SourceComponent } from './fire_weapon_plugin';
+import { parseLoggedShotEntityId } from './fire_sync';
+import { isConquestMode } from './conquest_config';
 
 // const DamageQuery = new Query([Optional(ShieldComponent), Optional(ArmorComponent),
 // Optional(IonizationComponent), Optional(IonizationColorComponent),
@@ -198,21 +201,33 @@ const DamageSystem = new System({
         const hasShield = shield && shield.max > 0;
         const isShip = entity.components.has(ShipComponent);
         if ((isProjectile || !isShip) && !hasShield) {
-            // Unshielded targets (projectiles and asteroids) absorb half of
-            // the weapon's shield energy into armor damage so energy blasters
+            // Unshielded targets (projectiles and asteroids) absorb the
+            // weapon's shield energy into armor damage so energy blasters
             // can effectively mine rocks as well as swat missiles.
             let asteroidBonus = 1;
             if (!isProjectile && !isShip && damager) {
-                const shooterOutfits = entities.get(damager)
-                    ?.components.get(OutfitsStateComponent);
+                const damagerEnt = entities.get(damager);
+                const shooterId = damagerEnt?.components.get(SourceComponent)
+                    ?? damagerEnt?.components.get(OwnerComponent)?.owner
+                    ?? parseLoggedShotEntityId(damager)?.source
+                    ?? damager;
+                const shooterEnt = entities.get(shooterId);
+                const shooterOutfits = shooterEnt?.components.get(OutfitsStateComponent);
+                const shooterPlayer = shooterEnt?.components.get(PlayerStateComponent);
+                if (isConquestMode(shooterPlayer)) {
+                    // In Galactic Conquest, boost asteroid mining damage so starter
+                    // blasters (e.g. Shuttle / Viper Light Blasters) break rocks briskly.
+                    asteroidBonus *= 2.5;
+                }
                 const drillCount = shooterOutfits?.get('conquest:seismic_drill')?.count ?? 0;
                 if (drillCount > 0) {
-                    asteroidBonus += 1.5 * drillCount;
+                    asteroidBonus *= (1 + 1.5 * drillCount);
                 }
             }
+            const energyFactor = (!isProjectile && !isShip) ? 1 : 0.5;
             damage = {
                 ...damage,
-                armor: (damage.armor + damage.shield / 2) * asteroidBonus,
+                armor: (damage.armor + damage.shield * energyFactor) * asteroidBonus,
             };
         }
 

@@ -346,15 +346,20 @@ function interpolateMovementState(
     after: MovementState,
     amount: number,
 ): MovementState {
+    const dx = shortestWrappedDelta(before.position.x, after.position.x);
+    const dy = shortestWrappedDelta(before.position.y, after.position.y);
+    // Do not interpolate a large teleport (such as off-screen asteroid recycling)
+    // across the middle of the viewport.
+    if (dx * dx + dy * dy > 900 * 900) {
+        return copyMovementState(after);
+    }
     const inverse = 1 - amount;
     const rotationDelta = before.rotation.distanceTo(after.rotation).angle;
     const discrete = amount < 1 ? before : after;
     return {
         position: new Position(
-            before.position.x + shortestWrappedDelta(
-                before.position.x, after.position.x) * amount,
-            before.position.y + shortestWrappedDelta(
-                before.position.y, after.position.y) * amount,
+            before.position.x + dx * amount,
+            before.position.y + dy * amount,
         ),
         velocity: new Vector(
             before.velocity.x * inverse + after.velocity.x * amount,

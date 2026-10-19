@@ -1,6 +1,7 @@
 import { GetWorld, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
 import { Plugin } from 'nova_ecs/plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
@@ -38,9 +39,11 @@ export const ASTEROID_RESPAWN_INTERVAL_MS = 20_000;
  * appear in a ring just outside the view and are recycled once they fall far
  * behind.
  */
-export const ASTEROID_SPAWN_MIN_RADIUS = 700;
-export const ASTEROID_SPAWN_MAX_RADIUS = 1_500;
-export const ASTEROID_CULL_RADIUS = 2_600;
+export const ASTEROID_SPAWN_MIN_RADIUS = 1_450;
+export const ASTEROID_SPAWN_MAX_RADIUS = 2_350;
+export const ASTEROID_CULL_RADIUS = 3_000;
+const ASTEROID_INBOUND_MIN_SPEED = 42;
+const ASTEROID_INBOUND_MAX_SPEED = 88;
 
 const AsteroidsQuery = new Query([AsteroidComponent] as const, 'Asteroids');
 const AsteroidPositionsQuery = new Query([
@@ -72,7 +75,7 @@ function beltPosition(): Position {
         Math.cos(angle) * radius, Math.sin(angle) * radius);
 }
 
-/** A point in the ring just outside the view around a given centre. */
+/** A point in the ring well outside the viewport around a given centre. */
 export function ringPosition(
     centre: { x: number, y: number },
     minRadius = ASTEROID_SPAWN_MIN_RADIUS,
@@ -83,6 +86,53 @@ export function ringPosition(
     return new Position(
         centre.x + Math.cos(angle) * radius,
         centre.y + Math.sin(angle) * radius);
+}
+
+/**
+ * Picks an off-screen perimeter spawn position that is outside every player's
+ * viewport (`>= ASTEROID_SPAWN_MIN_RADIUS` from all players) and computes a
+ * velocity vector that flies inward from the outside toward the middle/belt
+ * of the system so asteroids never pop into existence on-screen.
+ */
+export function offscreenAsteroidSpawn(
+    players: ReadonlyArray<readonly [{ position: Position }, unknown]>,
+): { position: Position; velocity: Vector } {
+    const primaryCentre = players[0]?.[0].position ?? new Position(0, 0);
+    let spawnPos = ringPosition(primaryCentre);
+    for (let attempt = 0; attempt < 16; attempt++) {
+        const candidate = ringPosition(primaryCentre);
+        const hiddenFromAll = players.every(([mov]) => {
+            const dx = candidate.x - mov.position.x;
+            const dy = candidate.y - mov.position.y;
+            return dx * dx + dy * dy >= (ASTEROID_SPAWN_MIN_RADIUS - 50) ** 2;
+        });
+        if (hiddenFromAll) {
+            spawnPos = candidate;
+            break;
+        }
+    }
+
+    // Aim inward from the outer perimeter toward a point in the central belt
+    // around the system center / player area so rocks cruise through the middle.
+    const targetAnchor = Math.random() < 0.65
+        ? new Position(0, 0)
+        : primaryCentre;
+    const aimPoint = new Position(
+        targetAnchor.x + (Math.random() - 0.5) * 1_100,
+        targetAnchor.y + (Math.random() - 0.5) * 1_100,
+    );
+    const toInterior = aimPoint.subtract(spawnPos);
+    const baseAngle = toInterior.lengthSquared > 1
+        ? Math.atan2(toInterior.y, toInterior.x)
+        : Math.atan2(-spawnPos.y, -spawnPos.x);
+    const angle = baseAngle + (Math.random() - 0.5) * 0.45;
+    const speed = ASTEROID_INBOUND_MIN_SPEED
+        + Math.random() * (ASTEROID_INBOUND_MAX_SPEED - ASTEROID_INBOUND_MIN_SPEED);
+    const velocity = new Vector(
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+    );
+    return { position: spawnPos, velocity };
 }
 
 export function isBeyondCull(
@@ -170,29 +220,39 @@ const AsteroidSpawnSystem = new AsyncSystem({
             return;
         }
 
-        // The initial belt appears at once; afterwards a mined out belt
-        // refills slowly in normal mode or briskly in Conquest mode.
-        const missing = state.spawnedInitialBelt
+        // Place new rocks off-screen on the outer perimeter flying inward
+        // toward the middle of the system so rocks never pop up in view.
+        const isRespawn = state.spawnedInitialBelt;
+        const missing = isRespawn
             ? (hasConquest ? Math.min(4, state.target - asteroids.length) : 1)
             : state.target - asteroids.length;
         state.spawnedInitialBelt = true;
         state.nextSpawnAt = time.time + (
             hasConquest ? CONQUEST_ASTEROID_RESPAWN_MS : ASTEROID_RESPAWN_INTERVAL_MS
         );
-        state.spawnedInitialBelt = true;
-
-        // Place the field around the pilot when there is one, so the rocks
-        // are met rather than merely present somewhere in the system.
-        const centre = players[0]?.[0].position;
 
         for (let index = 0; index < missing; index++) {
             const type = pickWeighted(state.types);
             if (!type) {
                 break;
             }
-            const asteroid = makeAsteroid(
-                type.id,
-                centre ? ringPosition(centre) : beltPosition());
+            const { position: spawnPos, velocity: spawnVel } =
+                players.length > 0 || isRespawn
+                    ? offscreenAsteroidSpawn(players)
+                    : (() => {
+                        const pos = beltPosition();
+                        const aim = new Position(
+                            (Math.random() - 0.5) * 1_200,
+                            (Math.random() - 0.5) * 1_200,
+                        ).subtract(pos);
+                        const spd = ASTEROID_INBOUND_MIN_SPEED
+                            + Math.random() * (ASTEROID_INBOUND_MAX_SPEED - ASTEROID_INBOUND_MIN_SPEED);
+                        const vel = aim.lengthSquared > 1
+                            ? aim.normalize().scale(spd)
+                            : new Vector(spd, 0);
+                        return { position: pos, velocity: vel };
+                    })();
+            const asteroid = makeAsteroid(type.id, spawnPos, spawnVel);
             if (!reserveEntity(budget, asteroid, 'asteroid')) {
                 break;
             }
@@ -208,8 +268,8 @@ const AsteroidSpawnSystem = new AsyncSystem({
 });
 
 /**
- * Move a rock that has drifted far behind the pilot back into the ring ahead
- * of them. Recycling keeps the field alive without spending entity budget.
+ * Recycle rocks that have drifted far past the outer cull boundary by spawning
+ * them off-screen on the perimeter with an inward trajectory toward the middle.
  */
 const AsteroidRecycleSystem = new System({
     name: 'AsteroidRecycle',
@@ -228,13 +288,20 @@ const AsteroidRecycleSystem = new System({
             if (!isBeyondCull(movement.position, centre)) {
                 continue;
             }
+            const AlsoVisibleToOtherPlayer = players.some(([mov]) =>
+                !isBeyondCull(movement.position, mov.position, ASTEROID_SPAWN_MIN_RADIUS));
+            if (AlsoVisibleToOtherPlayer) {
+                continue;
+            }
             const entity = entities.get(uuid);
             const state = entity?.components.get(MovementStateComponent);
             if (!state) {
                 continue;
             }
-            const moved = ringPosition(centre);
-            state.position = moved;
+            const { position, velocity } = offscreenAsteroidSpawn(players);
+            state.position = position;
+            state.velocity = velocity;
+            entity?.components.set(MovementStateComponent, state);
         }
     },
 });

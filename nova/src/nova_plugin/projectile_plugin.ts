@@ -155,6 +155,14 @@ class ProjectileWeaponEntry extends WeaponEntry {
                     new SAT.Circle(new SAT.Vector(0, 0), this.data.proxRadius)
                 ]);
                 projectile.components.set(HurtboxHullComponent, proxHull);
+            } else {
+                // Provide an immediate fallback hurtbox circle so newly dequeued
+                // projectiles can collide on Tick 0 before ProjectileHurtboxProvider's
+                // async sprite-sheet hull resolves.
+                const fallbackHull = new CompositeHull([
+                    new SAT.Circle(new SAT.Vector(0, 0), 3)
+                ]);
+                projectile.components.set(HurtboxHullComponent, fallbackHull);
             }
 
             if (this.data.blastRadius) {
@@ -274,6 +282,13 @@ class ProjectileWeaponEntry extends WeaponEntry {
                 this.entities,
                 onStep,
             ));
+        }
+
+        const hurtbox = projectile.components.get(HurtboxHullComponent);
+        if (hurtbox) {
+            hurtbox.pos.x = movementState.position.x;
+            hurtbox.pos.y = movementState.position.y;
+            hurtbox.angle = movementState.rotation.angle;
         }
 
         // Reuse the live prediction and its graphic/budget reservation without

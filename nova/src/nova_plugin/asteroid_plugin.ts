@@ -57,7 +57,7 @@ import {
 } from './conquest_config';
 
 /** Drift speed of a freshly spawned asteroid, in engine units per second. */
-const ASTEROID_DRIFT_SPEED = 30;
+const ASTEROID_DRIFT_SPEED = 90;
 /** Radius of the belt around the system centre. */
 const ASTEROID_BELT_RADIUS = 4_000;
 /**

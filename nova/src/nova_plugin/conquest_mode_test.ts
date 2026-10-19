@@ -11,6 +11,10 @@ import { World } from 'nova_ecs/world';
 import { MockGameData } from 'novadatainterface/MockGameData';
 import { getDefaultSystemData } from 'novadatainterface/SystemData';
 import { AsteroidPlugin, makeOre } from './asteroid_plugin';
+import {
+    ASTEROID_SPAWN_MIN_RADIUS,
+    offscreenAsteroidSpawn,
+} from './asteroid_spawn_plugin';
 import { EntityBudgetPlugin } from './entity_budget';
 import {
     applyConquestPocketSystems,
@@ -380,5 +384,20 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         solPlayer.currentSystem = CONQUEST_AURORA_SYSTEM;
         expect(playerConquestFaction(solPlayer, 'nova:144')).toBe(FEDERATION_GOVT);
         expect(playerConquestFaction(solPlayer, 'nova:144') !== AURORAN_GOVT).toBeTrue();
+
+        // Off-screen asteroid spawn places rocks outside every player's view with inward velocity
+        const p1 = [{ position: new Position(0, 0) }, {}] as const;
+        const p2 = [{ position: new Position(900, 0) }, {}] as const;
+        for (let i = 0; i < 20; i++) {
+            const { position, velocity } = offscreenAsteroidSpawn([p1, p2]);
+            expect(position.subtract(p1[0].position).length)
+                .toBeGreaterThanOrEqual(ASTEROID_SPAWN_MIN_RADIUS - 50);
+            expect(position.subtract(p2[0].position).length)
+                .toBeGreaterThanOrEqual(ASTEROID_SPAWN_MIN_RADIUS - 50);
+            expect(velocity.length).toBeGreaterThan(35);
+            // Velocity points inward toward the system interior (dot product with -position > 0)
+            const inwardDot = (-position.x) * velocity.x + (-position.y) * velocity.y;
+            expect(inwardDot).toBeGreaterThan(0);
+        }
     });
 });

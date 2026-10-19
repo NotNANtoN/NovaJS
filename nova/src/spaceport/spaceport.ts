@@ -273,6 +273,8 @@ export class Spaceport extends Menu<Entity> {
                     shipBuildWorld.step();
                     await shipBuildWorld.resources.get(AsyncSystemResource)?.done;
                     shipBuildWorld.step();
+                    await shipBuildWorld.resources.get(AsyncSystemResource)?.done;
+                    shipBuildWorld.step();
                     shipBuildWorld.entities.delete('ship');
                     deImmerify(newInput);
                     if (preservedOutfits && preservedOutfits.size > 0) {

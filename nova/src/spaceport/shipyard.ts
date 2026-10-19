@@ -352,29 +352,29 @@ export class Shipyard extends Menu<Entity> {
             });
         } finally { this.combatBusy = false; }
         this.input = makeShip(selection);
+        this.input.components.set(ShipDataComponent, selection);
         this.input.components.set(PlayerShipSelector, undefined);
         this.input.components.set(MultiplayerData, multiplayerData);
         this.input.components.set(PlayerStateComponent, this.playerState);
-        // Carry over persistent Vell-os attunement licenses onto the new hull
-        // and grant the Javelin's full T1/T0 weave (Winter Tempest, T1 Mind Boost, 3x Dart)
+        // Initialize stock outfits immediately on the new hull, carrying over
+        // any persistent Vell-os attunement licenses and granting the Javelin's
+        // full T1/T0 weave (Winter Tempest, T1 Mind Boost, 3x Dart).
         const carriedLicenses = previousOutfits
             ? [...previousOutfits.entries()]
                 .filter(([id, val]) => id.startsWith('conquest:vellos_') && val.count > 0)
             : [];
-        if (carriedLicenses.length > 0 || selection.id === 'nova:175') {
-            const baseOutfits = new Map<string, { count: number }>(
-                Object.entries(selection.outfits ?? {}).map(([id, count]) => [id, { count }]),
-            );
-            for (const [id, val] of carriedLicenses) {
-                baseOutfits.set(id, { count: val.count });
-            }
-            if (selection.id === 'nova:175') {
-                baseOutfits.set('nova:224', { count: 1 }); // Winter Tempest
-                baseOutfits.set('nova:336', { count: 1 }); // Vell-os T1 Strength
-                baseOutfits.set('nova:226', { count: 3 }); // 3x Dart escorts for Create Dart bay
-            }
-            this.input.components.set(OutfitsStateComponent, baseOutfits);
+        const baseOutfits = new Map<string, { count: number }>(
+            Object.entries(selection.outfits ?? {}).map(([id, count]) => [id, { count }]),
+        );
+        for (const [id, val] of carriedLicenses) {
+            baseOutfits.set(id, { count: val.count });
         }
+        if (selection.id === 'nova:175') {
+            baseOutfits.set('nova:224', { count: 1 }); // Winter Tempest
+            baseOutfits.set('nova:336', { count: 1 }); // Vell-os T1 Strength
+            baseOutfits.set('nova:226', { count: 3 }); // 3x Dart escorts for Create Dart bay
+        }
+        this.input.components.set(OutfitsStateComponent, baseOutfits);
         // For convenience
         (window as any).myShip = this.input;
         this.updateCreditsText();
