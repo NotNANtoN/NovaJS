@@ -15,7 +15,8 @@ import { HitboxHullComponent, HurtboxHullComponent } from './collisions_plugin';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction';
 import { ExitPointData } from './exit_point';
 import { OwnerComponent, ShotCreation, ShotSeedComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
-import { DeathAIComponent, FollowComponent, ShootAllWeaponsComponent } from './npc_plugin';
+import { DeathAIComponent, FollowComponent, GovtComponent, ShootAllWeaponsComponent } from './npc_plugin';
+import { reserveEntity } from './entity_budget';
 import { ShipComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { TargetRemovedEvent } from './target_plugin';
@@ -90,20 +91,30 @@ class BayWeaponEntry extends WeaponEntry {
             return;
         }
 
-        const multiplayerOwner = q[0][1].uuid;
+        const multiplayerOwner = q.length > 0 ? q[0][1].uuid : 'server';
         // Do not fire if we don't have a uuid yet.
-        if (! multiplayerOwner) {
+        if (!multiplayerOwner) {
             return;
+        }
+        if (target === undefined) {
+            return undefined;
         }
 
         let velocity = new Vector(0, 0);
         if (sourceVelocity) {
-            velocity.add(sourceVelocity);
+            velocity = velocity.add(sourceVelocity);
         }
         // TODO: Add exit velocity to bay weapons.
-        velocity.add(angle.getUnitVector().scale(10));
+        velocity = velocity.add(angle.getUnitVector().scale(10));
 
         const ship = this.makeShip();
+        if (!reserveEntity(this.budget, ship, 'ship')) {
+            return undefined;
+        }
+        const parentGovt = this.entities.get(source)?.components.get(GovtComponent);
+        if (parentGovt) {
+            ship.components.set(GovtComponent, { id: parentGovt.id });
+        }
         ship.components.set(OwnerComponent, {owner});
         ship.components.set(SourceComponent, source);
         ship.components.set(ShotSeedComponent, { seed: shot.seed });
@@ -116,11 +127,7 @@ class BayWeaponEntry extends WeaponEntry {
             turnBack: false,
             turning: 0,
         });
-        ship.components.set(TargetComponent, { target: target });
         ship.components.set(MultiplayerData, {owner: multiplayerOwner});
-        if (target === undefined) {
-            return undefined;
-        }
 
         this.entities.set(v4(), ship);
         const ownerVuln = this.entities.get(source)?.components

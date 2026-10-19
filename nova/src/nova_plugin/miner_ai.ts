@@ -176,7 +176,8 @@ function makeMinerApproachAI(follow: System) {
             // Holding station leaves the nose wherever braking pointed it,
             // which is away from the rock. Track the rock instead so mining
             // fire keeps landing.
-            movement.turnTo = command.turnTo ?? targetUuid;
+            movement.turnTo = command.turnTo
+                ?? asteroid[1].position.subtract(movement.position).angle;
             movement.accelerating = command.accelerating;
             movement.turnBack = command.turnBack;
         },

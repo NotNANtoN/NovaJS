@@ -84,10 +84,37 @@ function fireWithCost(
     copy = 0,
 ): FiredShot | undefined {
     if (weapon.ammoType === 'unlimited') {
+        if (weapon.type === 'BayWeaponData' && platform === 'node' && owner === 'server') {
+            let npcAmmo = entity.components.get(NpcWeaponAmmoComponent);
+            if (!npcAmmo) {
+                npcAmmo = new Map();
+                entity.components.set(NpcWeaponAmmoComponent, npcAmmo);
+            }
+            const remaining = npcAmmo.get(weapon.id) ?? 4;
+            if (remaining <= 0) {
+                return undefined;
+            }
+            const fired = fire();
+            if (fired) {
+                npcAmmo.set(weapon.id, remaining - 1);
+                paidCopies?.add(copy);
+            }
+            return fired;
+        }
         return fire();
     }
-    // Prediction/replay never changes authoritative resource balances.
-    if (platform !== 'node' || owner !== 'server') return fire();
+    // Prediction/replay never changes authoritative resource balances,
+    // but must still respect empty fuel/energy so client beams don't fire dry.
+    if (platform !== 'node' || owner !== 'server') {
+        if (weapon.ammoType[0] === 'energy') {
+            const cost = weapon.ammoType[1];
+            const state = entity.components.get(PlayerStateComponent);
+            if (state && Number.isFinite(cost) && cost > 0 && (state.fuel ?? 0) < cost) {
+                return undefined;
+            }
+        }
+        return fire();
+    }
     if (paidCopies?.has(copy)) return fire();
     if (weapon.ammoType[0] === 'energy') {
         const cost = weapon.ammoType[1];

@@ -165,6 +165,26 @@ export async function ShipParse(ship: ShipResource,
             outfits[outfitID] = 0;
         }
         outfits[outfitID] += count;
+
+        if (w.ammo > 0) {
+            const supplyWeaponID = weapon.guidance === 'bay'
+                ? localID
+                : (weapon.ammoType >= 0 && weapon.ammoType <= 255
+                    ? weapon.ammoType + 128
+                    : -1);
+            if (supplyWeaponID >= 128) {
+                const supplyGlobalID = weapon.idSpace.wëap[supplyWeaponID]?.globalID;
+                const ammoOutfit = Object.values(ship.idSpace.oütf).find(o =>
+                    o.functions.some(([type, val]) =>
+                        type === "ammunition"
+                        && val === supplyWeaponID
+                        && o.idSpace.wëap[val]?.globalID === supplyGlobalID));
+                if (ammoOutfit) {
+                    outfits[ammoOutfit.globalID] =
+                        (outfits[ammoOutfit.globalID] ?? 0) + w.ammo;
+                }
+            }
+        }
     }
 
     // The ship's free mass is mass on top of the mass of preinstalled outfits,
@@ -182,7 +202,7 @@ export async function ShipParse(ship: ShipResource,
         armor: ship.armor,
         armorRecharge: ship.armorRecharge * FPS / 1000,
         energy: ship.fuelCapacity,
-        energyRecharge: FPS / ship.energyRecharge, // Frames per unit -> units per second
+        energyRecharge: ship.energyRecharge ? FPS / ship.energyRecharge : 0, // Frames per unit -> units per second
         ionization: ship.ionization,
         deionize: ship.deionize / 100 * FPS, // 100 is 1 point of ion energy per 1/30th of a second (evn bible)
         speed: ship.speed * ShipVelocityConversionFactor,

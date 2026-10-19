@@ -1066,10 +1066,17 @@ export const ShootAllWeaponsAI = new System({
             : undefined;
         for (const [id, weapon] of weapons) {
             const weaponData = gameData.data.Weapon.getCached(id);
-            if (weaponData == null || weaponData.type === 'BayWeaponData') {
-                // do not use bay weapons yet since there is no ammo limit.
+            if (weaponData == null) {
                 continue;
-            };
+            }
+            if (weaponData.type === 'BayWeaponData') {
+                weapon.target = target.target;
+                weapon.firing = Boolean(
+                    target.target
+                    && (targetDistance === undefined || targetDistance <= 1_200),
+                );
+                continue;
+            }
             weapon.target = target.target;
             const pointDefense = weaponData.guidance === 'pointDefense'
                 || weaponData.guidance === 'pointDefenseBeam';
