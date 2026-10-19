@@ -59,7 +59,10 @@ import { makeShipExplosionBlast } from './ship_death_blast';
 import { authorExternalImpulse, ExternalImpulsePlugin } from './external_impulse';
 import { OwnerComponent, SourceComponent } from './fire_weapon_plugin';
 import { parseLoggedShotEntityId } from './fire_sync';
-import { isConquestMode } from './conquest_config';
+import { ConquestBotComponent, isConquestMode } from './conquest_config';
+
+export const LastAttackerComponent =
+    new Component<string>('LastAttackerComponent');
 
 // const DamageQuery = new Query([Optional(ShieldComponent), Optional(ArmorComponent),
 // Optional(IonizationComponent), Optional(IonizationColorComponent),
@@ -200,6 +203,16 @@ const DamageSystem = new System({
 
         const hasShield = shield && shield.max > 0;
         const isShip = entity.components.has(ShipComponent);
+        if (isShip && damager) {
+            const damagerEnt = entities.get(damager);
+            const shooterId = damagerEnt?.components.get(SourceComponent)
+                ?? damagerEnt?.components.get(OwnerComponent)?.owner
+                ?? parseLoggedShotEntityId(damager)?.source
+                ?? damager;
+            if (shooterId && shooterId !== uuid) {
+                entity.components.set(LastAttackerComponent, shooterId);
+            }
+        }
         if ((isProjectile || !isShip) && !hasShield) {
             // Unshielded targets (projectiles and asteroids) absorb the
             // weapon's shield energy into armor damage so energy blasters
@@ -214,7 +227,10 @@ const DamageSystem = new System({
                 const shooterEnt = entities.get(shooterId);
                 const shooterOutfits = shooterEnt?.components.get(OutfitsStateComponent);
                 const shooterPlayer = shooterEnt?.components.get(PlayerStateComponent);
-                if (isConquestMode(shooterPlayer)) {
+                if (
+                    isConquestMode(shooterPlayer)
+                    || shooterEnt?.components.has(ConquestBotComponent)
+                ) {
                     // In Galactic Conquest, boost asteroid mining damage so starter
                     // blasters (e.g. Shuttle / Viper Light Blasters) break rocks briskly.
                     asteroidBonus *= 2.5;
@@ -449,10 +465,13 @@ function resolvePlayerDeath(
                 id => gameData.data.Outfit.getCached(id),
             )
             : undefined;
-        const outcome = outfits
-            ? escapePodOutfitId ? 'escaped' as const : 'killed' as const
-            : undefined;
-        if (escapePodOutfitId) {
+        const conquest = isConquestMode(playerState);
+        const outcome = conquest
+            ? 'escaped' as const
+            : outfits
+                ? escapePodOutfitId ? 'escaped' as const : 'killed' as const
+                : undefined;
+        if (escapePodOutfitId || conquest) {
             // Start fetching the replacement hull during the explosion so the
             // synchronous respawn step never has to guess at its retail data.
             void gameData?.data.Ship.get(BASIC_ESCAPE_POD_SHIP_ID)
@@ -575,66 +594,88 @@ function resolvePlayerRespawn(
             return;
         }
         if (death.outcome === 'escaped') {
-            const gameData = world.resources.get(GameDataResource);
-            const basicHull = gameData?.data.Ship.getCached(
-                BASIC_ESCAPE_POD_SHIP_ID);
-            if (!gameData || !basicHull || !playerState || !shipType) {
-                movement.position = new Position(...death.wreckPosition);
-                movement.velocity = new Vector(0, 0);
-                return;
-            }
-            const defaultOutfits = Object.entries(basicHull.outfits)
-                .map(([id, count]) => {
-                    const outfit = gameData.data.Outfit.getCached(id);
-                    return outfit ? [outfit, count] as const : undefined;
+            const conquest = isConquestMode(playerState);
+            const currentOutfits = entity.components.get(OutfitsStateComponent);
+            if (conquest && death.escapePodOutfitId && currentOutfits) {
+                // In Galactic Conquest, an installed Escape Pod acts as Hull
+                // Insurance: consume 1 Escape Pod and keep the current ship
+                // and outfits intact!
+                const podEntry = currentOutfits.get(death.escapePodOutfitId);
+                if (podEntry && podEntry.count > 1) {
+                    currentOutfits.set(death.escapePodOutfitId, { count: podEntry.count - 1 });
+                } else {
+                    currentOutfits.delete(death.escapePodOutfitId);
+                }
+                entity.components.set(OutfitsStateComponent, currentOutfits);
+            } else {
+                const gameData = world.resources.get(GameDataResource);
+                const basicHull = gameData?.data.Ship.getCached(
+                    BASIC_ESCAPE_POD_SHIP_ID);
+                if (!gameData || !basicHull || !playerState || !shipType) {
+                    movement.position = new Position(...death.wreckPosition);
+                    movement.velocity = new Vector(0, 0);
+                    return;
+                }
+                const defaultOutfits = Object.entries(basicHull.outfits)
+                    .map(([id, count]) => {
+                        const outfit = gameData.data.Outfit.getCached(id);
+                        return outfit ? [outfit, count] as const : undefined;
+                    });
+                if (defaultOutfits.some(entry => entry === undefined)) {
+                    movement.position = new Position(...death.wreckPosition);
+                    movement.velocity = new Vector(0, 0);
+                    return;
+                }
+
+                const carriedLicenses = conquest && currentOutfits
+                    ? [...currentOutfits.entries()]
+                        .filter(([id, val]) => id.startsWith('conquest:vellos_') && val.count > 0)
+                    : [];
+                const recovery = recoverPilotAfterEscapePod(
+                    playerState, basicHull);
+                for (const [id, val] of carriedLicenses) {
+                    recovery.outfits.set(id, { count: val.count });
+                }
+                playerState.shipId = recovery.playerState.shipId;
+                playerState.cargoCapacity =
+                    recovery.playerState.cargoCapacity;
+                playerState.holds = recovery.playerState.holds;
+                playerState.fuel = recovery.playerState.fuel;
+                playerState.activeMissions =
+                    recovery.playerState.activeMissions;
+
+                const physics = applyOutfitPhysics(
+                    basicHull.physics,
+                    defaultOutfits as Array<NonNullable<
+                        (typeof defaultOutfits)[number]
+                    >>,
+                );
+                entity.components.set(ShipComponent, {
+                    id: recovery.playerState.shipId,
                 });
-            if (defaultOutfits.some(entry => entry === undefined)) {
-                movement.position = new Position(...death.wreckPosition);
-                movement.velocity = new Vector(0, 0);
-                return;
+                entity.components.set(ShipDataComponent, basicHull);
+                entity.components.set(
+                    OutfitsStateComponent, recovery.outfits);
+                entity.components.set(ShipPhysicsComponent, physics);
+                entity.components.set(ShieldComponent, new Stat({
+                    current: physics.shield,
+                    max: physics.shield,
+                    min: 0,
+                    recharge: physics.shieldRecharge,
+                }));
+                entity.components.set(ArmorComponent, new Stat({
+                    current: physics.armor,
+                    max: physics.armor,
+                    min: 0,
+                    recharge: physics.armorRecharge,
+                }));
+                entity.components.set(IonizationComponent, new Stat({
+                    current: 0,
+                    max: physics.ionization,
+                    min: 0,
+                    recharge: -physics.deionize,
+                }));
             }
-
-            const recovery = recoverPilotAfterEscapePod(
-                playerState, basicHull);
-            playerState.shipId = recovery.playerState.shipId;
-            playerState.cargoCapacity =
-                recovery.playerState.cargoCapacity;
-            playerState.holds = recovery.playerState.holds;
-            playerState.fuel = recovery.playerState.fuel;
-            playerState.activeMissions =
-                recovery.playerState.activeMissions;
-
-            const physics = applyOutfitPhysics(
-                basicHull.physics,
-                defaultOutfits as Array<NonNullable<
-                    (typeof defaultOutfits)[number]
-                >>,
-            );
-            entity.components.set(ShipComponent, {
-                id: recovery.playerState.shipId,
-            });
-            entity.components.set(ShipDataComponent, basicHull);
-            entity.components.set(
-                OutfitsStateComponent, recovery.outfits);
-            entity.components.set(ShipPhysicsComponent, physics);
-            entity.components.set(ShieldComponent, new Stat({
-                current: physics.shield,
-                max: physics.shield,
-                min: 0,
-                recharge: physics.shieldRecharge,
-            }));
-            entity.components.set(ArmorComponent, new Stat({
-                current: physics.armor,
-                max: physics.armor,
-                min: 0,
-                recharge: physics.armorRecharge,
-            }));
-            entity.components.set(IonizationComponent, new Stat({
-                current: 0,
-                max: physics.ionization,
-                min: 0,
-                recharge: -physics.deionize,
-            }));
         }
         const position: [number, number] =
             playerState?.lastLandedPosition ?? [0, 0];

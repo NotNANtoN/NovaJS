@@ -18,7 +18,8 @@ import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { v4 as uuid } from 'uuid';
 import { AsteroidComponent, makeOre, OreComponent } from './asteroid_plugin';
-import { DeathEvent, DisabledComponent } from './death_plugin';
+import { BoardingNoticeComponent } from './boarding_notice';
+import { DeathEvent, DisabledComponent, LastAttackerComponent } from './death_plugin';
 import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { HiredEscortComponent } from './escort_plugin';
 import { OwnerComponent } from './fire_weapon_plugin';
@@ -38,7 +39,13 @@ import {
     ChooseRandomTargetComponent,
     GovtComponent,
 } from './npc_components';
-import { FollowAI, makeNpc } from './npc_plugin';
+import {
+    FollowAI,
+    getEffectiveWeaponRange,
+    makeNpc,
+    ShootAllWeaponsAI,
+    WanderComponent,
+} from './npc_plugin';
 import { isPersonallyProvoked, isProvoked, ProvocationResource } from './npc_hostility';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { PlatformResource } from './platform_plugin';
@@ -134,8 +141,21 @@ export function hullTiersForGovt(govt: number): readonly string[] {
 const nextConquestBotSpawnBySystem = new Map<string, number>();
 const nextRivalRaidWaveBySystem = new Map<string, number>();
 const CONQUEST_RIVAL_RAID_WAVE_INTERVAL_MS = 28_000;
+const warmedGameDataSets = new WeakSet<object>();
 
-async function spawnConquestBotEntity(
+function warmConquestHulls(
+    gameData: import('novadatainterface/GameDataInterface').GameDataInterface,
+): void {
+    if (warmedGameDataSets.has(gameData)) {
+        return;
+    }
+    warmedGameDataSets.add(gameData);
+    for (const id of [...FEDERATION_UPGRADE_TIERS, ...AURORAN_UPGRADE_TIERS]) {
+        void gameData.data.Ship.get(id).catch(() => {});
+    }
+}
+
+function spawnConquestBotEntity(
     gameData: import('novadatainterface/GameDataInterface').GameDataInterface,
     budget: import('./entity_budget').EntityBudget,
     botState: ConquestBotState,
@@ -143,19 +163,24 @@ async function spawnConquestBotEntity(
     rotation = new Angle(Math.random() * 2 * Math.PI),
     velocity = new Vector(0, 0),
     arrivingFrom?: { from: string; to: string; now: number },
-): Promise<Entity | undefined> {
+): Entity | undefined {
     const tiers = hullTiersForGovt(botState.factionGovt);
     const clampedTier = Math.max(0, Math.min(tiers.length - 1, botState.tier));
     botState.tier = clampedTier;
     const shipId = tiers[clampedTier];
-    const shipData = await gameData.data.Ship.get(shipId);
+    const shipData = gameData.data.Ship.getCached(shipId);
+    if (!shipData) {
+        void gameData.data.Ship.get(shipId).catch(() => {});
+        return undefined;
+    }
     const bot = makeNpc(shipData);
     if (!reserveEntity(budget, bot, 'ship')) {
         return undefined;
     }
-    // ConquestBotLifecycleSystem manages targeting; prevent ChooseRandomTargetAI
-    // from wiping out asteroid targets every frame.
+    // ConquestBotLifecycleSystem manages targeting and flight; prevent
+    // ChooseRandomTargetAI and WanderAI from overriding targets or headings.
     bot.components.delete(ChooseRandomTargetComponent);
+    bot.components.delete(WanderComponent);
     bot.name = `${botState.callsign} (${shipData.name})`;
 
     const mov = bot.components.get(MovementStateComponent);
@@ -165,6 +190,13 @@ async function spawnConquestBotEntity(
         mov.velocity = velocity;
     }
     bot.components
+        .set(ShipDataComponent, shipData)
+        .set(
+            OutfitsStateComponent,
+            new Map(Object.entries(shipData.outfits ?? {}).map(
+                ([id, count]) => [id, { count }],
+            )),
+        )
         .set(GovtComponent, { id: botState.factionGovt })
         .set(ConquestBotComponent, botState)
         .set(MultiplayerData, { owner: 'server' });
@@ -184,10 +216,9 @@ async function spawnConquestBotEntity(
     return bot;
 }
 
-const ConquestBotLifecycleSystem = new AsyncSystem({
+const ConquestBotLifecycleSystem = new System({
     name: 'ConquestBotLifecycle',
-    after: [FollowAI],
-    exclusive: true,
+    after: [FollowAI, ShootAllWeaponsAI],
     args: [
         SingletonComponent,
         GameDataResource,
@@ -203,7 +234,7 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
         ConquestShipsQuery,
         Optional(ProvocationResource),
     ] as const,
-    async step(
+    step(
         _singleton,
         gameData,
         systemId,
@@ -226,6 +257,7 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
         if (!hasConquestPlayer) {
             return;
         }
+        warmConquestHulls(gameData);
 
         // 0. Purge any retail ambient NPCs (traders, shuttles, cargo drones)
         // that spawned before the Conquest player's state arrived.
@@ -289,7 +321,7 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
                     lastModeSwitchAt: time.time,
                 };
                 usedCallsigns.add(state.callsign);
-                const bot = await spawnConquestBotEntity(
+                const bot = spawnConquestBotEntity(
                     gameData,
                     budget,
                     state,
@@ -334,7 +366,7 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
                 ? Math.min(homeTiers.length - 1, 1 + Math.floor(Math.random() * 2))
                 : 0;
             try {
-                const bot = await spawnConquestBotEntity(
+                const bot = spawnConquestBotEntity(
                     gameData,
                     budget,
                     {
@@ -408,7 +440,7 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
                     if (i === 0) {
                         leaderUuid = memberUuid;
                     }
-                    const bot = await spawnConquestBotEntity(
+                    const bot = spawnConquestBotEntity(
                         gameData,
                         budget,
                         {
@@ -430,6 +462,19 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
                     );
                     if (bot) {
                         entities.set(memberUuid, bot);
+                        if (i === 0) {
+                            const factionLabel = rivalGovt === AURORAN_GOVT ? 'Auroran' : 'Federation';
+                            const waveDesc = groupSize > 1
+                                ? `${factionLabel} Strike Group (${callsign} + ${groupSize - 1} wing)`
+                                : `${factionLabel} Raider ${callsign}`;
+                            for (const [playerUuid, pState] of players) {
+                                if (isConquestMode(pState)) {
+                                    entities.get(playerUuid)?.components.set(BoardingNoticeComponent, {
+                                        text: `⚠️ Incoming ${waveDesc} jumping in from ${otherSystem === CONQUEST_AURORA_SYSTEM ? 'Aurora' : 'Sol'}!`,
+                                    });
+                                }
+                            }
+                        }
                     }
                 } catch {
                     break;
@@ -597,24 +642,39 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
                         targetComp.target = closestRockUuid;
                         const toRock = closestRockMov.position.subtract(movement.position);
                         const dist = toRock.length;
+                        const effRange = getEffectiveWeaponRange(weapons, gameData) ?? 200;
+                        const miningStandoff = Math.min(130, Math.max(85, effRange * 0.58));
                         if (physics) {
                             const cmd = approachTarget(movement, closestRockMov, physics, {
-                                standoff: 190,
+                                standoff: miningStandoff,
                             });
-                            movement.turnTo = dist <= 420
+                            movement.turnTo = dist <= Math.max(260, effRange * 1.3)
                                 ? toRock.angle
                                 : (cmd.turnTo ?? toRock.angle);
-                            movement.accelerating = dist > 210 ? cmd.accelerating : 0;
+                            movement.accelerating = dist > miningStandoff + 25 ? cmd.accelerating : 0;
                             movement.turnBack = cmd.turnBack;
                         }
-                        if (dist <= 450) {
+                        const noseAngleDiff = Math.abs(movement.rotation.distanceTo(toRock.angle).angle);
+                        const canMine = dist <= Math.max(220, effRange * 1.1) && noseAngleDiff <= 0.38;
+                        if (canMine) {
                             botState.gatheredCredits +=
                                 CONQUEST_BOT_GATHER_CREDIT_RATE_PER_SEC * (time.delta_s || 0.016);
-                            if (weapons) {
-                                for (const [, w] of weapons) {
-                                    w.firing = true;
-                                    w.target = closestRockUuid;
-                                }
+                        }
+                        if (weapons) {
+                            for (const [wId, w] of weapons) {
+                                const wData = gameData.data.Weapon.getCached(wId);
+                                const isTurret = wData && 'guidance' in wData
+                                    && (wData.guidance === 'turret' || wData.guidance === 'beamTurret');
+                                const usesAmmo = Boolean(
+                                    wData
+                                    && wData.ammoType !== 'unlimited'
+                                    && wData.ammoType[0] !== 'energy',
+                                );
+                                w.target = closestRockUuid;
+                                w.firing = !usesAmmo && (
+                                    canMine
+                                    || Boolean(isTurret && dist <= Math.max(240, effRange * 1.1))
+                                );
                             }
                         }
                     }
@@ -627,8 +687,8 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
                     if (botState.tier + 1 < tiers.length) {
                         botState.tier += 1;
                         const nextHullId = tiers[botState.tier];
-                        try {
-                            const nextShipData = await gameData.data.Ship.get(nextHullId);
+                        const nextShipData = gameData.data.Ship.getCached(nextHullId);
+                        if (nextShipData) {
                             shipComp.id = nextShipData.id;
                             botEntity.name = `${botState.callsign} (${nextShipData.name})`;
                             botEntity.components.set(ShipComponent, { id: nextShipData.id });
@@ -649,8 +709,8 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
                                 armor.max = nextShipData.physics.armor;
                                 armor.current = nextShipData.physics.armor;
                             }
-                        } catch {
-                            // Keep current hull if next tier is unavailable
+                        } else {
+                            void gameData.data.Ship.get(nextHullId).catch(() => {});
                         }
                     }
 
@@ -860,6 +920,8 @@ const ConquestSalvageDropSystem = new System({
     args: [
         ShipComponent,
         Optional(ShipDataComponent),
+        Optional(ConquestBotComponent),
+        Optional(LastAttackerComponent),
         MovementStateComponent,
         Entities,
         PlatformResource,
@@ -867,7 +929,7 @@ const ConquestSalvageDropSystem = new System({
         EntityBudgetResource,
         ConquestPlayersQuery,
     ] as const,
-    step(_ship, shipData, movement, entities, platform, systemId, budget, players) {
+    step(_ship, shipData, victimBot, lastAttackerUuid, movement, entities, platform, systemId, budget, players) {
         if (platform !== 'node' || !isConquestPocketSystem(systemId)) {
             return;
         }
@@ -876,6 +938,33 @@ const ConquestSalvageDropSystem = new System({
             return;
         }
         const cost = shipData?.cost ?? 30_000;
+        const bounty = Math.max(4_500, Math.round(cost * 0.35));
+
+        // Award direct Combat Kill Bounty to the killer (Player or Conquest Bot)
+        if (lastAttackerUuid) {
+            const killerEnt = entities.get(lastAttackerUuid);
+            const killerPlayer = killerEnt?.components.get(PlayerStateComponent);
+            const killerBot = killerEnt?.components.get(ConquestBotComponent);
+            if (killerEnt && killerPlayer && isConquestMode(killerPlayer)) {
+                killerPlayer.credits = Math.max(0, (killerPlayer.credits ?? 0) + bounty);
+                killerPlayer.kills = (killerPlayer.kills ?? 0) + 1;
+                const authority = killerEnt.components.get(CombatAuthorityComponent);
+                if (authority && !authority.retired) {
+                    authority.state.credits = killerPlayer.credits;
+                    authority.commit();
+                    authority.project(killerEnt);
+                }
+                const victimLabel = victimBot?.callsign
+                    ? `${victimBot.callsign} (${shipData?.name ?? 'Warship'})`
+                    : (shipData?.name ?? 'Enemy Ship');
+                killerEnt.components.set(BoardingNoticeComponent, {
+                    text: `💥 Destroyed ${victimLabel} — +${bounty.toLocaleString()} cr bounty (+Salvage dropped!)`,
+                });
+            } else if (killerBot) {
+                killerBot.gatheredCredits += bounty;
+            }
+        }
+
         const totalTons = Math.max(3, Math.min(24, Math.round(cost / 12_000)));
         const chunks = Math.min(3, totalTons);
         const tonsPerChunk = Math.max(1, Math.floor(totalTons / chunks));

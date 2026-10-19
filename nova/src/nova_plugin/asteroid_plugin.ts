@@ -276,7 +276,7 @@ const OreMovementPhysicsProvider = Provide({
     args: [OreComponent] as const,
     factory: (ore) => ({
         acceleration: 0,
-        maxVelocity: ORE_DRIFT_SPEED,
+        maxVelocity: 220,
         movementType: MovementType.INERTIAL,
         turnRate: Math.abs(ore.spin),
     }),

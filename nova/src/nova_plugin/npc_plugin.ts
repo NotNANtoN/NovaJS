@@ -1151,11 +1151,12 @@ const WanderAI = new System({
     args: [MovementStateComponent, TargetComponent, WanderComponent,
         TimeResource, UUID, MultiplayerData, PlatformResource,
         NpcAIComponent, Optional(DestructionStartedComponent),
-        Optional(ArmorComponent), Optional(JumpStateComponent)] as const,
+        Optional(ArmorComponent), Optional(JumpStateComponent),
+        Optional(ConquestBotComponent)] as const,
     step(movementState, target, wander, time, uuid, multiplayer, platform,
-        _npcAI, destructionStarted, armor, jumpState) {
+        _npcAI, destructionStarted, armor, jumpState, conquestBot) {
         if (platform !== "node" || multiplayer.owner !== "server"
-            || target.target) {
+            || target.target || conquestBot !== undefined) {
             return;
         }
         if (destructionStarted || armor && armor.current <= 0) {

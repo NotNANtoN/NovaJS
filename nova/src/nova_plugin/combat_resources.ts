@@ -103,9 +103,17 @@ export function mergeCombatPlayerState(local: PlayerState, remote: PlayerState,
         authority.commit();
     }
     const fuel = authority ? authority.balance.fuel : Math.max(0, (local.fuel ?? 0) - debit);
-    return mergeServerMissionProgress(local, withState(remote, { fuel, shipId: local.shipId,
-        combatResources: authority?.state.combatResources ?? local.combatResources }),
-        context.owner, remoteRevision);
+    const serverHasNewerRevision = Boolean(
+        authority
+        && remoteRevision !== undefined
+        && remoteRevision < authority.balance.revision,
+    );
+    return mergeServerMissionProgress(local, withState(remote, {
+        fuel,
+        shipId: local.shipId,
+        ...(serverHasNewerRevision ? { credits: authority!.state.credits } : {}),
+        combatResources: authority?.state.combatResources ?? local.combatResources,
+    }), context.owner, remoteRevision);
 }
 export function mergeCombatOutfits(local: OutfitsState, remote: OutfitsState,
     context: ReplicationMergeContext): OutfitsState {

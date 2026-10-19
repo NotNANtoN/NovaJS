@@ -147,11 +147,28 @@ function movementControlChanged(
     previous: MovementState,
     current: MovementState,
 ): boolean {
-    return previous.turning !== current.turning
+    if (
+        previous.turning !== current.turning
         || previous.turnBack !== current.turnBack
         || previous.accelerating !== current.accelerating
         || !sameAngle(previous.turnTo, current.turnTo)
-        || previous.targetSpeed !== current.targetSpeed;
+        || previous.targetSpeed !== current.targetSpeed
+    ) {
+        return true;
+    }
+    // When an unaccelerated inertial entity (like floating ore under tractor pull
+    // or a repositioned asteroid) has its velocity or position changed directly
+    // by a system on the server, emit a movement delta so clients stay in sync.
+    if (previous.accelerating === 0 && current.accelerating === 0) {
+        const dvx = previous.velocity.x - current.velocity.x;
+        const dvy = previous.velocity.y - current.velocity.y;
+        if (dvx * dvx + dvy * dvy > MOVEMENT_VELOCITY_QUANTUM * MOVEMENT_VELOCITY_QUANTUM) {
+            return true;
+        }
+    }
+    const dx = shortestWrappedDelta(previous.position.x, current.position.x);
+    const dy = shortestWrappedDelta(previous.position.y, current.position.y);
+    return dx * dx + dy * dy > 120 * 120;
 }
 
 export function applyMovementStateDelta(

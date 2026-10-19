@@ -23,6 +23,12 @@ import { PlanetData } from 'novadatainterface/PlanetData';
 import { ShipyardInfoDialog } from './shipyard_info_dialog';
 import { shipyardInfoPictId } from './shipyard_info_content';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
+import {
+    FireIntentComponent,
+    FireLogComponent,
+    FireSyncLocalStateComponent,
+    getFireSyncLocalState,
+} from '../nova_plugin/fire_sync';
 import { Bits64 } from '../nova_plugin/contribute';
 import { contributeForPlayer } from './player_contribute_context';
 import { runShopSetExpression } from './shop_ncb';
@@ -351,7 +357,13 @@ export class Shipyard extends Menu<Entity> {
                     ? { initialPlanetId: this.planetData.id } : undefined,
             });
         } finally { this.combatBusy = false; }
+        const previousFireSync = getFireSyncLocalState(
+            this.input,
+            this.input.components.get(FireIntentComponent),
+            this.input.components.get(FireLogComponent),
+        );
         this.input = makeShip(selection);
+        this.input.components.set(FireSyncLocalStateComponent, previousFireSync);
         this.input.components.set(ShipDataComponent, selection);
         this.input.components.set(PlayerShipSelector, undefined);
         this.input.components.set(MultiplayerData, multiplayerData);

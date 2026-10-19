@@ -39,10 +39,10 @@ export const ASTEROID_RESPAWN_INTERVAL_MS = 20_000;
  * appear in a ring just outside the view and are recycled once they fall far
  * behind.
  */
-export const ASTEROID_SPAWN_MIN_RADIUS = 1_450;
-export const ASTEROID_SPAWN_MAX_RADIUS = 2_350;
-export const ASTEROID_CULL_RADIUS = 3_000;
-const ASTEROID_INBOUND_MIN_SPEED = 42;
+export const ASTEROID_SPAWN_MIN_RADIUS = 2_100;
+export const ASTEROID_SPAWN_MAX_RADIUS = 3_000;
+export const ASTEROID_CULL_RADIUS = 3_600;
+const ASTEROID_INBOUND_MIN_SPEED = 48;
 const ASTEROID_INBOUND_MAX_SPEED = 88;
 
 const AsteroidsQuery = new Query([AsteroidComponent] as const, 'Asteroids');
@@ -95,16 +95,36 @@ export function ringPosition(
  * of the system so asteroids never pop into existence on-screen.
  */
 export function offscreenAsteroidSpawn(
-    players: ReadonlyArray<readonly [{ position: Position }, unknown]>,
+    players: ReadonlyArray<readonly [{ position: Position; velocity?: Vector }, unknown]>,
 ): { position: Position; velocity: Vector } {
     const primaryCentre = players[0]?.[0].position ?? new Position(0, 0);
+    const minDistSq = (ASTEROID_SPAWN_MIN_RADIUS - 25) ** 2;
     let spawnPos = ringPosition(primaryCentre);
-    for (let attempt = 0; attempt < 16; attempt++) {
-        const candidate = ringPosition(primaryCentre);
+    for (let attempt = 0; attempt < 24; attempt++) {
+        const anchor = attempt % 2 === 0 ? primaryCentre : new Position(0, 0);
+        const candidate = ringPosition(anchor);
+        // Never spawn near (0, 0) where players spawn or depart from planets
+        const originDistSq = candidate.x * candidate.x + candidate.y * candidate.y;
+        if (originDistSq < (ASTEROID_SPAWN_MIN_RADIUS - 200) ** 2) {
+            continue;
+        }
         const hiddenFromAll = players.every(([mov]) => {
             const dx = candidate.x - mov.position.x;
             const dy = candidate.y - mov.position.y;
-            return dx * dx + dy * dy >= (ASTEROID_SPAWN_MIN_RADIUS - 50) ** 2;
+            if (dx * dx + dy * dy < minDistSq) {
+                return false;
+            }
+            if (mov.velocity) {
+                // Also stay outside the player's 1.5-second forward path
+                const futureX = mov.position.x + mov.velocity.x * 1.5;
+                const futureY = mov.position.y + mov.velocity.y * 1.5;
+                const fdx = candidate.x - futureX;
+                const fdy = candidate.y - futureY;
+                if (fdx * fdx + fdy * fdy < minDistSq) {
+                    return false;
+                }
+            }
+            return true;
         });
         if (hiddenFromAll) {
             spawnPos = candidate;
@@ -112,20 +132,21 @@ export function offscreenAsteroidSpawn(
         }
     }
 
-    // Aim inward from the outer perimeter toward a point in the central belt
-    // around the system center / player area so rocks cruise through the middle.
-    const targetAnchor = Math.random() < 0.65
+    // Aim inward from the outer perimeter toward a random point in the central
+    // belt around the system center / player area so rocks cruise through the
+    // middle and around the system from outside everyone's view.
+    const targetAnchor = Math.random() < 0.7
         ? new Position(0, 0)
         : primaryCentre;
     const aimPoint = new Position(
-        targetAnchor.x + (Math.random() - 0.5) * 1_100,
-        targetAnchor.y + (Math.random() - 0.5) * 1_100,
+        targetAnchor.x + (Math.random() - 0.5) * 1_300,
+        targetAnchor.y + (Math.random() - 0.5) * 1_300,
     );
     const toInterior = aimPoint.subtract(spawnPos);
     const baseAngle = toInterior.lengthSquared > 1
         ? Math.atan2(toInterior.y, toInterior.x)
         : Math.atan2(-spawnPos.y, -spawnPos.x);
-    const angle = baseAngle + (Math.random() - 0.5) * 0.45;
+    const angle = baseAngle + (Math.random() - 0.5) * 0.4;
     const speed = ASTEROID_INBOUND_MIN_SPEED
         + Math.random() * (ASTEROID_INBOUND_MAX_SPEED - ASTEROID_INBOUND_MIN_SPEED);
     const velocity = new Vector(
@@ -237,21 +258,7 @@ const AsteroidSpawnSystem = new AsyncSystem({
                 break;
             }
             const { position: spawnPos, velocity: spawnVel } =
-                players.length > 0 || isRespawn
-                    ? offscreenAsteroidSpawn(players)
-                    : (() => {
-                        const pos = beltPosition();
-                        const aim = new Position(
-                            (Math.random() - 0.5) * 1_200,
-                            (Math.random() - 0.5) * 1_200,
-                        ).subtract(pos);
-                        const spd = ASTEROID_INBOUND_MIN_SPEED
-                            + Math.random() * (ASTEROID_INBOUND_MAX_SPEED - ASTEROID_INBOUND_MIN_SPEED);
-                        const vel = aim.lengthSquared > 1
-                            ? aim.normalize().scale(spd)
-                            : new Vector(spd, 0);
-                        return { position: pos, velocity: vel };
-                    })();
+                offscreenAsteroidSpawn(players);
             const asteroid = makeAsteroid(type.id, spawnPos, spawnVel);
             if (!reserveEntity(budget, asteroid, 'asteroid')) {
                 break;
@@ -280,20 +287,32 @@ const AsteroidRecycleSystem = new System({
         Entities,
     ] as const,
     step(_singleton, asteroids, players, entities) {
-        const centre = players[0]?.[0].position;
-        if (!centre) {
-            return;
-        }
-        for (const [uuid, movement] of asteroids) {
+        const centre = players[0]?.[0].position ?? new Position(0, 0);
+        for (const [rockUuid, movement] of asteroids) {
             if (!isBeyondCull(movement.position, centre)) {
                 continue;
             }
-            const AlsoVisibleToOtherPlayer = players.some(([mov]) =>
-                !isBeyondCull(movement.position, mov.position, ASTEROID_SPAWN_MIN_RADIUS));
-            if (AlsoVisibleToOtherPlayer) {
+            // Do not cull an asteroid while it is still flying inward toward the
+            // system center or toward any player.
+            const movingInwardToOrigin =
+                movement.position.x * movement.velocity.x
+                + movement.position.y * movement.velocity.y < 0;
+            if (movingInwardToOrigin && !isBeyondCull(movement.position, { x: 0, y: 0 }, ASTEROID_CULL_RADIUS * 1.25)) {
                 continue;
             }
-            const entity = entities.get(uuid);
+            const visibleOrApproachingPlayer = players.some(([mov]) => {
+                if (!isBeyondCull(movement.position, mov.position, ASTEROID_SPAWN_MIN_RADIUS)) {
+                    return true;
+                }
+                const relX = movement.position.x - mov.position.x;
+                const relY = movement.position.y - mov.position.y;
+                return relX * movement.velocity.x + relY * movement.velocity.y < 0
+                    && !isBeyondCull(movement.position, mov.position, ASTEROID_CULL_RADIUS);
+            });
+            if (visibleOrApproachingPlayer) {
+                continue;
+            }
+            const entity = entities.get(rockUuid);
             const state = entity?.components.get(MovementStateComponent);
             if (!state) {
                 continue;

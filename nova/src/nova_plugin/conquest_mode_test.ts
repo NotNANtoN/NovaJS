@@ -46,6 +46,9 @@ import {
 } from './player_state';
 import { classifyOutfitCategory, isPurchaseAvailable } from '../spaceport/availability';
 import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
+import { DeathEvent, LastAttackerComponent } from './death_plugin';
+import { ShipComponent, ShipDataComponent } from './ship_plugin';
+import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 
 describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
@@ -298,7 +301,7 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
     });
 
     it('turns inertialess Vell-os ships directly toward the jump vector without spinning around to retro-thrust', () => {
-        const movement = {
+        const movement: import('nova_ecs/plugins/movement_plugin').MovementState = {
             position: new Position(1500, 0),
             velocity: new Vector(-200, 150),
             rotation: new Angle(Math.PI),
@@ -314,7 +317,7 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(movement.turnBack).toBeFalse();
         expect(movement.velocity.length).toBe(0);
         expect(movement.targetSpeed).toBe(0);
-        expect(movement.turnTo?.angle).toBeCloseTo(destVector.angle.angle, 6);
+        expect((movement.turnTo as Angle)?.angle).toBeCloseTo(destVector.angle.angle, 6);
     });
 
     it('appends cache-busting version query string to conquest:* artwork URLs', () => {
@@ -399,5 +402,76 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
             const inwardDot = (-position.x) * velocity.x + (-position.y) * velocity.y;
             expect(inwardDot).toBeGreaterThan(0);
         }
+    });
+
+    it('awards direct combat kill bounties and drops Salvage Core chunks when an enemy ship is destroyed', async () => {
+        const world = new World();
+        world.resources.set(GameDataResource, new MockGameData());
+        world.resources.set(SystemIdResource, CONQUEST_SOL_SYSTEM);
+        world.resources.set(PlatformResource, 'node');
+        await world.addPlugin(TimePlugin);
+        await world.addPlugin(EntityBudgetPlugin);
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(MovementPlugin);
+        await world.addPlugin(AsteroidPlugin);
+        await world.addPlugin(ConquestModePlugin);
+
+        const playerState = createInitialPlayerState();
+        playerState.gameMode = 'conquest';
+        playerState.credits = 10_000;
+        playerState.kills = 0;
+
+        const playerEnt = new Entity('Player Viper')
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(ShipComponent, { id: 'nova:144' })
+            .addComponent(MultiplayerData, { owner: 'peer-1' })
+            .addComponent(MovementStateComponent, {
+                position: new Position(0, 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        world.entities.set('player-1', playerEnt);
+
+        const enemyShipData = {
+            ...getDefaultShipData(),
+            id: 'nova:156',
+            name: 'Phoenix',
+            cost: 100_000,
+        };
+        const enemyEnt = new Entity('Auroran Raider')
+            .addComponent(ShipComponent, { id: 'nova:156' })
+            .addComponent(ShipDataComponent, enemyShipData)
+            .addComponent(LastAttackerComponent, 'player-1')
+            .addComponent(ConquestBotComponent, {
+                callsign: "Kar'Vosh",
+                mode: 'attack',
+                factionGovt: AURORAN_GOVT,
+                homeSystem: CONQUEST_AURORA_SYSTEM,
+                tier: 1,
+                gatheredCredits: 0,
+                lastModeSwitchAt: 0,
+                upgradePending: false,
+            })
+            .addComponent(MultiplayerData, { owner: 'server' })
+            .addComponent(MovementStateComponent, {
+                position: new Position(120, -80),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        world.entities.set('enemy-1', enemyEnt);
+
+        const time = world.resources.get(TimeResource)!;
+        world.emitNow(DeathEvent, time, ['enemy-1']);
+
+        // Bounty: 35% of 100,000 = 35,000 cr
+        const updatedPlayer = world.entities.get('player-1')!.components.get(PlayerStateComponent)!;
+        expect(updatedPlayer.credits).toBe(45_000);
+        expect(updatedPlayer.kills).toBe(1);
     });
 });

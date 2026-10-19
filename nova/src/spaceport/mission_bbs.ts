@@ -44,6 +44,7 @@ import {
     PlayerStateComponent,
     setCargoCapacity,
 } from '../nova_plugin/player_state';
+import { isConquestMode } from '../nova_plugin/conquest_config';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import {
     generateProceduralMissions,
@@ -935,7 +936,7 @@ export abstract class MissionBoard extends Menu<Entity> {
         // the world step, which revokes the component draft.
         const state = plainSnapshot(
             this.input.components.get(PlayerStateComponent));
-        if (!state) {
+        if (!state || isConquestMode(state)) {
             this.offers = [];
             this.loading = false;
             this.render();

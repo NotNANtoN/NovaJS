@@ -710,11 +710,16 @@ export const ServerFireIntentSystem = new System({
             || entity.components.has(JumpStateComponent)
             || entity.components.get(DisabledComponent) === true
             || (entity.components.get(ArmorComponent)?.current ?? 1) <= 0;
+        const boundaryChanged = local.boundary !== undefined && local.boundary !== boundary;
         const invalidate = blocked || local.blocked || local.invalidated
-            || (local.boundary !== undefined && local.boundary !== boundary);
+            || boundaryChanged;
         local.invalidated = false;
         local.boundary = boundary;
         local.blocked = blocked;
+        if (boundaryChanged && !intent) {
+            local.highestIntentSeq = 0;
+            sync.highestIntentSeq = 0;
+        }
         if (invalidate || (local.hadIntent && !intent)) {
             local.cadence.clearPending();
             local.waitingForWeapon = undefined;

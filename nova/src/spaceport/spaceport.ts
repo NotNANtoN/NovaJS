@@ -33,6 +33,12 @@ import {
 import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { SystemPlugin } from '../nova_plugin/system_plugin';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state';
+import {
+    FireIntentComponent,
+    FireLogComponent,
+    FireSyncLocalStateComponent,
+    getFireSyncLocalState,
+} from '../nova_plugin/fire_sync';
 import { CloakStateComponent } from '../nova_plugin/cloaking_plugin';
 import { isConquestMode } from '../nova_plugin/conquest_config';
 import { deImmerify } from '../util/deimmerify';
@@ -257,6 +263,11 @@ export class Spaceport extends Menu<Entity> {
                 this.shipyard.setPlayerState(plainSnapshot(
                     this.input.components.get(PlayerStateComponent)));
                 const previousInput = this.input;
+                const previousFireSync = getFireSyncLocalState(
+                    previousInput,
+                    previousInput.components.get(FireIntentComponent),
+                    previousInput.components.get(FireLogComponent),
+                );
                 const newInput = await this.shipyard.show(this.input);
                 if (newInput !== this.input) {
                     // Construct a fake system and run providers so that outfits of the new
@@ -277,6 +288,8 @@ export class Spaceport extends Menu<Entity> {
                     shipBuildWorld.step();
                     shipBuildWorld.entities.delete('ship');
                     deImmerify(newInput);
+                    newInput.components.set(FireSyncLocalStateComponent, previousFireSync);
+                    newInput.components.delete(FireIntentComponent);
                     if (preservedOutfits && preservedOutfits.size > 0) {
                         const currentOutfits = newInput.components.get(OutfitsStateComponent)
                             ?? new Map<string, { count: number }>();
@@ -770,7 +783,7 @@ export class Spaceport extends Menu<Entity> {
         const combatState = input.components.get(PlayerStateComponent);
         if (combatState) {
             const planetData = this.data ?? await this.gameData.data.Planet?.get(this.id);
-            if (planetData && planetData.government !== undefined) {
+            if (planetData && planetData.government !== undefined && !isConquestMode(combatState)) {
                 const govtKey = String(planetData.government);
                 const standing = combatState.legalRecords?.[govtKey] ?? 0;
                 if (standing < 0) {

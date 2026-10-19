@@ -20,6 +20,13 @@ import { ControlsSubject } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { NcbRuntimeResource } from '../nova_plugin/ncb_runtime';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
+import {
+    FireIntentComponent,
+    FireLogComponent,
+    FireSyncLocalStateComponent,
+    getFireSyncLocalState,
+} from '../nova_plugin/fire_sync';
+import { isConquestMode } from '../nova_plugin/conquest_config';
 import { AnimationGraphicComponent, AnimationGraphicLoadedComponent } from './animation_graphic_plugin';
 import {
     LandEvent,
@@ -156,6 +163,13 @@ export const LandSystem = new System({
             return;
         }
         deImmerify(playerShip);
+        const preservedFireSync = getFireSyncLocalState(
+            playerShip,
+            playerShip.components.get(FireIntentComponent),
+            playerShip.components.get(FireLogComponent),
+        );
+        playerShip.components.set(FireSyncLocalStateComponent, preservedFireSync);
+        playerShip.components.delete(FireIntentComponent);
         const landingState = playerShip.components.get(PlayerStateComponent);
         const landingPosition: [number, number] = landedPlanet
             ? [landedPlanet.position[0], landedPlanet.position[1]] : [0, 0];
@@ -181,7 +195,7 @@ export const LandSystem = new System({
                 }
                 const outfits = playerShip.components.get(OutfitsStateComponent);
                 // Mission/date side effects occur only after authorization.
-                const notices = landingState && missionRuntime
+                const notices = landingState && missionRuntime && !isConquestMode(landingState)
                     ? await missionRuntime.processLanding(
                         landingState, id, ncbRuntime.setContext(playerShip, landingState)) : [];
                 if (landingState) advanceGameDate(landingState);
@@ -211,6 +225,10 @@ export const LandSystem = new System({
             restore: newShip => {
                 recoveryDialog?.remove();
                 if (communicator?.uuid) newShip.components.set(MultiplayerData, { owner: communicator.uuid });
+                if (!newShip.components.has(FireSyncLocalStateComponent)) {
+                    newShip.components.set(FireSyncLocalStateComponent, preservedFireSync);
+                }
+                newShip.components.delete(FireIntentComponent);
                 newShip.components.delete(AnimationGraphicComponent);
                 newShip.components.delete(AnimationGraphicLoadedComponent);
                 world.entities.set(shipUuid, newShip);
