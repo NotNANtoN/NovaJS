@@ -190,6 +190,31 @@ export const CONQUEST_BOT_GATHER_CREDIT_RATE_PER_SEC = 1_100;
 export const CONQUEST_BOT_UPGRADE_BASE_COST = 10_000;
 export const CONQUEST_BOT_RAID_IDLE_MS = 24_000;
 
+const AURORAN_HULL_SET = new Set<string>([
+    ...AURORAN_UPGRADE_TIERS,
+    'nova:139', // Enterprise
+    'nova:157', // Thunderhead
+]);
+
+/**
+ * Determines which faction a player belongs to in Galactic Conquest:
+ * - Players who fly Auroran hulls or last landed on Aurora belong to AURORAN_GOVT (129).
+ * - Players who spawned/landed on Sol (Earth) or fly Federation/Vell-os hulls belong to FEDERATION_GOVT (128).
+ */
+export function playerConquestFaction(
+    state: Pick<PlayerState, 'lastLandedSystem' | 'lastLandedPlanet' | 'shipId'> | undefined,
+    shipId?: string,
+): number {
+    const hull = shipId ?? state?.shipId ?? '';
+    if (AURORAN_HULL_SET.has(hull)) {
+        return AURORAN_GOVT;
+    }
+    if (state?.lastLandedSystem === CONQUEST_AURORA_SYSTEM) {
+        return AURORAN_GOVT;
+    }
+    return FEDERATION_GOVT;
+}
+
 export function isConquestMode(
     state: Pick<PlayerState, 'gameMode'> | undefined,
 ): boolean {

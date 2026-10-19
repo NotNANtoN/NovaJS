@@ -13,7 +13,7 @@ import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
 import { DisabledComponent } from "../nova_plugin/disabled_plugin";
 import { GovtComponent } from "../nova_plugin/npc_components";
-import { ConquestBotComponent } from "../nova_plugin/conquest_config";
+import { ConquestBotComponent, isConquestMode, playerConquestFaction } from "../nova_plugin/conquest_config";
 import { PlayerStateComponent } from "../nova_plugin/player_state";
 import { areWingmates } from "../nova_plugin/wing";
 import { HiredEscortComponent } from "../nova_plugin/escort_plugin";
@@ -367,6 +367,11 @@ const DrawTargetCornersSystem = new System({
             } else if (targetPlayer) {
                 targetCorners.setStyle("player");
                 callsign = targetPlayer.pilotName ? `CMDR ${targetPlayer.pilotName}` : `TRANSPONDER: ONLINE`;
+            } else if (conquestBot && isConquestMode(playerState)) {
+                const myFaction = playerConquestFaction(playerState);
+                targetCorners.setStyle(
+                    conquestBot.factionGovt === myFaction ? "friendly" : "hostile",
+                );
             } else if (targetGovt && playerGovt && govts) {
                 const targetGovtData = govts.getCached(targetGovt.id);
                 const playerGovtData = govts.getCached(playerGovt.id);

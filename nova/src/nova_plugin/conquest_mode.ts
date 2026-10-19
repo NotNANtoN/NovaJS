@@ -39,6 +39,7 @@ import {
     GovtComponent,
 } from './npc_components';
 import { FollowAI, makeNpc } from './npc_plugin';
+import { isPersonallyProvoked, isProvoked, ProvocationResource } from './npc_hostility';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { PlatformResource } from './platform_plugin';
 import { PlayerStateComponent } from './player_state';
@@ -73,6 +74,7 @@ import {
     MAX_CONQUEST_BOTS_PER_SYSTEM,
     oppositeConquestSystem,
     pickUniqueConquestCallsign,
+    playerConquestFaction,
 } from './conquest_config';
 export * from './conquest_config';
 
@@ -199,6 +201,7 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
         ConquestAsteroidsQuery,
         ConquestOresQuery,
         ConquestShipsQuery,
+        Optional(ProvocationResource),
     ] as const,
     async step(
         _singleton,
@@ -213,6 +216,7 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
         asteroids,
         ores,
         ships,
+        provocations,
     ) {
         if (platform !== 'node' || !isConquestPocketSystem(systemId)) {
             return;
@@ -319,16 +323,26 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
             const angle = Math.random() * 2 * Math.PI;
             const dist = 450 + Math.random() * 750;
             const pos = new Position(Math.cos(angle) * dist, Math.sin(angle) * dist);
+            // Spawn half of home-faction bots as active patrol warships ('attack' mode, Tier 1-2)
+            // and half as miners ('gather' mode) so incoming rival players/raiders are immediately engaged!
+            const homeAttackers = bots.filter(
+                ([, b]) => b.factionGovt === homeGovt && b.mode === 'attack',
+            ).length;
+            const spawnAsDefender = homeAttackers < 3 && Math.random() < 0.55;
+            const homeTiers = hullTiersForGovt(homeGovt);
+            const initialTier = spawnAsDefender
+                ? Math.min(homeTiers.length - 1, 1 + Math.floor(Math.random() * 2))
+                : 0;
             try {
                 const bot = await spawnConquestBotEntity(
                     gameData,
                     budget,
                     {
                         callsign,
-                        mode: 'gather',
+                        mode: spawnAsDefender ? 'attack' : 'gather',
                         factionGovt: homeGovt,
                         homeSystem: systemId,
-                        tier: 0,
+                        tier: initialTier,
                         gatheredCredits: 0,
                         lastModeSwitchAt: time.time,
                         upgradePending: false,
@@ -435,7 +449,7 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
             for (const [
                 candidateUuid,
                 candidateMov,
-                ,
+                candidateShip,
                 ,
                 candidateGovt,
                 candidatePlayer,
@@ -451,10 +465,28 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
                     && (candGovtId === FEDERATION_GOVT
                         || candGovtId === AURORAN_GOVT
                         || candGovtId === 130);
+                const provoked = Boolean(
+                    provocations && (
+                        isPersonallyProvoked(provocations, botUuid, candidateUuid)
+                        || isProvoked(
+                            provocations,
+                            botState.factionGovt,
+                            candidateUuid,
+                            (a, b) => (a === b ? 'ally' : 'enemy'),
+                        )
+                    ),
+                );
                 const isEnemyPlayer = Boolean(
-                    candidatePlayer
-                    && isConquestMode(candidatePlayer)
-                    && systemId !== botState.homeSystem,
+                    candidatePlayer && (
+                        provoked
+                        || (
+                            isConquestMode(candidatePlayer)
+                            && (
+                                playerConquestFaction(candidatePlayer, candidateShip?.id) !== botState.factionGovt
+                                || systemId !== botState.homeSystem
+                            )
+                        )
+                    ),
                 );
                 if (!isEnemyNpc && !isEnemyPlayer) {
                     continue;
@@ -486,12 +518,12 @@ const ConquestBotLifecycleSystem = new AsyncSystem({
             const tiers = hullTiersForGovt(botState.factionGovt);
 
             if (botState.mode === 'gather') {
-                // Self-defense if an enemy raider gets close
+                // Self-defense if an enemy raider or rival player enters range
                 const nearbyThreat = findClosestEnemy(
                     botUuid,
                     botState,
                     movement.position,
-                    650,
+                    1_800,
                 );
                 if (nearbyThreat) {
                     botState.mode = 'attack';

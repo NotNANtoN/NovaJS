@@ -14,7 +14,7 @@ import { Provide } from "nova_ecs/provide";
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { System } from "nova_ecs/system";
 import { currentIfDraft } from "../util/deimmerify";
-import { AnimationComponent } from "../nova_plugin/animation_plugin";
+import { AnimationComponent, ExplosionDataComponent } from "../nova_plugin/animation_plugin";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
 import { PlanetComponent } from "../nova_plugin/planet_plugin";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
@@ -61,7 +61,9 @@ const AnimationGraphicLoader = ProvideAsync({
         await graphic.buildPromise;
 
         // Order sprites
-        if (entity.components.has(PlayerShipSelector)) {
+        if (entity.components.has(ExplosionDataComponent)) {
+            graphic.container.zIndex = 12;
+        } else if (entity.components.has(PlayerShipSelector)) {
             graphic.container.zIndex = 10;
         } else if (entity.components.has(ProjectileComponent)) {
             // TODO: Support projectiles above and below ships.
@@ -108,11 +110,19 @@ export const AnimationGraphicProvider = Provide({
 
 export const ObjectDrawSystem = new System({
     name: "ObjectDrawSystem",
-    args: [MovementStateComponent, AnimationGraphicComponent, Optional(CloakStateComponent), Optional(PlayerShipSelector)] as const,
-    step: (movementState, graphic, cloakState, playerShip) => {
+    args: [MovementStateComponent, AnimationGraphicComponent, Optional(CloakStateComponent), Optional(PlayerShipSelector), Optional(ExplosionDataComponent)] as const,
+    step: (movementState, graphic, cloakState, playerShip, explosionData) => {
         if (graphic.managed.disposed) {
             // Cleanup already destroyed this graphic (entity deleted); a
             // straggler step must not touch the freed Pixi transform.
+            return;
+        }
+        if (explosionData) {
+            // Explosions step their frame via `graphic.progress` in ExplosionSystem.
+            // Setting `graphic.rotation` here would overwrite `sprite.frame` back to 0!
+            graphic.container.alpha = 1;
+            graphic.container.position.x = movementState.position.x;
+            graphic.container.position.y = movementState.position.y;
             return;
         }
         if (movementState.turning < 0) {
@@ -196,7 +206,9 @@ const SyncAnimationGraphicInsert = new System({
         });
 
         // Order sprites
-        if (entity.components.has(PlayerShipSelector)) {
+        if (entity.components.has(ExplosionDataComponent)) {
+            graphic.container.zIndex = 12;
+        } else if (entity.components.has(PlayerShipSelector)) {
             graphic.container.zIndex = 10;
         } else if (entity.components.has(ProjectileComponent)) {
             graphic.container.zIndex = 9;

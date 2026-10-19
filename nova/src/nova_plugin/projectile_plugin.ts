@@ -47,7 +47,7 @@ import { ReturnToQueueComponent } from './return_to_queue_plugin';
 import { SoundEvent } from './sound_event';
 import { Stat } from './stat';
 import { ShotPresentationDelayComponent } from './fire_weapon_plugin';
-import { getFireSyncLocalState, loggedShotEntityId, parseLoggedShotEntityId, recordShotImpact, ShotImpact, ShotImpactLogComponent } from './fire_sync';
+import { getFireSyncLocalState, loggedShotEntityId, parseLoggedShotEntityId, recordShotImpact, ShotImpact, ShotImpactLogComponent, FireLogComponent, FireIntentComponent } from './fire_sync';
 import { HitFeedbackEvent } from './damage_events';
 import { setBeamContact } from './beam_contact';
 import { BlastShotComponent } from './blast_plugin';
@@ -300,7 +300,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
     }
 }
 
-export const ProjectileExpireEvent = new EcsEvent<undefined>('ProjectileExpire');
+export const ProjectileExpireEvent = new EcsEvent<boolean>('ProjectileExpire');
 
 const ProjectileLifespanSystem = new System({
     name: 'ProjectileLifespanSystem',
@@ -317,7 +317,7 @@ const ProjectileLifespanSystem = new System({
                 return;
             }
             entities.delete(uuid);
-            emit(ProjectileExpireEvent, undefined, [self]);
+            emit(ProjectileExpireEvent, true, [self]);
         }
     },
 });
@@ -414,7 +414,7 @@ export function resolveProjectileHit(
         fireSubs(projectileData.id, uuid, false);
     }
     entities.delete(uuid);
-    emitNow(ProjectileCollisionEvent, other, [self]);
+    emitNow(ProjectileCollisionEvent, other ?? self, [self]);
 }
 
 export const ProjectileCollisionSystem = new System({
@@ -514,9 +514,10 @@ export const ShotImpactApplySystem = new System({
     after: [NetworkReceivePhase, MovementSystem, RemoteMovementPresentationSystem],
     args: [ShotImpactLogComponent, UUID, GetEntity, Entities, FireSubs,
         EmitNow, PlatformResource, TimeResource,
-        Optional(NetworkTimingResource), Optional(ServerClockOffsetResource)] as const,
+        Optional(NetworkTimingResource), Optional(ServerClockOffsetResource),
+        Optional(GameDataResource)] as const,
     step(log, uuid, ship, entities, fireSubs, emitNow, platform, time,
-        network, serverClockOffset) {
+        network, serverClockOffset, gameData) {
         if (platform !== 'browser') {
             return;
         }
@@ -550,7 +551,7 @@ export const ShotImpactApplySystem = new System({
             if (!shot) {
                 // No local copy (not replayed yet, expired, or out of
                 // interest when fired): still show the victim being hit.
-                applyShotImpact(entities, shotId, impact, fireSubs, emitNow);
+                applyShotImpact(entities, shotId, impact, fireSubs, emitNow, ship, gameData);
                 return false;
             }
             const replayed = shot?.components.has(MovementPlaybackComponent)
@@ -562,7 +563,7 @@ export const ShotImpactApplySystem = new System({
             if (!due) {
                 return true;
             }
-            applyShotImpact(entities, shotId, impact, fireSubs, emitNow);
+            applyShotImpact(entities, shotId, impact, fireSubs, emitNow, ship, gameData);
             return false;
         });
     },
@@ -570,7 +571,9 @@ export const ShotImpactApplySystem = new System({
 
 function applyShotImpact(entities: Map<string, Entity>, shotId: string,
     impact: ShotImpact, fireSubs: (id: string, source: string, sourceExpired?: boolean) => Entity[],
-    emitNow: (event: EcsEvent<any, any>, data: any, entities?: (string | Entity)[]) => void): void {
+    emitNow: (event: EcsEvent<any, any>, data: any, entities?: (string | Entity)[]) => void,
+    shooter?: Entity,
+    gameData?: import('novadatainterface/GameDataInterface').GameDataInterface): void {
     const kind = impact.kind ?? 'projectile';
     const other = impact.target ? entities.get(impact.target) : undefined;
     if (kind === 'beam') {
@@ -586,8 +589,33 @@ function applyShotImpact(entities: Map<string, Entity>, shotId: string,
         }, [impact.target]);
     }
     if (kind === 'projectile') {
-        resolveProjectileHit(entities, shotId, other, impact.position,
-            fireSubs, emitNow);
+        if (entities.has(shotId)) {
+            resolveProjectileHit(entities, shotId, other, impact.position,
+                fireSubs, emitNow);
+        } else if (shooter && gameData) {
+            // The local projectile expired or was not yet replayed when the
+            // server's ShotImpact arrived: still render its explosion and hit particles!
+            const loggedShot = shooter.components.get(FireLogComponent)?.shots
+                .find(s => s.seq === impact.seq)
+                ?? shooter.components.get(FireIntentComponent)?.shots
+                    .find(s => s.seq === impact.seq);
+            const weaponData = loggedShot
+                ? gameData.data.Weapon.getCached(loggedShot.weaponId)
+                : undefined;
+            if (weaponData && weaponData.type === 'ProjectileWeaponData') {
+                const transient = new Entity(weaponData.name)
+                    .addComponent(ProjectileDataComponent, weaponData)
+                    .addComponent(MovementStateComponent, {
+                        position: new Position(impact.position.x, impact.position.y),
+                        rotation: new Angle(0),
+                        velocity: new Vector(0, 0),
+                        accelerating: 0,
+                        turning: 0,
+                        turnBack: false,
+                    });
+                emitNow(ProjectileCollisionEvent, other ?? transient, [transient]);
+            }
+        }
     }
 }
 
@@ -597,14 +625,14 @@ const ProjectileExplodeSystem = new System({
     name: 'ProjectileExplodeSystem',
     events: [ProjectileExpireEvent, ProjectileCollisionEvent],
     args: [ProjectileDataComponent, Optional(ProjectileCollisionEvent),
-        GetEntity, Emit] as const,
-    step(projectileData, other, self, emit) {
-        if (other) {
-            emit(ProjectileExplodeEvent, other, [self]);
+        Optional(ProjectileExpireEvent), GetEntity, EmitNow] as const,
+    step(projectileData, other, expired, self, emitNow) {
+        if (!expired) {
+            emitNow(ProjectileExplodeEvent, other, [self]);
             return;
         }
         if (projectileData.detonateWhenShotExpires) {
-            emit(ProjectileExplodeEvent, undefined, [self]);
+            emitNow(ProjectileExplodeEvent, undefined, [self]);
         }
     }
 });

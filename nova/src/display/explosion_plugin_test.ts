@@ -8,7 +8,8 @@ import {
     registerDestructionVisual,
 } from './destruction_visual_state';
 import { AnimationGraphic } from './animation_graphic';
-import { AnimationGraphicComponent } from './animation_graphic_plugin';
+import { AnimationGraphicComponent, ObjectDrawSystem } from './animation_graphic_plugin';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { Time } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -115,6 +116,27 @@ describe('explosion presentation cadence', () => {
         time.time += 1;
         step();
         expect(world.entities.has('explosion')).toBeFalse();
+    });
+
+    it('does not let ObjectDrawSystem overwrite explosion progress back to rotation frame 0', () => {
+        const explosionData = getDefaultExplosionData();
+        const explosion = makeExplosion(explosionData, new Position(50, -30));
+        let rotationSetCount = 0;
+        const graphic = {
+            managed: { disposed: false },
+            container: { position: { x: 0, y: 0 }, alpha: 0 },
+            setFramesToUse: () => { rotationSetCount++; },
+            set rotation(_val: number) {
+                rotationSetCount++;
+            },
+        } as unknown as AnimationGraphic;
+
+        const movement = explosion.components.get(MovementStateComponent)!;
+        ObjectDrawSystem.step(movement, graphic, undefined, undefined, explosionData);
+
+        expect(rotationSetCount).toBe(0);
+        expect(graphic.container.position.x).toBe(50);
+        expect(graphic.container.position.y).toBe(-30);
     });
 
     it('sends a killed pilot onward even if the visual never finishes', () => {

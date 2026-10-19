@@ -29,6 +29,7 @@ import {
     FEDERATION_UPGRADE_TIERS,
     oppositeConquestSystem,
     pickUniqueConquestCallsign,
+    playerConquestFaction,
 } from './conquest_mode';
 import { GameDataResource } from './game_data_resource';
 import { SystemIdResource } from './system_id_resource';
@@ -371,5 +372,13 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(drained[0].botState.squadId).toBe('squad-alpha');
         expect(drained[0].departurePosition).toEqual([-1800, 420]);
         expect(drainConquestBotTransfers(CONQUEST_SOL_SYSTEM).length).toBe(0);
+
+        // Sol-spawned player has FEDERATION_GOVT, so Auroran defenders in Aurora recognize them as hostile
+        const solPlayer = createInitialPlayerState();
+        solPlayer.gameMode = 'conquest';
+        ensureConquestPocketState(solPlayer);
+        solPlayer.currentSystem = CONQUEST_AURORA_SYSTEM;
+        expect(playerConquestFaction(solPlayer, 'nova:144')).toBe(FEDERATION_GOVT);
+        expect(playerConquestFaction(solPlayer, 'nova:144') !== AURORAN_GOVT).toBeTrue();
     });
 });

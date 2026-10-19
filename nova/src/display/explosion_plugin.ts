@@ -14,12 +14,14 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
 import { v4 } from "uuid";
-import { ExplosionDataComponent } from "../nova_plugin/animation_plugin";
+import { DeleteEvent } from "nova_ecs/events";
+import { AnimationComponent, ExplosionDataComponent } from "../nova_plugin/animation_plugin";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
+import { ArmorComponent } from "../nova_plugin/health_plugin";
 import { ProjectileDataComponent } from "../nova_plugin/projectile_data";
 import { ProjectileExplodeEvent } from "../nova_plugin/projectile_plugin";
 import { SoundEvent } from "../nova_plugin/sound_event";
-import { AnimationGraphicComponent } from "./animation_graphic_plugin";
+import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin";
 import {
     DisabledComponent,
     PlayerDeathComponent,
@@ -54,6 +56,7 @@ export const PLAYER_DEATH_AFTERMATH_HOLD_MS = 2_200;
 
 export const ExplosionSystem = new System({
     name: 'ExplosionSystem',
+    after: [ObjectDrawSystem],
     args: [AnimationGraphicComponent, ExplosionDataComponent,
         ExplosionState, TimeResource, Entities, UUID, Emit,
         ActiveDestructionVisuals, MovementStateComponent,
@@ -177,12 +180,23 @@ const ProjectileExplosionSystem = new System({
             return;
         }
 
+        const impactPos = Position.fromVectorLike(movement.position);
+        const secondary = projectileData.secondaryExplosion;
         const primaryExplosionData = gameData.data.Explosion.getCached(primary);
         if (!primaryExplosionData) {
+            void gameData.data.Explosion.get(primary).then(loadedPrimary => {
+                if (!loadedPrimary) return;
+                const loadedSecondary = secondary
+                    ? gameData.data.Explosion.getCached(secondary)
+                    : undefined;
+                const explosion = makeExplosion(loadedPrimary, impactPos, loadedSecondary);
+                if (reserveEntity(budget, explosion, 'explosion')) {
+                    entities.set(v4(), explosion);
+                }
+            }).catch(() => {});
             return;
         }
 
-        const secondary = projectileData.secondaryExplosion;
         let secondaryExplosionData: ExplosionData | undefined;
         if (secondary) {
             secondaryExplosionData =
@@ -190,7 +204,7 @@ const ProjectileExplosionSystem = new System({
         }
 
         const explosion = makeExplosion(primaryExplosionData,
-            movement.position, secondaryExplosionData);
+            impactPos, secondaryExplosionData);
         if (reserveEntity(budget, explosion, 'explosion')) {
             entities.set(v4(), explosion);
         }
@@ -300,6 +314,39 @@ export const ShipFinalExplosionSystem = new System({
     }
 });
 
+const ShipDeletedExplosionSystem = new System({
+    name: 'ShipDeletedExplosionSystem',
+    events: [DeleteEvent],
+    args: [
+        ShipDataComponent,
+        MovementStateComponent,
+        Optional(DestructionStartedComponent),
+        Optional(ArmorComponent),
+        UUID,
+        DyingShips,
+        GameDataResource,
+        Entities,
+        EntityBudgetResource,
+        ActiveDestructionVisuals,
+        Optional(FinalExplosionShown),
+    ] as const,
+    step(ship, movement, destructionStarted, armor, uuid, dying, gameData, entities, budget, activeDestructionVisuals, shown) {
+        if (shown) {
+            return;
+        }
+        const isDestroyed = Boolean(destructionStarted)
+            || (armor !== undefined && armor.current <= 0)
+            || dying.has(uuid);
+        if (!isDestroyed) {
+            return;
+        }
+        const entry = dying.get(uuid);
+        dying.delete(uuid);
+        const pos = entry?.position ?? Position.fromVectorLike(movement.position);
+        playFinalExplosion(ship, pos, uuid, gameData, entities, budget, activeDestructionVisuals);
+    },
+});
+
 // TODO: Sample collisions in the convex hull of the ship
 /**
  * Damage and death are resolved on the server, so `ZeroArmorEvent` and
@@ -393,9 +440,10 @@ export function makeExplosion(explosionData: ExplosionData, position: Position,
     secondaryExplosionData?: ExplosionData, completionTarget?: string) {
     const explosion = new Entity()
         .addComponent(ExplosionDataComponent, explosionData)
+        .addComponent(AnimationComponent, explosionData.animation)
         .addComponent(ExplosionState, {})
         .addComponent(MovementStateComponent, {
-            position,
+            position: Position.fromVectorLike(position),
             accelerating: 0,
             rotation: new Angle(0),
             turnBack: false,
@@ -429,6 +477,7 @@ export const ExplosionPlugin: Plugin = {
         world.addSystem(TrackDyingShips);
         world.addSystem(PlayerFinalExplosionSystem);
         world.addSystem(ShipFinalExplosionSystem);
+        world.addSystem(ShipDeletedExplosionSystem);
         world.addSystem(ShipSecondaryExplosionSystem);
         world.addSystem(ShipSecondaryExplosionDoneSystem);
         world.addSystem(PlayerDestructionAftermathSystem);
@@ -441,6 +490,7 @@ export const ExplosionPlugin: Plugin = {
         world.removeSystem(TrackDyingShips);
         world.removeSystem(PlayerFinalExplosionSystem);
         world.removeSystem(ShipFinalExplosionSystem);
+        world.removeSystem(ShipDeletedExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionDoneSystem);
         world.removeSystem(PlayerDestructionAftermathSystem);
