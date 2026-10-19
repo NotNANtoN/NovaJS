@@ -66,6 +66,7 @@ import {
 } from "./jump_plugin";
 import { SystemIdResource } from "./system_id_resource";
 import { CloakStateComponent } from "./cloaking_plugin";
+import { ConquestBotComponent } from "./conquest_config";
 export {
     ChooseRandomTargetComponent,
     GovtComponent,
@@ -680,7 +681,8 @@ export const NpcPurposeAI = new System({
         destructionStarted, armor, time, wander, commandedEscort) {
         if (platform !== "node" || multiplayer.owner !== "server"
             || destructionStarted || armor && armor.current <= 0
-            || commandedEscort !== undefined) {
+            || commandedEscort !== undefined
+            || entity.components.has(ConquestBotComponent)) {
             entity.components.delete(NpcFleeComponent);
             return;
         }
@@ -788,12 +790,14 @@ export const ParkInterceptorAI = new System({
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent),
         Optional(CommandedEscortComponent),
+        Optional(ConquestBotComponent),
     ] as const,
     step(movement, physics, target, planets, shipData, multiplayer, platform,
-        _npc, fleeing, jumpState, destructionStarted, armor, commandedEscort) {
+        _npc, fleeing, jumpState, destructionStarted, armor, commandedEscort, conquestBot) {
         const profile = getShipAIProfile(shipData);
         if (platform !== "node" || multiplayer.owner !== "server"
             || commandedEscort !== undefined
+            || conquestBot !== undefined
             || target.target || !profile.parksWithoutEnemies || fleeing
             || jumpState || destructionStarted || armor && armor.current <= 0) {
             return;

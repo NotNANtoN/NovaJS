@@ -13,6 +13,7 @@ import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
 import { DisabledComponent } from "../nova_plugin/disabled_plugin";
 import { GovtComponent } from "../nova_plugin/npc_components";
+import { ConquestBotComponent } from "../nova_plugin/conquest_config";
 import { PlayerStateComponent } from "../nova_plugin/player_state";
 import { areWingmates } from "../nova_plugin/wing";
 import { HiredEscortComponent } from "../nova_plugin/escort_plugin";
@@ -301,6 +302,7 @@ const TargetEntityQuery = new Query([
     Optional(TargetComponent),
     Optional(PlayerStateComponent),
     Optional(HiredEscortComponent),
+    Optional(ConquestBotComponent),
 ] as const);
 
 const DrawTargetCornersSystem = new System({
@@ -337,8 +339,16 @@ const DrawTargetCornersSystem = new System({
         let callsign: string | undefined;
         const targetComponents = runQuery(TargetEntityQuery, target)[0];
         if (targetComponents) {
-            const [disabled, targetGovt, targetLock, targetPlayer, targetEscort] = targetComponents;
+            const [disabled, targetGovt, targetLock, targetPlayer, targetEscort, conquestBot] = targetComponents;
             const isWingmate = areWingmates(playerState, targetPlayer);
+            if (conquestBot) {
+                const roleTag = conquestBot.mode === 'gather'
+                    ? 'MINER'
+                    : conquestBot.squadId
+                        ? 'SQUAD'
+                        : 'RAIDER';
+                callsign = `${conquestBot.callsign} [T${conquestBot.tier + 1} ${roleTag}]`;
+            }
             if (disabled) {
                 targetCorners.setStyle("disabled");
             } else if (isWingmate) {

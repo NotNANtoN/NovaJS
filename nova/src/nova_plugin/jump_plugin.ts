@@ -43,11 +43,14 @@ import { AppliedDamageEvent } from "./damage_events";
 import { areSystemsSameOrVariants, variantIndexForCatalog, visibleJumpTarget, type SystemLookup } from "./system_variants";
 import { resolveWingJumpTarget } from "./wing";
 import {
+    CONQUEST_POCKET_SYSTEMS,
     CONQUEST_SYSTEM_POSITIONS,
+    ConquestBotComponent,
+    enqueueConquestBotTransfer,
     isConquestMode,
     isConquestPocketSystem,
     oppositeConquestSystem,
-} from "./conquest_config";
+} from './conquest_config';
 export { areSystemsSameOrVariants, type SystemLookup };
 
 export const JUMP_SPOOL_MS = 1_200;
@@ -673,19 +676,21 @@ const JumpBrakeControlSystem = new System({
         MovementPhysicsComponent,
         Optional(GameDataResource),
         Optional(PlayerStateComponent),
+        Optional(ConquestBotComponent),
     ] as const,
-    step(state, movement, physics, gameData, playerState) {
+    step(state, movement, physics, gameData, playerState, conquestBot) {
         if (state.phase === 'braking') {
             let direction: Vector | undefined;
             if (gameData) {
                 const source = gameData.data.System.getCached(state.from);
                 const destination = gameData.data.System.getCached(state.to);
+                const useConquestCoords = isConquestMode(playerState) || Boolean(conquestBot);
                 if (source && destination) {
-                    const sourcePos = isConquestMode(playerState)
+                    const sourcePos = useConquestCoords
                         && CONQUEST_SYSTEM_POSITIONS[state.from]
                         ? CONQUEST_SYSTEM_POSITIONS[state.from]
                         : source.position;
-                    const destPos = isConquestMode(playerState)
+                    const destPos = useConquestCoords
                         && CONQUEST_SYSTEM_POSITIONS[state.to]
                         ? CONQUEST_SYSTEM_POSITIONS[state.to]
                         : destination.position;
@@ -914,9 +919,16 @@ export const NpcJumpLifecycleSystem = new System({
                 void gameData.data.System.get(state.to);
             }
             if (source && destination) {
+                const isConquestBot = entity.components.has(ConquestBotComponent);
+                const sourcePos = isConquestBot && CONQUEST_SYSTEM_POSITIONS[state.from]
+                    ? CONQUEST_SYSTEM_POSITIONS[state.from]
+                    : source.position;
+                const destPos = isConquestBot && CONQUEST_SYSTEM_POSITIONS[state.to]
+                    ? CONQUEST_SYSTEM_POSITIONS[state.to]
+                    : destination.position;
                 const delta = new Vector(
-                    destination.position[0] - source.position[0],
-                    destination.position[1] - source.position[1],
+                    destPos[0] - sourcePos[0],
+                    destPos[1] - sourcePos[1],
                 );
                 direction = delta.lengthSquared > 0
                     ? delta.normalize()
@@ -947,6 +959,18 @@ export const NpcJumpLifecycleSystem = new System({
         const timedOut = time.time - createdAt >= NPC_JUMP_TIMEOUT_MS;
         if (distanceFromSystemOrigin(movement.position)
             > SYSTEM_DEPARTURE_RADIUS || timedOut) {
+            const conquestBot = entity.components.get(ConquestBotComponent);
+            if (conquestBot && state.from && state.to && state.from !== state.to) {
+                enqueueConquestBotTransfer({
+                    from: state.from,
+                    to: state.to,
+                    departurePosition: [movement.position.x, movement.position.y],
+                    botState: {
+                        ...conquestBot,
+                        mode: 'attack',
+                    },
+                });
+            }
             entities.delete(uuid);
         }
     },

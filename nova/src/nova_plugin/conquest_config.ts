@@ -1,3 +1,6 @@
+import * as t from 'io-ts';
+import { Component } from 'nova_ecs/component';
+import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
 import type { SystemData } from 'novadatainterface/SystemData';
 import type { PlayerState } from './player_state';
 
@@ -22,14 +25,14 @@ export const FEDERATION_GOVT = 128;
 export const AURORAN_GOVT = 129;
 
 export const FEDERATION_UPGRADE_TIERS = [
-    'nova:128', // Shuttle
     'nova:187', // Fed Scout Ship
     'nova:144', // Fed Viper
     'nova:135', // Lightning
     'nova:145', // Fed Anaconda
     'nova:137', // Valkyrie
     'nova:142', // Fed Patrol Boat
-    'nova:133', // Starbridge
+    'nova:172', // RAGE Gunboat
+    'nova:140', // IDA Frigate
     'nova:141', // Fed Destroyer
     'nova:143', // Fed Carrier
 ] as const;
@@ -42,6 +45,132 @@ export const AURORAN_UPGRADE_TIERS = [
     'nova:154', // Aurora Cruiser
     'nova:153', // Aurora Carrier
 ] as const;
+
+export const FEDERATION_PILOT_NAMES = [
+    'Capt. Vance',
+    'Cmdr. Sterling',
+    'Lt. Mercer',
+    'Maj. Thorne',
+    'Capt. Rostova',
+    'Lt. Kaelen Vos',
+    'Cmdr. Hale',
+    'Capt. Aria Chen',
+    'Maj. Dorian Webb',
+    'Lt. Tessa Lin',
+    'Cmdr. Cross',
+    'Capt. Reyes',
+    'Lt. Lindqvist',
+    'Maj. Moreau',
+    'Capt. Hawkes',
+    'Lt. Callen',
+] as const;
+
+export const AURORAN_PILOT_NAMES = [
+    "Kar'Vosh",
+    "Thran'ek",
+    "Drek'Nar",
+    "Vael'Kor",
+    "Zor'Kahn",
+    "Mal'Drak",
+    "Krel'Vane",
+    "Syra'Keth",
+    "Tor'Gath",
+    "Rul'Vek",
+    "Nyx'Talon",
+    "Brenn'Dar",
+    "Kaz'Vor",
+    "Vorn'ash",
+    "Jor'Tek",
+    "Drak'thul",
+] as const;
+
+let fallbackCallsignCounter = 1;
+
+export function pickUniqueConquestCallsign(
+    govt: number,
+    usedCallsigns: ReadonlySet<string>,
+): string {
+    const pool = govt === AURORAN_GOVT
+        ? AURORAN_PILOT_NAMES
+        : FEDERATION_PILOT_NAMES;
+    const available = pool.filter(name => !usedCallsigns.has(name));
+    if (available.length > 0) {
+        return available[Math.floor(Math.random() * available.length)];
+    }
+    const base = pool[Math.floor(Math.random() * pool.length)];
+    return `${base} ${++fallbackCallsignCounter}`;
+}
+
+export const ConquestBotStateCodec = t.intersection([
+    t.type({
+        callsign: t.string,
+        mode: t.union([
+            t.literal('gather'),
+            t.literal('attack'),
+            t.literal('raid'),
+        ]),
+        factionGovt: t.number,
+        homeSystem: t.string,
+        tier: t.number,
+        gatheredCredits: t.number,
+        lastModeSwitchAt: t.number,
+        upgradePending: t.boolean,
+    }),
+    t.partial({
+        squadId: t.string,
+        squadLeaderUuid: t.string,
+    }),
+]);
+
+export type ConquestBotState = t.TypeOf<typeof ConquestBotStateCodec>;
+
+export const ConquestBotComponent =
+    new Component<ConquestBotState>('ConquestBotComponent');
+
+replicationPolicies.register(ConquestBotComponent, {
+    codec: ConquestBotStateCodec,
+    authority: 'server',
+});
+
+export interface ConquestBotTransfer {
+    from: string;
+    to: string;
+    departurePosition: [number, number];
+    botState: ConquestBotState;
+}
+
+const pendingTransfersBySystem = new Map<string, ConquestBotTransfer[]>();
+
+export function enqueueConquestBotTransfer(transfer: ConquestBotTransfer): void {
+    let queue = pendingTransfersBySystem.get(transfer.to);
+    if (!queue) {
+        queue = [];
+        pendingTransfersBySystem.set(transfer.to, queue);
+    }
+    if (queue.length < 16) {
+        queue.push({
+            ...transfer,
+            departurePosition: [
+                transfer.departurePosition[0],
+                transfer.departurePosition[1],
+            ],
+            botState: { ...transfer.botState },
+        });
+    }
+}
+
+export function drainConquestBotTransfers(systemId: string): ConquestBotTransfer[] {
+    const queue = pendingTransfersBySystem.get(systemId);
+    if (!queue || queue.length === 0) {
+        return [];
+    }
+    pendingTransfersBySystem.delete(systemId);
+    return queue;
+}
+
+export function clearConquestBotTransfers(): void {
+    pendingTransfersBySystem.clear();
+}
 
 /**
  * Default collector pull radius in Conquest mode: small enough that shattered

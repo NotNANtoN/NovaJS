@@ -49,6 +49,8 @@ import {
     JUMP_ARRIVAL_MS,
     JumpStateComponent,
 } from './jump_plugin';
+import { isConquestMode, isConquestPocketSystem } from './conquest_config';
+import { PlayerStateComponent } from './player_state';
 
 
 export const NPC_RESPAWN_INTERVAL_MS = 3_000;
@@ -617,6 +619,16 @@ const NpcSpawnSystem = new AsyncSystem({
     async step(_singleton, gameData, systemId, time, state, npcs, world, budget) {
         if (!activeWorlds.has(world) || state.disabled) {
             return;
+        }
+        // In Galactic Conquest pocket systems, ConquestBotLifecycleSystem owns
+        // all Federation and Auroran AI spawns; do not spawn ambient traders.
+        if (isConquestPocketSystem(systemId)) {
+            for (const entity of world.entities.values()) {
+                const playerState = entity.components.get(PlayerStateComponent);
+                if (playerState && isConquestMode(playerState)) {
+                    return;
+                }
+            }
         }
 
         if (!state.initialized) {

@@ -14,13 +14,21 @@ import { AsteroidPlugin, makeOre } from './asteroid_plugin';
 import { EntityBudgetPlugin } from './entity_budget';
 import {
     applyConquestPocketSystems,
+    AURORAN_GOVT,
+    clearConquestBotTransfers,
     CONQUEST_AURORA_SYSTEM,
     CONQUEST_ORE_SCATTER_DELAY_MS,
     CONQUEST_SOL_SYSTEM,
+    ConquestBotComponent,
     ConquestModePlugin,
     conquestOreCreditValue,
+    drainConquestBotTransfers,
+    enqueueConquestBotTransfer,
     ensureConquestPocketState,
+    FEDERATION_GOVT,
+    FEDERATION_UPGRADE_TIERS,
     oppositeConquestSystem,
+    pickUniqueConquestCallsign,
 } from './conquest_mode';
 import { GameDataResource } from './game_data_resource';
 import { SystemIdResource } from './system_id_resource';
@@ -323,5 +331,45 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         await world.addPlugin(ConquestModePlugin);
 
         await expectAsync(world.removeAllPlugins()).toBeResolved();
+    });
+
+    it('assigns unique faction callsigns, excludes civilian traders from upgrade tiers, and transfers raiding bots across pocket systems', () => {
+        clearConquestBotTransfers();
+        expect(FEDERATION_UPGRADE_TIERS[0]).toBe('nova:187'); // Fed Scout Ship (no civilian Shuttle)
+        expect(FEDERATION_UPGRADE_TIERS).not.toContain('nova:128' as any);
+
+        const used = new Set<string>();
+        for (let i = 0; i < 10; i++) {
+            const name = pickUniqueConquestCallsign(FEDERATION_GOVT, used);
+            expect(used.has(name)).toBeFalse();
+            used.add(name);
+        }
+        const auroranName = pickUniqueConquestCallsign(AURORAN_GOVT, used);
+        expect(auroranName.length).toBeGreaterThan(2);
+
+        enqueueConquestBotTransfer({
+            from: CONQUEST_AURORA_SYSTEM,
+            to: CONQUEST_SOL_SYSTEM,
+            departurePosition: [-1800, 420],
+            botState: {
+                callsign: auroranName,
+                mode: 'attack',
+                factionGovt: AURORAN_GOVT,
+                homeSystem: CONQUEST_AURORA_SYSTEM,
+                tier: 3,
+                gatheredCredits: 2500,
+                lastModeSwitchAt: 1000,
+                upgradePending: false,
+                squadId: 'squad-alpha',
+            },
+        });
+
+        const drained = drainConquestBotTransfers(CONQUEST_SOL_SYSTEM);
+        expect(drained.length).toBe(1);
+        expect(drained[0].botState.callsign).toBe(auroranName);
+        expect(drained[0].botState.tier).toBe(3);
+        expect(drained[0].botState.squadId).toBe('squad-alpha');
+        expect(drained[0].departurePosition).toEqual([-1800, 420]);
+        expect(drainConquestBotTransfers(CONQUEST_SOL_SYSTEM).length).toBe(0);
     });
 });

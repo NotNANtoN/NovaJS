@@ -68,6 +68,7 @@ import {
     BoardingOutcomeComponent,
 } from "../nova_plugin/boarding_plugin";
 import { EscortOrderNoticeComponent, HiredEscortComponent } from "../nova_plugin/escort_plugin";
+import { ConquestBotComponent } from "../nova_plugin/conquest_config";
 import { targetLabel, TargetLabelPieces } from "./target_label";
 
 
@@ -851,7 +852,7 @@ const DrawStatusBarSecondaryWeapon = new System({
 const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
     Optional(ArmorComponent), Optional(AnimationGraphicComponent),
     Optional(GovtComponent), Optional(DisabledComponent),
-    Optional(PlayerStateComponent)] as const);
+    Optional(PlayerStateComponent), Optional(ConquestBotComponent)] as const);
 
 const PlanetTargetInfoQuery = new Query([
     PlanetComponent,
@@ -873,14 +874,16 @@ const DrawStatusBarTarget = new System({
         if (target) {
             const result = runQuery(TargetQuery, target)[0];
             if (result) {
-                const [shipData, shield, armor, shipGraphic, government, disabled, playerState] = result;
+                const [shipData, shield, armor, shipGraphic, government, disabled, playerState, conquestBot] = result;
                 const governmentData = government
                     ? governments.getCached(government.id)
                     : undefined;
                 const isPlayer = Boolean(playerState);
                 const subtitle = playerState?.pilotName
                     ? playerState.pilotName
-                    : shipData.subtitle;
+                    : conquestBot?.callsign
+                        ? `${conquestBot.callsign} • Tier ${conquestBot.tier + 1}`
+                        : shipData.subtitle;
                 statusBar.drawTarget(
                     targetLabel(
                         shipData.name, subtitle, governmentData, isPlayer),
