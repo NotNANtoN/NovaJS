@@ -675,7 +675,22 @@ export const MovementSystem = new System({
             return;
         }
         if (playback) {
-            Object.assign(state, advanceMovementState(state, physics, playback.deltaMs / 1000, entities));
+            const dt_s = Math.max(0, playback.deltaMs / 1000);
+            if (dt_s <= 1 / 30) {
+                const playbackTime: Time = {
+                    time: time.time,
+                    delta_s: dt_s,
+                    delta_ms: playback.deltaMs,
+                    frame: time.frame,
+                };
+                if (physics.movementType === MovementType.INERTIAL) {
+                    inertialControls(state, physics, playbackTime, entities);
+                } else if (physics.movementType === MovementType.INERTIALESS) {
+                    inertialessControls(state, physics, playbackTime, entities);
+                }
+            } else {
+                Object.assign(state, advanceMovementState(state, physics, dt_s, entities));
+            }
         } else if (physics.movementType === MovementType.INERTIAL) {
             inertialControls(state, physics, time, entities);
         } else if (physics.movementType === MovementType.INERTIALESS) {

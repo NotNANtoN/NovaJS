@@ -51,6 +51,44 @@ interface ActiveParticle {
     maxLifetime: number;
 }
 
+const MAX_ACTIVE_PARTICLES = 2_400;
+const MAX_POOLED_PARTICLES = 2_400;
+const particlePool: PIXI.Particle[] = [];
+
+function acquireParticle(
+    x: number,
+    y: number,
+    scale: number,
+    tint: number,
+    alpha: number,
+): PIXI.Particle {
+    const pooled = particlePool.pop();
+    if (pooled) {
+        pooled.x = x;
+        pooled.y = y;
+        pooled.scaleX = scale;
+        pooled.scaleY = scale;
+        pooled.tint = tint;
+        pooled.alpha = alpha;
+        return pooled;
+    }
+    return new PIXI.Particle({
+        texture: PIXI.Texture.WHITE,
+        x,
+        y,
+        scaleX: scale,
+        scaleY: scale,
+        tint,
+        alpha,
+    });
+}
+
+function releaseParticle(particle: PIXI.Particle): void {
+    if (particlePool.length < MAX_POOLED_PARTICLES) {
+        particlePool.push(particle);
+    }
+}
+
 const ActiveParticlesResource =
     new Resource<ActiveParticle[]>('ActiveParticlesResource');
 const ParticleContainerResource =
@@ -61,25 +99,24 @@ const ManagedParticleHandleResource =
 const TrailEmitterSystem = new System({
     name: "TrailEmitterSystem",
     args: [MovementStateComponent, TrailParticlesComponent,
-        ParticleContainerResource, ActiveParticlesResource] as const,
-    step({ position }, config, container, activeList) {
+        ParticleContainerResource, ActiveParticlesResource, TimeResource] as const,
+    step({ position }, config, container, activeList, time) {
         if (!config || !position) return;
-        const count = Math.max(1, Math.floor(config.count / 2));
+        if (time.frame % 2 !== 0) return;
+        const count = Math.min(4, Math.max(1, Math.floor(config.count / 3)));
         for (let i = 0; i < count; i++) {
-            if (activeList.length >= 20_000) break;
+            if (activeList.length >= MAX_ACTIVE_PARTICLES) break;
             const angle = Math.random() * Math.PI * 2;
             const speed = (config.velocity / 2) * (0.6 + Math.random() * 0.8);
             const lifetime = Math.max(0.05,
                 (config.lifeMin + Math.random() * Math.max(0.01, config.lifeMax - config.lifeMin)) / 30);
-            const particle = new PIXI.Particle({
-                texture: PIXI.Texture.WHITE,
-                x: position.x,
-                y: position.y,
-                scaleX: 2,
-                scaleY: 2,
-                tint: (config.color ?? 0xffffff) & 0xffffff,
-                alpha: 1,
-            });
+            const particle = acquireParticle(
+                position.x,
+                position.y,
+                2,
+                (config.color ?? 0xffffff) & 0xffffff,
+                1,
+            );
             container.addParticle(particle);
             activeList.push({
                 particle,
@@ -101,22 +138,20 @@ const HitEmitterSystem = new System({
         const config = projectileData?.hitParticles;
         const position = movementState.position;
         if (!config || !position) return;
-        const count = Math.max(1, config.count);
+        const count = Math.min(16, Math.max(1, config.count));
         for (let i = 0; i < count; i++) {
-            if (activeList.length >= 20_000) break;
+            if (activeList.length >= MAX_ACTIVE_PARTICLES) break;
             const angle = Math.random() * Math.PI * 2;
             const speed = (config.velocity / 2) * (0.5 + Math.random() * 1.0);
             const lifetime = Math.max(0.05,
                 (config.lifeMin + Math.random() * Math.max(0.01, config.lifeMax - config.lifeMin)) / 30);
-            const particle = new PIXI.Particle({
-                texture: PIXI.Texture.WHITE,
-                x: position.x,
-                y: position.y,
-                scaleX: 2.5,
-                scaleY: 2.5,
-                tint: (config.color ?? 0xffffff) & 0xffffff,
-                alpha: 1,
-            });
+            const particle = acquireParticle(
+                position.x,
+                position.y,
+                2.5,
+                (config.color ?? 0xffffff) & 0xffffff,
+                1,
+            );
             container.addParticle(particle);
             activeList.push({
                 particle,
@@ -135,7 +170,7 @@ const ShipExhaustParticleSystem = new System({
         ParticleContainerResource, ActiveParticlesResource, TimeResource] as const,
     step(_ship, movementState, container, activeList, time) {
         if (movementState.accelerating <= 0 || !movementState.position) return;
-        if (activeList.length >= 20_000) return;
+        if (activeList.length >= MAX_ACTIVE_PARTICLES) return;
         if (time.frame % 2 !== 0) return;
 
         const forward = movementState.rotation.getUnitVector();
@@ -149,15 +184,7 @@ const ShipExhaustParticleSystem = new System({
         const backY = -forward.y * exhaustSpeed - forward.x * spreadAngle * exhaustSpeed;
 
         const lifetime = 0.35 + Math.random() * 0.15;
-        const particle = new PIXI.Particle({
-            texture: PIXI.Texture.WHITE,
-            x: originX,
-            y: originY,
-            scaleX: 1.8,
-            scaleY: 1.8,
-            tint: 0x58c0ff,
-            alpha: 0.85,
-        });
+        const particle = acquireParticle(originX, originY, 1.8, 0x58c0ff, 0.85);
         container.addParticle(particle);
         activeList.push({
             particle,
@@ -180,10 +207,10 @@ const DisabledShipSparkSystem = new System({
         ActiveParticlesResource,
         TimeResource,
     ] as const,
-    step(_ship, movementState, disabled, ionized, container, activeList, time) {
+    step(_ship, movementState, disabled, ionized, container, activeList, _time) {
         const isDamaged = Boolean(disabled) || Boolean(ionized);
         if (!isDamaged || !movementState.position) return;
-        if (activeList.length >= 20_000) return;
+        if (activeList.length >= MAX_ACTIVE_PARTICLES) return;
 
         // Occasional electrical plasma arcs (approx ~12% chance per frame)
         if (Math.random() > 0.12) return;
@@ -201,15 +228,7 @@ const DisabledShipSparkSystem = new System({
             const tints = ionized ? [0xa040ff, 0xd070ff, 0x7020ff] : [0x60d0ff, 0x90f0ff, 0xffe060];
             const tint = tints[Math.floor(Math.random() * tints.length)]!;
 
-            const particle = new PIXI.Particle({
-                texture: PIXI.Texture.WHITE,
-                x: sparkX,
-                y: sparkY,
-                scaleX: 1.5,
-                scaleY: 1.5,
-                tint,
-                alpha: 1,
-            });
+            const particle = acquireParticle(sparkX, sparkY, 1.5, tint, 1);
             container.addParticle(particle);
             activeList.push({
                 particle,
@@ -234,22 +253,20 @@ const AsteroidDamageDustSystem = new System({
         ActiveParticlesResource,
     ] as const,
     step(_asteroid, asteroidData, movementState, container, activeList) {
-        if (!movementState.position || activeList.length >= 20_000) return;
-        const count = 10;
+        if (!movementState.position || activeList.length >= MAX_ACTIVE_PARTICLES) return;
+        const count = 8;
         const color = asteroidData?.color ?? 0x8b7d6b;
         for (let i = 0; i < count; i++) {
             const angle = Math.random() * Math.PI * 2;
             const speed = 35 + Math.random() * 55;
             const lifetime = 0.35 + Math.random() * 0.30;
-            const particle = new PIXI.Particle({
-                texture: PIXI.Texture.WHITE,
-                x: movementState.position.x + (Math.random() - 0.5) * 16,
-                y: movementState.position.y + (Math.random() - 0.5) * 16,
-                scaleX: 1.8,
-                scaleY: 1.8,
-                tint: color,
-                alpha: 0.85,
-            });
+            const particle = acquireParticle(
+                movementState.position.x + (Math.random() - 0.5) * 16,
+                movementState.position.y + (Math.random() - 0.5) * 16,
+                1.8,
+                color,
+                0.85,
+            );
             container.addParticle(particle);
             activeList.push({
                 particle,
@@ -266,21 +283,36 @@ const ParticleUpdateSystem = new System({
     name: "ParticleUpdateSystem",
     args: [ParticleContainerResource, ActiveParticlesResource, TimeResource, SingletonComponent] as const,
     step(container, activeList, time) {
+        if (activeList.length === 0) return;
         const dt = time.delta_s;
+        const children = container.particleChildren;
+        const canCompactChildrenInPlace = Array.isArray(children);
         let writeIdx = 0;
+        let removedAny = false;
         for (let i = 0; i < activeList.length; i++) {
             const item = activeList[i];
             item.lifetime -= dt;
             if (item.lifetime <= 0) {
-                container.removeParticle(item.particle);
+                removedAny = true;
+                if (!canCompactChildrenInPlace) {
+                    container.removeParticle(item.particle);
+                }
+                releaseParticle(item.particle);
             } else {
                 item.particle.x += item.vx * dt;
                 item.particle.y += item.vy * dt;
                 item.particle.alpha = Math.max(0, item.lifetime / item.maxLifetime);
+                if (canCompactChildrenInPlace) {
+                    children[writeIdx] = item.particle;
+                }
                 activeList[writeIdx++] = item;
             }
         }
         activeList.length = writeIdx;
+        if (canCompactChildrenInPlace && removedAny) {
+            children.length = writeIdx;
+            container.update();
+        }
     }
 });
 

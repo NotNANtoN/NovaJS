@@ -258,7 +258,11 @@ export const AdvanceNetworkPlaybackSystem = new System({
     args: [MovementPlaybackComponent, TimeResource, Optional(NetworkTimingResource)] as const,
     step(playback, time, network) {
         const renderTime = network?.renderTime ?? time.time - playback.delayMs;
-        const cursor = Math.max(playback.cursor, renderTime - playback.clock.offset);
+        const targetCursor = renderTime - playback.clock.offset;
+        const minStep = time.delta_ms > 0
+            ? Math.min(time.delta_ms * (playback.clock.rate || 1) * 0.5, 8)
+            : 0;
+        const cursor = Math.max(playback.cursor + minStep, targetCursor);
         playback.deltaMs = Math.min(100, cursor - playback.cursor);
         playback.cursor = cursor;
     },

@@ -211,6 +211,15 @@ class ProjectileWeaponEntry extends WeaponEntry {
         }
 
         const movementState = projectile.components.get(MovementStateComponent)!;
+        const previousPosition = existing
+            ? new Position(movementState.position.x, movementState.position.y)
+            : undefined;
+        const previousRotation = existing
+            ? new Angle(movementState.rotation.angle)
+            : undefined;
+        const previousVelocity = existing
+            ? new Vector(movementState.velocity.x, movementState.velocity.y)
+            : undefined;
         if (!existing || shot.fastForwardMs > 0) {
             movementState.position = position;
             movementState.rotation = angle;
@@ -289,6 +298,20 @@ class ProjectileWeaponEntry extends WeaponEntry {
                 this.entities,
                 onStep,
             ));
+            // When reconciling our own already-flying predicted shot, if the
+            // local projectile has already been advancing (`previousPosition`
+            // moved away from the muzzle) and agrees within normal RTT/clock
+            // jitter (< 36px), preserve the smooth local in-flight position
+            // instead of snapping the projectile backward or forward in mid-air!
+            if (existing && shot.reconcile && previousPosition && previousRotation && previousVelocity) {
+                const movedFromMuzzleSq = previousPosition.subtract(position).lengthSquared;
+                const driftSq = movementState.position.subtract(previousPosition).lengthSquared;
+                if (movedFromMuzzleSq > 1 && driftSq < 36 * 36) {
+                    movementState.position = previousPosition;
+                    movementState.rotation = previousRotation;
+                    movementState.velocity = previousVelocity;
+                }
+            }
         }
 
         const hurtbox = projectile.components.get(HurtboxHullComponent);
