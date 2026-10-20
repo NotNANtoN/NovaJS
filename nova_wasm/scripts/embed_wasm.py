@@ -7,7 +7,14 @@ import sys
 
 
 def make_commonjs_bindings(raw_js: str) -> str:
-    for export in ("convex_hull", "convex_hull_rgba", "sat_batch", "first_order_lead_angle"):
+    for export in (
+        "convex_hull",
+        "convex_hull_rgba",
+        "sat_batch",
+        "first_order_lead_angle",
+        "swept_circle_polygon_time",
+        "swept_polygon_polygon_time",
+    ):
         raw_js = raw_js.replace(
             f"export function {export}(",
             f"function {export}(",
@@ -23,6 +30,8 @@ def make_commonjs_bindings(raw_js: str) -> str:
     convex_hull_rgba,
     sat_batch,
     first_order_lead_angle,
+    swept_circle_polygon_time,
+    swept_polygon_polygon_time,
     initSync,
     default: __wbg_init,
 };""",
@@ -61,6 +70,8 @@ def main() -> None:
     convex_hull_rgba,
     sat_batch,
     first_order_lead_angle,
+    swept_circle_polygon_time,
+    swept_polygon_polygon_time,
 }} = require("./nova_wasm_bindgen.js");
 
 const EMBEDDED_WASM_BASE64 = "{encoded}";
@@ -149,6 +160,52 @@ function satBatch(
     );
 }}
 
+function sweptCirclePolygonTime(
+    cx,
+    cy,
+    radius,
+    polyVertices,
+    polyOx,
+    polyOy,
+    vx,
+    vy,
+) {{
+    requireInitialized();
+    return swept_circle_polygon_time(
+        cx,
+        cy,
+        radius,
+        polyVertices,
+        polyOx,
+        polyOy,
+        vx,
+        vy,
+    );
+}}
+
+function sweptPolygonPolygonTime(
+    aVertices,
+    aOx,
+    aOy,
+    bVertices,
+    bOx,
+    bOy,
+    vx,
+    vy,
+) {{
+    requireInitialized();
+    return swept_polygon_polygon_time(
+        aVertices,
+        aOx,
+        aOy,
+        bVertices,
+        bOx,
+        bOy,
+        vx,
+        vy,
+    );
+}}
+
 module.exports = {{
     convexHull,
     convexHullRgba,
@@ -156,6 +213,8 @@ module.exports = {{
     init,
     isInitialized,
     satBatch,
+    sweptCirclePolygonTime,
+    sweptPolygonPolygonTime,
 }};
 """,
         encoding="utf-8",
@@ -197,6 +256,28 @@ export function satBatch(
     bRotations: Float32Array,
     pairs: Uint32Array,
 ): Uint8Array;
+
+export function sweptCirclePolygonTime(
+    cx: number,
+    cy: number,
+    radius: number,
+    polyVertices: Float32Array,
+    polyOx: number,
+    polyOy: number,
+    vx: number,
+    vy: number,
+): number;
+
+export function sweptPolygonPolygonTime(
+    aVertices: Float32Array,
+    aOx: number,
+    aOy: number,
+    bVertices: Float32Array,
+    bOx: number,
+    bOy: number,
+    vx: number,
+    vy: number,
+): number;
 """,
         encoding="utf-8",
     )

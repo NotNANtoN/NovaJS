@@ -416,6 +416,25 @@ mod tests {
             vec![1]
         );
     }
+
+    #[test]
+    fn swept_polygon_and_circle_find_exact_contact_time() {
+        let poly_a = square(-1.0, -1.0, 2.0);
+        let poly_b = square(-1.0, -1.0, 2.0);
+        // A starts at (-5, 0) and moves by (10, 0) toward B at (0, 0):
+        // Leading edge of A is at -4, trailing edge of B is at -1 -> contact at t = 3 / 10 = 0.3
+        let t_poly = swept_polygon_polygon_time(&poly_a, -5.0, 0.0, &poly_b, 0.0, 0.0, 10.0, 0.0);
+        assert!((t_poly - 0.3).abs() < 1e-5);
+
+        // Circle of radius 1 at (-5, 0) moving by (10, 0) toward poly_b at (0, 0):
+        // Contact when circle center reaches -2 -> t = 3 / 10 = 0.3
+        let t_circle = swept_circle_polygon_time(-5.0, 0.0, 1.0, &poly_b, 0.0, 0.0, 10.0, 0.0);
+        assert!((t_circle - 0.3).abs() < 1e-5);
+
+        // Miss case returns -1.0
+        let t_miss = swept_circle_polygon_time(-5.0, 10.0, 1.0, &poly_b, 0.0, 0.0, 10.0, 0.0);
+        assert_eq!(t_miss, -1.0);
+    }
 }
 
 
@@ -483,4 +502,216 @@ pub fn first_order_lead_angle(
     let hit_x = rel_pos_x + rel_vel_x * time;
     let hit_y = rel_pos_y + rel_vel_y * time;
     hit_x.atan2(-hit_y)
+}
+
+const SWEPT_EPSILON: f64 = 1e-9;
+
+fn swept_circle_time(px: f64, py: f64, vx: f64, vy: f64, radius: f64) -> Option<f64> {
+    let c = px * px + py * py - radius * radius;
+    if c <= SWEPT_EPSILON {
+        return Some(0.0);
+    }
+    let a = vx * vx + vy * vy;
+    let b = px * vx + py * vy;
+    if a == 0.0 || b >= 0.0 {
+        return None;
+    }
+    let discriminant = b * b - a * c;
+    if discriminant < -SWEPT_EPSILON {
+        return None;
+    }
+    let t = c / (-b + discriminant.max(0.0).sqrt());
+    if (0.0..=1.0).contains(&t) {
+        Some(t)
+    } else {
+        None
+    }
+}
+
+/// Computes the earliest translational contact time in `[0.0, 1.0]` between two
+/// convex polygons `a` (translated by `a_ox, a_oy`) and `b` (translated by
+/// `b_ox, b_oy`) moving with relative displacement `(vx, vy)` over the step.
+/// Returns `-1.0` if no contact occurs in `[0.0, 1.0]`.
+#[wasm_bindgen]
+pub fn swept_polygon_polygon_time(
+    a_vertices: &[f32],
+    a_ox: f32,
+    a_oy: f32,
+    b_vertices: &[f32],
+    b_ox: f32,
+    b_oy: f32,
+    vx: f32,
+    vy: f32,
+) -> f32 {
+    let a_count = a_vertices.len() / 2;
+    let b_count = b_vertices.len() / 2;
+    if a_count == 0 || b_count == 0 {
+        return -1.0;
+    }
+    let a_ox = f64::from(a_ox);
+    let a_oy = f64::from(a_oy);
+    let b_ox = f64::from(b_ox);
+    let b_oy = f64::from(b_oy);
+    let vx = f64::from(vx);
+    let vy = f64::from(vy);
+
+    let mut enter = 0.0_f64;
+    let mut exit = 1.0_f64;
+
+    for (poly, count, ox, oy) in [
+        (a_vertices, a_count, a_ox, a_oy),
+        (b_vertices, b_count, b_ox, b_oy),
+    ] {
+        for i in 0..count {
+            let next = (i + 1) % count;
+            let x0 = f64::from(poly[i * 2]) + ox;
+            let y0 = f64::from(poly[i * 2 + 1]) + oy;
+            let x1 = f64::from(poly[next * 2]) + ox;
+            let y1 = f64::from(poly[next * 2 + 1]) + oy;
+            let axis_x = -(y1 - y0);
+            let axis_y = x1 - x0;
+            if axis_x * axis_x + axis_y * axis_y == 0.0 {
+                continue;
+            }
+
+            let mut min_a = f64::INFINITY;
+            let mut max_a = f64::NEG_INFINITY;
+            for j in 0..a_count {
+                let px = f64::from(a_vertices[j * 2]) + a_ox;
+                let py = f64::from(a_vertices[j * 2 + 1]) + a_oy;
+                let proj = px * axis_x + py * axis_y;
+                if proj < min_a {
+                    min_a = proj;
+                }
+                if proj > max_a {
+                    max_a = proj;
+                }
+            }
+
+            let mut min_b = f64::INFINITY;
+            let mut max_b = f64::NEG_INFINITY;
+            for j in 0..b_count {
+                let px = f64::from(b_vertices[j * 2]) + b_ox;
+                let py = f64::from(b_vertices[j * 2 + 1]) + b_oy;
+                let proj = px * axis_x + py * axis_y;
+                if proj < min_b {
+                    min_b = proj;
+                }
+                if proj > max_b {
+                    max_b = proj;
+                }
+            }
+
+            let low = min_b - max_a;
+            let high = max_b - min_a;
+            let speed = vx * axis_x + vy * axis_y;
+            if speed == 0.0 {
+                if low > SWEPT_EPSILON || high < -SWEPT_EPSILON {
+                    return -1.0;
+                }
+            } else {
+                let t0 = low / speed;
+                let t1 = high / speed;
+                enter = enter.max(t0.min(t1));
+                exit = exit.min(t0.max(t1));
+                if enter > exit + SWEPT_EPSILON {
+                    return -1.0;
+                }
+            }
+        }
+    }
+
+    if enter <= 1.0 && exit >= 0.0 {
+        enter as f32
+    } else {
+        -1.0
+    }
+}
+
+/// Computes the earliest translational contact time in `[0.0, 1.0]` between a
+/// circle at `(cx, cy)` with `radius` and a convex polygon `poly_vertices`
+/// (translated by `poly_ox, poly_oy`), where the circle moves by `(vx, vy)`
+/// relative to the polygon. Returns `-1.0` if no contact occurs in `[0.0, 1.0]`.
+#[wasm_bindgen]
+pub fn swept_circle_polygon_time(
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    poly_vertices: &[f32],
+    poly_ox: f32,
+    poly_oy: f32,
+    vx: f32,
+    vy: f32,
+) -> f32 {
+    let count = poly_vertices.len() / 2;
+    if count == 0 {
+        return -1.0;
+    }
+    let cx = f64::from(cx);
+    let cy = f64::from(cy);
+    let radius = f64::from(radius);
+    let poly_ox = f64::from(poly_ox);
+    let poly_oy = f64::from(poly_oy);
+    let vx = f64::from(vx);
+    let vy = f64::from(vy);
+
+    let mut best: Option<f64> = None;
+    let mut positive = false;
+    let mut negative = false;
+
+    for i in 0..count {
+        let next = (i + 1) % count;
+        let sx = f64::from(poly_vertices[i * 2]) + poly_ox;
+        let sy = f64::from(poly_vertices[i * 2 + 1]) + poly_oy;
+        let ex = f64::from(poly_vertices[next * 2]) + poly_ox - sx;
+        let ey = f64::from(poly_vertices[next * 2 + 1]) + poly_oy - sy;
+        let rx = cx - sx;
+        let ry = cy - sy;
+        let cross_val = ex * ry - ey * rx;
+        if cross_val > SWEPT_EPSILON {
+            positive = true;
+        }
+        if cross_val < -SWEPT_EPSILON {
+            negative = true;
+        }
+        if let Some(vt) = swept_circle_time(rx, ry, vx, vy, radius) {
+            if vt == 0.0 {
+                return 0.0;
+            }
+            best = Some(best.map_or(vt, |b| b.min(vt)));
+        }
+        let length = ex.hypot(ey);
+        if length == 0.0 {
+            continue;
+        }
+        let tx = ex / length;
+        let ty = ey / length;
+        let nx = -ty;
+        let ny = tx;
+        let distance = rx * nx + ry * ny;
+        let speed = vx * nx + vy * ny;
+        let along = rx * tx + ry * ty;
+        if distance.abs() <= radius && along >= 0.0 && along <= length {
+            return 0.0;
+        }
+        if speed == 0.0 {
+            continue;
+        }
+        let v_along = vx * tx + vy * ty;
+        for side in [-radius, radius] {
+            let t = (side - distance) / speed;
+            let proj = along + t * v_along;
+            if (0.0..=1.0).contains(&t) && (0.0..=length).contains(&proj) {
+                if t == 0.0 {
+                    return 0.0;
+                }
+                best = Some(best.map_or(t, |b| b.min(t)));
+            }
+        }
+    }
+
+    if count >= 3 && !(positive && negative) {
+        return 0.0;
+    }
+    best.map_or(-1.0, |t| t as f32)
 }

@@ -33,7 +33,7 @@ export type MovementPhysics = t.TypeOf<typeof MovementPhysics>;
 
 export const MovementPhysicsComponent = new Component<MovementPhysics>('MovementPhysics');
 
-export const MovementState = t.intersection([t.type({
+const MovementStateBase = t.intersection([t.type({
     position: PositionType,
     velocity: VectorType,
     rotation: AngleType,
@@ -44,13 +44,88 @@ export const MovementState = t.intersection([t.type({
     turnTo: t.union([AngleType, t.string /* target UUID */, t.null]),
     targetSpeed: t.number,
 })]);
-export type MovementState = t.TypeOf<typeof MovementState>;
+export type MovementState = t.TypeOf<typeof MovementStateBase>;
+
+export const MovementState = new t.Type<
+    MovementState,
+    t.OutputOf<typeof MovementStateBase>
+>(
+    'MovementState',
+    MovementStateBase.is,
+    (u, c) => {
+        if (typeof u === 'object' && u !== null) {
+            const raw = u as Record<string, any>;
+            const pos = raw.position;
+            const vel = raw.velocity;
+            const rot = raw.rotation;
+            if (
+                typeof pos === 'object' && pos !== null
+                && typeof pos.x === 'number' && typeof pos.y === 'number'
+                && typeof vel === 'object' && vel !== null
+                && typeof vel.x === 'number' && typeof vel.y === 'number'
+                && typeof rot === 'object' && rot !== null
+                && typeof rot.angle === 'number'
+                && typeof raw.turning === 'number'
+                && typeof raw.turnBack === 'boolean'
+                && typeof raw.accelerating === 'number'
+            ) {
+                const rawTurnTo = raw.turnTo;
+                let turnTo: Angle | string | null | undefined;
+                let turnToValid = true;
+                if (rawTurnTo === undefined || rawTurnTo === null || typeof rawTurnTo === 'string') {
+                    turnTo = rawTurnTo;
+                } else if (typeof rawTurnTo === 'object' && typeof rawTurnTo.angle === 'number') {
+                    turnTo = new Angle(rawTurnTo.angle);
+                } else {
+                    turnToValid = false;
+                }
+                const rawTargetSpeed = raw.targetSpeed;
+                const targetSpeedValid = rawTargetSpeed === undefined || typeof rawTargetSpeed === 'number';
+                if (turnToValid && targetSpeedValid) {
+                    const decoded: MovementState = {
+                        position: new Position(pos.x, pos.y),
+                        velocity: new Vector(vel.x, vel.y),
+                        rotation: new Angle(rot.angle),
+                        turning: raw.turning,
+                        turnBack: raw.turnBack,
+                        accelerating: raw.accelerating,
+                    };
+                    if (turnTo !== undefined) {
+                        decoded.turnTo = turnTo;
+                    }
+                    if (rawTargetSpeed !== undefined) {
+                        decoded.targetSpeed = rawTargetSpeed;
+                    }
+                    return t.success(decoded);
+                }
+            }
+        }
+        return MovementStateBase.validate(u, c);
+    },
+    (a) => {
+        const out: Record<string, unknown> = {
+            position: { x: a.position.x, y: a.position.y },
+            velocity: { x: a.velocity.x, y: a.velocity.y },
+            rotation: { angle: a.rotation.angle },
+            turning: a.turning,
+            turnBack: a.turnBack,
+            accelerating: a.accelerating,
+        };
+        if ('turnTo' in a && a.turnTo !== undefined) {
+            out.turnTo = a.turnTo instanceof Angle ? { angle: a.turnTo.angle } : a.turnTo;
+        }
+        if ('targetSpeed' in a && a.targetSpeed !== undefined) {
+            out.targetSpeed = a.targetSpeed;
+        }
+        return out as t.OutputOf<typeof MovementStateBase>;
+    },
+);
 
 export const MOVEMENT_POSITION_QUANTUM = 0.25;
 export const MOVEMENT_VELOCITY_QUANTUM = 0.1;
 export const MOVEMENT_ANGLE_QUANTUM = 0.001;
 
-export const MovementStateDelta = t.partial({
+const MovementStateDeltaBase = t.partial({
     position: PositionType,
     velocity: VectorType,
     rotation: AngleType,
@@ -60,7 +135,82 @@ export const MovementStateDelta = t.partial({
     turnTo: t.union([AngleType, t.string, t.null]),
     targetSpeed: t.union([t.number, t.null]),
 });
-export type MovementStateDelta = t.TypeOf<typeof MovementStateDelta>;
+export type MovementStateDelta = t.TypeOf<typeof MovementStateDeltaBase>;
+
+export const MovementStateDelta = new t.Type<
+    MovementStateDelta,
+    t.OutputOf<typeof MovementStateDeltaBase>
+>(
+    'MovementStateDelta',
+    MovementStateDeltaBase.is,
+    (u, c) => {
+        if (typeof u === 'object' && u !== null && !Array.isArray(u)) {
+            const raw = u as Record<string, any>;
+            const out: MovementStateDelta = {};
+            let fastOk = true;
+            if (raw.position !== undefined) {
+                if (typeof raw.position === 'object' && raw.position !== null
+                    && typeof raw.position.x === 'number' && typeof raw.position.y === 'number') {
+                    out.position = new Position(raw.position.x, raw.position.y);
+                } else fastOk = false;
+            }
+            if (fastOk && raw.velocity !== undefined) {
+                if (typeof raw.velocity === 'object' && raw.velocity !== null
+                    && typeof raw.velocity.x === 'number' && typeof raw.velocity.y === 'number') {
+                    out.velocity = new Vector(raw.velocity.x, raw.velocity.y);
+                } else fastOk = false;
+            }
+            if (fastOk && raw.rotation !== undefined) {
+                if (typeof raw.rotation === 'object' && raw.rotation !== null
+                    && typeof raw.rotation.angle === 'number') {
+                    out.rotation = new Angle(raw.rotation.angle);
+                } else fastOk = false;
+            }
+            if (fastOk && raw.turning !== undefined) {
+                if (typeof raw.turning === 'number') out.turning = raw.turning;
+                else fastOk = false;
+            }
+            if (fastOk && raw.turnBack !== undefined) {
+                if (typeof raw.turnBack === 'boolean') out.turnBack = raw.turnBack;
+                else fastOk = false;
+            }
+            if (fastOk && raw.accelerating !== undefined) {
+                if (typeof raw.accelerating === 'number') out.accelerating = raw.accelerating;
+                else fastOk = false;
+            }
+            if (fastOk && raw.turnTo !== undefined) {
+                if (raw.turnTo === null || typeof raw.turnTo === 'string') {
+                    out.turnTo = raw.turnTo;
+                } else if (typeof raw.turnTo === 'object' && typeof raw.turnTo.angle === 'number') {
+                    out.turnTo = new Angle(raw.turnTo.angle);
+                } else fastOk = false;
+            }
+            if (fastOk && raw.targetSpeed !== undefined) {
+                if (raw.targetSpeed === null || typeof raw.targetSpeed === 'number') {
+                    out.targetSpeed = raw.targetSpeed;
+                } else fastOk = false;
+            }
+            if (fastOk) {
+                return t.success(out);
+            }
+        }
+        return MovementStateDeltaBase.validate(u, c);
+    },
+    (a) => {
+        const out: Record<string, unknown> = {};
+        if (a.position !== undefined) out.position = { x: a.position.x, y: a.position.y };
+        if (a.velocity !== undefined) out.velocity = { x: a.velocity.x, y: a.velocity.y };
+        if (a.rotation !== undefined) out.rotation = { angle: a.rotation.angle };
+        if (a.turning !== undefined) out.turning = a.turning;
+        if (a.turnBack !== undefined) out.turnBack = a.turnBack;
+        if (a.accelerating !== undefined) out.accelerating = a.accelerating;
+        if (a.turnTo !== undefined) {
+            out.turnTo = a.turnTo instanceof Angle ? { angle: a.turnTo.angle } : a.turnTo;
+        }
+        if (a.targetSpeed !== undefined) out.targetSpeed = a.targetSpeed;
+        return out as t.OutputOf<typeof MovementStateDeltaBase>;
+    },
+);
 
 function roundToQuantum(value: number, quantum: number): number {
     const rounded = Math.round(value / quantum) * quantum;
@@ -745,6 +895,8 @@ export const MovementPlugin: Plugin = {
         deltaMaker.addComponent(MovementStateComponent, {
             componentType: MovementState,
             deltaType: MovementStateDelta,
+            snapshotValue: copyMovementState,
+            isSnapshotDirty: movementControlChanged,
             getDelta(a, b) {
                 return movementControlChanged(a, b)
                     ? quantizeMovementState(b)

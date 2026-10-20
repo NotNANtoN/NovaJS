@@ -99,6 +99,52 @@ function sat_batch(a_vertices, a_offsets, a_positions, a_rotations, b_vertices, 
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v10;
 }
+
+/**
+ * Computes the earliest translational contact time in `[0.0, 1.0]` between a
+ * circle at `(cx, cy)` with `radius` and a convex polygon `poly_vertices`
+ * (translated by `poly_ox, poly_oy`), where the circle moves by `(vx, vy)`
+ * relative to the polygon. Returns `-1.0` if no contact occurs in `[0.0, 1.0]`.
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} radius
+ * @param {Float32Array} poly_vertices
+ * @param {number} poly_ox
+ * @param {number} poly_oy
+ * @param {number} vx
+ * @param {number} vy
+ * @returns {number}
+ */
+function swept_circle_polygon_time(cx, cy, radius, poly_vertices, poly_ox, poly_oy, vx, vy) {
+    const ptr0 = passArrayF32ToWasm0(poly_vertices, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.swept_circle_polygon_time(cx, cy, radius, ptr0, len0, poly_ox, poly_oy, vx, vy);
+    return ret;
+}
+
+/**
+ * Computes the earliest translational contact time in `[0.0, 1.0]` between two
+ * convex polygons `a` (translated by `a_ox, a_oy`) and `b` (translated by
+ * `b_ox, b_oy`) moving with relative displacement `(vx, vy)` over the step.
+ * Returns `-1.0` if no contact occurs in `[0.0, 1.0]`.
+ * @param {Float32Array} a_vertices
+ * @param {number} a_ox
+ * @param {number} a_oy
+ * @param {Float32Array} b_vertices
+ * @param {number} b_ox
+ * @param {number} b_oy
+ * @param {number} vx
+ * @param {number} vy
+ * @returns {number}
+ */
+function swept_polygon_polygon_time(a_vertices, a_ox, a_oy, b_vertices, b_ox, b_oy, vx, vy) {
+    const ptr0 = passArrayF32ToWasm0(a_vertices, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF32ToWasm0(b_vertices, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.swept_polygon_polygon_time(ptr0, len0, a_ox, a_oy, ptr1, len1, b_ox, b_oy, vx, vy);
+    return ret;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -277,6 +323,8 @@ module.exports = {
     convex_hull_rgba,
     sat_batch,
     first_order_lead_angle,
+    swept_circle_polygon_time,
+    swept_polygon_polygon_time,
     initSync,
     default: __wbg_init,
 };

@@ -34,3 +34,25 @@ export function satBatch(
     bRotations: Float32Array,
     pairs: Uint32Array,
 ): Uint8Array;
+
+export function sweptCirclePolygonTime(
+    cx: number,
+    cy: number,
+    radius: number,
+    polyVertices: Float32Array,
+    polyOx: number,
+    polyOy: number,
+    vx: number,
+    vy: number,
+): number;
+
+export function sweptPolygonPolygonTime(
+    aVertices: Float32Array,
+    aOx: number,
+    aOy: number,
+    bVertices: Float32Array,
+    bOx: number,
+    bOy: number,
+    vx: number,
+    vy: number,
+): number;

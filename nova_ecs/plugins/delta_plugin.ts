@@ -18,12 +18,24 @@ export interface OptionalComponentDelta<Data, Delta> {
     deltaType?: t.Type<Delta, unknown, unknown>;
     getDelta?: (a: Data, b: Data, patches: Patch[]) => Delta | undefined;
     applyDelta?: (componentData: Data, delta: Delta) => Data | void;
+    /**
+     * Optional plain-object snapshot function. When provided, `DeltaMaker`
+     * keeps the component value as a plain un-proxied JS object (bypassing
+     * Immer `Proxy` creation and traps on every read/write) and diffs against
+     * the stored snapshot via `isSnapshotDirty` and `getDelta`.
+     */
+    snapshotValue?: (data: Data) => Data;
+    isSnapshotDirty?: (baseline: Data, current: Data) => boolean;
 }
 
 export type ComponentDelta<Data, Delta> = {
-    [K in keyof OptionalComponentDelta<Data, Delta>]-?:
-    OptionalComponentDelta<Data, Delta>[K];
-}
+    componentType: t.Type<Data, unknown, unknown>;
+    deltaType: t.Type<Delta, unknown, unknown>;
+    getDelta: (a: Data, b: Data, patches: Patch[]) => Delta | undefined;
+    applyDelta: (componentData: Data, delta: Delta) => Data | void;
+    snapshotValue?: (data: Data) => Data;
+    isSnapshotDirty?: (baseline: Data, current: Data) => boolean;
+};
 
 interface ComponentDeltaMap<K extends Component<any>>
     extends Map<K, ComponentDelta<unknown, unknown>> {
@@ -44,6 +56,7 @@ setAutoFreeze(false);
 
 const DeltaComponent = new Component<{
     components: Map<UnknownComponent, unknown>,
+    snapshots?: Map<UnknownComponent, unknown>,
 }>('DeltaComponent');
 
 export class DeltaMaker {
@@ -64,6 +77,8 @@ export class DeltaMaker {
             deltaType: componentDelta.deltaType ?? immerDeltaType,
             getDelta: componentDelta.getDelta ?? immerGetDelta,
             applyDelta: componentDelta.applyDelta ?? immerApplyDelta,
+            snapshotValue: componentDelta.snapshotValue,
+            isSnapshotDirty: componentDelta.isSnapshotDirty,
         });
         for (const tracking of this.trackedEntities.values()) {
             tracking.dirty = true;
@@ -111,9 +126,40 @@ export class DeltaMaker {
 
         // Immer draft property mutations do not emit component-map events.
         // current() returns the original object for an unmodified draft.
+        const deltaComponent = entity.components.get(DeltaComponent);
         for (const [component, data] of entity.components) {
-            if (this.componentDeltas.has(component) && isDraft(data)
-                && current(data) !== original(data)) {
+            const deltaFuncs = this.componentDeltas.get(component);
+            if (!deltaFuncs) {
+                continue;
+            }
+            if (deltaFuncs.snapshotValue) {
+                if (
+                    !deltaComponent
+                    || !deltaComponent.components.has(component)
+                    || !Object.is(deltaComponent.components.get(component), data)
+                ) {
+                    tracking.dirty = true;
+                    return true;
+                }
+                const baseline = deltaComponent.snapshots?.get(component);
+                if (
+                    baseline === undefined
+                    || (deltaFuncs.isSnapshotDirty
+                        ? deltaFuncs.isSnapshotDirty(baseline, data)
+                        : !Object.is(baseline, data))
+                ) {
+                    tracking.dirty = true;
+                    return true;
+                }
+                // Advance the baseline snapshot for normal per-frame integration
+                // so single-step position deltas don't accumulate across frames.
+                deltaComponent.snapshots!.set(
+                    component,
+                    deltaFuncs.snapshotValue(data),
+                );
+                continue;
+            }
+            if (isDraft(data) && current(data) !== original(data)) {
                 tracking.dirty = true;
                 return true;
             }
@@ -128,7 +174,8 @@ export class DeltaMaker {
      * outbound delta.
      */
     isComponentDirty(entity: Entity, component: UnknownComponent): boolean {
-        if (!this.componentDeltas.has(component)) {
+        const deltaFuncs = this.componentDeltas.get(component);
+        if (!deltaFuncs) {
             return false;
         }
         this.track(entity);
@@ -138,6 +185,15 @@ export class DeltaMaker {
             || !deltaComponent.components.has(component)
             || !Object.is(deltaComponent.components.get(component), data)) {
             return true;
+        }
+        if (deltaFuncs.snapshotValue) {
+            const baseline = deltaComponent.snapshots?.get(component);
+            if (baseline === undefined) {
+                return true;
+            }
+            return deltaFuncs.isSnapshotDirty
+                ? deltaFuncs.isSnapshotDirty(baseline, data)
+                : !Object.is(baseline, data);
         }
         return isDraft(data)
             && current(data) !== original(data);
@@ -158,8 +214,9 @@ export class DeltaMaker {
         value: unknown,
     ): unknown {
         let trackedValue = value;
+        const deltaFuncs = this.componentDeltas.get(component);
         try {
-            if (isDraftable(value)) {
+            if (!deltaFuncs?.snapshotValue && isDraftable(value)) {
                 trackedValue = createDraft(value as Objectish);
             }
         } finally {
@@ -269,9 +326,23 @@ export class DeltaMaker {
                 && Object.is(deltaComponent.components.get(component), data);
             if (matchesBaseline) {
                 // Use deltas for components we've already seen.
-                const { getDelta, deltaType } = componentDeltaFuncs;
+                const { getDelta, deltaType, snapshotValue } = componentDeltaFuncs;
 
-                if (isDraft(data)) {
+                if (snapshotValue) {
+                    const plainData = isDraft(data) ? current(data) : data;
+                    const snapshots = deltaComponent.snapshots ??= new Map();
+                    const baseline = snapshots.has(component)
+                        ? snapshots.get(component)
+                        : plainData;
+                    snapshots.set(component, snapshotValue(plainData));
+                    const delta = getDelta(baseline, plainData, []);
+                    if (delta !== undefined) {
+                        componentDeltas.set(
+                            component.name,
+                            deltaType.encode(delta),
+                        );
+                    }
+                } else if (isDraft(data)) {
                     const originalData = original(data);
 
                     let patches: Patch[] | undefined;
@@ -309,7 +380,14 @@ export class DeltaMaker {
                     component.name,
                     componentType.encode(currentData),
                 );
-                if (isDraft(data)) {
+                if (componentDeltaFuncs.snapshotValue) {
+                    const snapshots = deltaComponent.snapshots ??= new Map();
+                    snapshots.set(
+                        component,
+                        componentDeltaFuncs.snapshotValue(currentData),
+                    );
+                    this.installTrackingValue(entity, component, currentData);
+                } else if (isDraft(data)) {
                     this.finishAndInstall(
                         entity,
                         component,

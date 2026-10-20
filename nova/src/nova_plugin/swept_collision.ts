@@ -1,4 +1,53 @@
 import * as SAT from 'sat';
+import {
+    init as initNovaWasm,
+    isInitialized as isNovaWasmInitialized,
+    sweptCirclePolygonTime as wasmSweptCirclePolygonTime,
+    sweptPolygonPolygonTime as wasmSweptPolygonPolygonTime,
+} from '../../../nova_wasm';
+
+let wasmInitStarted = false;
+function ensureWasmReady(): boolean {
+    if (isNovaWasmInitialized()) {
+        return true;
+    }
+    if (!wasmInitStarted) {
+        wasmInitStarted = true;
+        void initNovaWasm().catch(() => {});
+    }
+    return false;
+}
+
+const cachedPolygonVertices = new WeakMap<
+    SAT.Polygon,
+    { angle: number; len: number; x0: number; y0: number; flat: Float32Array }
+>();
+
+function flatPolygonVertices(shape: SAT.Polygon): Float32Array {
+    const calc = shape.calcPoints;
+    const len = calc.length;
+    const x0 = len > 0 ? calc[0].x : 0;
+    const y0 = len > 0 ? calc[0].y : 0;
+    const cached = cachedPolygonVertices.get(shape);
+    if (
+        cached
+        && cached.angle === shape.angle
+        && cached.len === len
+        && cached.x0 === x0
+        && cached.y0 === y0
+    ) {
+        return cached.flat;
+    }
+    const flat = cached && cached.len === len
+        ? cached.flat
+        : new Float32Array(len * 2);
+    for (let i = 0; i < len; i++) {
+        flat[i * 2] = calc[i].x;
+        flat[i * 2 + 1] = calc[i].y;
+    }
+    cachedPolygonVertices.set(shape, { angle: shape.angle, len, x0, y0, flat });
+    return flat;
+}
 
 interface Point { x: number; y: number }
 type Shape = SAT.Polygon | SAT.Circle;
@@ -104,9 +153,79 @@ function circlePolygonTime(center: Point, radius: number, polygon: Point[],
  */
 export function sweptHullTime(a: readonly Shape[], b: readonly Shape[],
     da: Point, db: Point, shiftA: Point = { x: 0, y: 0 }): number | undefined {
-    const velocity = sub(da, db);
-    const offsetA = { x: shiftA.x - da.x, y: shiftA.y - da.y };
-    const offsetB = { x: -db.x, y: -db.y };
+    const vx = da.x - db.x;
+    const vy = da.y - db.y;
+    const offsetAx = shiftA.x - da.x;
+    const offsetAy = shiftA.y - da.y;
+    const offsetBx = -db.x;
+    const offsetBy = -db.y;
+
+    if (ensureWasmReady()) {
+        let first: number | undefined;
+        for (const sa of a) {
+            for (const sb of b) {
+                let t: number | undefined;
+                if (sa instanceof SAT.Circle) {
+                    const cx = sa.pos.x + offsetAx;
+                    const cy = sa.pos.y + offsetAy;
+                    if (sb instanceof SAT.Circle) {
+                        const bx = sb.pos.x + offsetBx;
+                        const by = sb.pos.y + offsetBy;
+                        t = circleTime(
+                            { x: cx - bx, y: cy - by },
+                            { x: vx, y: vy },
+                            sa.r + sb.r,
+                        );
+                    } else {
+                        const raw = wasmSweptCirclePolygonTime(
+                            cx,
+                            cy,
+                            sa.r,
+                            flatPolygonVertices(sb),
+                            sb.pos.x + offsetBx,
+                            sb.pos.y + offsetBy,
+                            vx,
+                            vy,
+                        );
+                        t = raw >= 0 ? raw : undefined;
+                    }
+                } else if (sb instanceof SAT.Circle) {
+                    const cx = sb.pos.x + offsetBx;
+                    const cy = sb.pos.y + offsetBy;
+                    const raw = wasmSweptCirclePolygonTime(
+                        cx,
+                        cy,
+                        sb.r,
+                        flatPolygonVertices(sa),
+                        sa.pos.x + offsetAx,
+                        sa.pos.y + offsetAy,
+                        -vx,
+                        -vy,
+                    );
+                    t = raw >= 0 ? raw : undefined;
+                } else {
+                    const raw = wasmSweptPolygonPolygonTime(
+                        flatPolygonVertices(sa),
+                        sa.pos.x + offsetAx,
+                        sa.pos.y + offsetAy,
+                        flatPolygonVertices(sb),
+                        sb.pos.x + offsetBx,
+                        sb.pos.y + offsetBy,
+                        vx,
+                        vy,
+                    );
+                    t = raw >= 0 ? raw : undefined;
+                }
+                if (t === 0) return 0;
+                if (t !== undefined && (first === undefined || t < first)) first = t;
+            }
+        }
+        return first;
+    }
+
+    const velocity = { x: vx, y: vy };
+    const offsetA = { x: offsetAx, y: offsetAy };
+    const offsetB = { x: offsetBx, y: offsetBy };
     // Prepare each polygon once per hull pair, not once for every convex
     // shape pair. These arrays are invocation-local, never a draft/hull cache.
     const preparedA = a.map(shape => shape instanceof SAT.Polygon ? points(shape, offsetA) : shape);

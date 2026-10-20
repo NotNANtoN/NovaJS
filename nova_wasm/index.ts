@@ -5,4 +5,6 @@ export {
     isInitialized,
     satBatch,
     firstOrderLeadAngle,
+    sweptPolygonPolygonTime,
+    sweptCirclePolygonTime,
 } from "./pkg/nova_wasm";

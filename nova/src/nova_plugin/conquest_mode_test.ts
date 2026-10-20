@@ -47,6 +47,13 @@ import {
     PlayerStateComponent,
 } from './player_state';
 import { classifyOutfitCategory, formatShopItemDescription, isPurchaseAvailable } from '../spaceport/availability';
+import { isDraft } from 'immer';
+import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
+import {
+    init as initNovaWasm,
+    sweptCirclePolygonTime,
+    sweptPolygonPolygonTime,
+} from '../../../nova_wasm';
 import { computeBoardingCaptureChance } from './boarding_plugin';
 import { computeShipDeathShockwave } from './ship_death_blast';
 import { DeathPlugin } from './death_plugin';
@@ -604,5 +611,43 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
 
         expect(nearbyPlayer.components.get(ShieldComponent)!.current).toBeLessThan(100);
         expect(nearbyNpc.components.get(ShieldComponent)!.current).toBeLessThan(120);
+    });
+
+    it('bypasses Immer Proxy drafts on MovementStateComponent and runs Rust/Wasm swept collision kernels', async () => {
+        await initNovaWasm();
+        const poly = new Float32Array([-10, -10, 10, -10, 10, 10, -10, 10]);
+        const tCircle = sweptCirclePolygonTime(-50, 0, 10, poly, 0, 0, 100, 0);
+        expect(tCircle).toBeCloseTo(0.3, 4);
+        const tPoly = sweptPolygonPolygonTime(poly, -50, 0, poly, 0, 0, 100, 0);
+        expect(tPoly).toBeCloseTo(0.3, 4);
+
+        const world = new World();
+        await world.addPlugin(TimePlugin);
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(MovementPlugin);
+        const deltaMaker = world.resources.get(DeltaResource)!;
+
+        const ship = new Entity('plain-movement-ship').addComponent(MovementStateComponent, {
+            position: new Position(10, 20),
+            velocity: new Vector(5, 0),
+            rotation: new Angle(0),
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+        });
+        world.entities.set('ship', ship);
+
+        // Initial snapshot consumes full state without wrapping MovementState in an Immer Proxy
+        const initialDelta = deltaMaker.getDelta(ship);
+        expect(initialDelta?.componentStates?.has(MovementStateComponent.name)).toBeTrue();
+        const mov = ship.components.get(MovementStateComponent)!;
+        expect(isDraft(mov)).toBeFalse();
+
+        // Mutating turning in-place on the plain object still produces a MovementStateDelta
+        mov.turning = 1;
+        expect(deltaMaker.isDirty(ship)).toBeTrue();
+        const stepDelta = deltaMaker.getDelta(ship);
+        expect(stepDelta?.componentDeltas?.has(MovementStateComponent.name)).toBeTrue();
+        expect(isDraft(ship.components.get(MovementStateComponent))).toBeFalse();
     });
 });

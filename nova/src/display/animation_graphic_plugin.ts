@@ -45,6 +45,52 @@ function animationKey(animation: { id?: string, images?: unknown }): string {
     return key;
 }
 
+const MAX_POOLED_EXPLOSION_GRAPHICS_PER_KEY = 24;
+const explosionGraphicPool = new Map<string, AnimationGraphic[]>();
+
+function takePooledExplosionGraphic(key: string): AnimationGraphic | undefined {
+    const bucket = explosionGraphicPool.get(key);
+    while (bucket && bucket.length > 0) {
+        const candidate = bucket.pop()!;
+        if (!candidate.managed.disposed && candidate.built) {
+            candidate.progress = 0;
+            candidate.container.alpha = 1;
+            candidate.container.zIndex = 12;
+            return candidate;
+        }
+    }
+    return undefined;
+}
+
+function releaseExplosionGraphicToPool(key: string, graphic: AnimationGraphic): boolean {
+    if (graphic.managed.disposed || !graphic.built) {
+        return false;
+    }
+    let bucket = explosionGraphicPool.get(key);
+    if (!bucket) {
+        bucket = [];
+        explosionGraphicPool.set(key, bucket);
+    }
+    if (bucket.length >= MAX_POOLED_EXPLOSION_GRAPHICS_PER_KEY) {
+        return false;
+    }
+    graphic.detach();
+    graphic.progress = 0;
+    bucket.push(graphic);
+    return true;
+}
+
+function clearExplosionGraphicPool(): void {
+    for (const bucket of explosionGraphicPool.values()) {
+        for (const graphic of bucket) {
+            if (!graphic.managed.disposed) {
+                graphic.dispose();
+            }
+        }
+    }
+    explosionGraphicPool.clear();
+}
+
 const AnimationGraphicLoader = ProvideAsync({
     name: "AnimationGraphicLoader",
     provided: AnimationGraphicLoadedComponent,
@@ -181,6 +227,12 @@ const AnimationGraphicCleanup = new System({
             graphic.detach();
             return;
         }
+        const key = builtFrom.get(graphic);
+        if (entity.components.has(ExplosionDataComponent) && key && releaseExplosionGraphicToPool(key, graphic)) {
+            entity.components.delete(AnimationGraphicComponent);
+            entity.components.delete(AnimationGraphicLoadedComponent);
+            return;
+        }
         graphic.dispose();
         entity.components.delete(AnimationGraphicComponent);
         entity.components.delete(AnimationGraphicLoadedComponent);
@@ -207,13 +259,17 @@ const SyncAnimationGraphicInsert = new System({
             entity.components.delete(AnimationGraphicLoadedComponent);
         }
 
-        const graphic = new AnimationGraphic({
+        const anim = currentIfDraft(animation)!;
+        const key = animationKey(anim);
+        const isExplosion = entity.components.has(ExplosionDataComponent);
+        const pooled = isExplosion ? takePooledExplosionGraphic(key) : undefined;
+        const graphic = pooled ?? new AnimationGraphic({
             gameData: currentIfDraft(gameData)!,
-            animation: currentIfDraft(animation)!,
+            animation: anim,
         });
 
         // Order sprites
-        if (entity.components.has(ExplosionDataComponent)) {
+        if (isExplosion) {
             graphic.container.zIndex = 12;
         } else if (entity.components.has(PlayerShipSelector)) {
             graphic.container.zIndex = 10;
@@ -225,19 +281,23 @@ const SyncAnimationGraphicInsert = new System({
             graphic.container.zIndex = -10;
         }
 
-        builtFrom.set(graphic, animationKey(currentIfDraft(animation)!));
+        builtFrom.set(graphic, key);
         graphic.attachTo(space);
         if (movementState) {
             graphic.container.position.x = movementState.position.x;
             graphic.container.position.y = movementState.position.y;
-            graphic.rotation = movementState.rotation.angle;
+            if (!isExplosion) {
+                graphic.rotation = movementState.rotation.angle;
+            }
         }
         entity.components.set(AnimationGraphicComponent, graphic);
         entity.components.set(AnimationGraphicLoadedComponent, graphic);
-        void graphic.buildPromise.catch(error => {
-            console.warn('Failed to build flight graphic', error);
-            graphic.dispose();
-        });
+        if (!pooled) {
+            void graphic.buildPromise.catch(error => {
+                console.warn('Failed to build flight graphic', error);
+                graphic.dispose();
+            });
+        }
     }
 });
 
@@ -251,6 +311,7 @@ export const AnimationGraphicPlugin: Plugin = {
         world.addSystem(AnimationGraphicCleanup);
     },
     remove(world) {
+        clearExplosionGraphicPool();
         world.removeSystem(SyncAnimationGraphicInsert);
         world.removeSystem(AnimationGraphicLoader);
         world.removeSystem(AnimationGraphicProvider);
