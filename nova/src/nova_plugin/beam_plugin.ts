@@ -7,6 +7,7 @@ import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
+import { DeleteEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementState, MovementStateComponent, MovementSystem, RemoteMovementPresentationSystem } from 'nova_ecs/plugins/movement_plugin';
@@ -632,6 +633,33 @@ const ExpirePredictedBeamContactSystem = new System({
 const BEAM_FEEDBACK_INTERVAL_MS = 100;
 const PREDICTED_CONTACT_TTL_MS = 100;
 
+/**
+ * Ensures that if a beam entity with a looping sound is deleted by any path
+ * (including client FireLog reconciliation when `timing.expired` is true), its
+ * looping sound is stopped as soon as no other active beam uses that sound.
+ */
+const BeamDeletedSoundCleanupSystem = new System({
+    name: 'BeamDeletedSoundCleanupSystem',
+    events: [DeleteEvent],
+    args: [BeamDataComponent, Entities, UUID, Emit] as const,
+    step(beamData, entities, uuid, emit) {
+        if (!beamData.sound || !beamData.loopSound) {
+            return;
+        }
+        const otherActiveBeams = [...entities.entries()].some(([id, e]) => {
+            if (id === uuid) return false;
+            const bData = e.components.get(BeamDataComponent);
+            return bData && bData.loopSound && bData.sound === beamData.sound;
+        });
+        if (!otherActiveBeams) {
+            SoundEvent.emit(emit, {
+                id: beamData.sound,
+                stop: true,
+            });
+        }
+    },
+});
+
 export const BeamPlugin: Plugin = {
     name: 'BeamPlugin',
     build(world) {
@@ -643,6 +671,7 @@ export const BeamPlugin: Plugin = {
 
         world.addComponent(BeamContactComponent);
         world.addSystem(BeamSystem);
+        world.addSystem(BeamDeletedSoundCleanupSystem);
         world.addSystem(BeamClippingSystem);
         world.addSystem(BeamCollisionSystem);
         world.addSystem(BeamContactReportSystem);

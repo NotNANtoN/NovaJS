@@ -4,7 +4,7 @@ import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
-import { EcsEvent } from 'nova_ecs/events';
+import { DeleteEvent, EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import {
@@ -734,6 +734,33 @@ const ProjectileDeathSystem = new System({
     }
 });
 
+/**
+ * Stops looping projectile weapon sounds (such as point-defense turrets,
+ * chainguns, or rockets with `loopSound: true`) whenever the last active
+ * projectile using that sound is deleted from the world.
+ */
+const ProjectileDeletedSoundCleanupSystem = new System({
+    name: 'ProjectileDeletedSoundCleanupSystem',
+    events: [DeleteEvent],
+    args: [ProjectileDataComponent, Entities, UUID, Emit] as const,
+    step(projectileData, entities, uuid, emit) {
+        if (!projectileData.sound || !projectileData.loopSound) {
+            return;
+        }
+        const otherActive = [...entities.entries()].some(([id, e]) => {
+            if (id === uuid) return false;
+            const pData = e.components.get(ProjectileDataComponent);
+            return pData && pData.loopSound && pData.sound === projectileData.sound;
+        });
+        if (!otherActive) {
+            SoundEvent.emit(emit, {
+                id: projectileData.sound,
+                stop: true,
+            });
+        }
+    },
+});
+
 export const ProjectilePlugin: Plugin = {
     name: 'ProjectilePlugin',
     build(world) {
@@ -749,8 +776,9 @@ export const ProjectilePlugin: Plugin = {
         world.addSystem(ProjectileCollisionSystem);
         world.addSystem(ShotImpactApplySystem);
         world.addSystem(ProjectileDeathSystem);
+        world.addSystem(ProjectileDeletedSoundCleanupSystem);
         world.addSystem(ProjectileHurtboxProvider);
         world.addSystem(ProjectileExplodeSystem);
         world.addSystem(ProjectileBlastSystem);
     }
-}
+};

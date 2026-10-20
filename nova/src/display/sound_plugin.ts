@@ -24,6 +24,7 @@ import {
     ProjectileComponent,
     ProjectileDataComponent,
 } from '../nova_plugin/projectile_data';
+import { BeamDataComponent } from '../nova_plugin/beam_plugin';
 import { CycleTargetEvent } from '../nova_plugin/target_plugin';
 import { TargetComponent } from '../nova_plugin/target_component';
 import {
@@ -45,6 +46,7 @@ const CrisisSoundState = new Component<{ disabled: boolean, ejected: boolean }>(
     'CrisisSoundState');
 const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
 const LoopingSoundRefs = new Resource<Map<string, number>>('LoopingSoundRefs');
+const LoopingSoundLastActive = new Resource<Map<string, number>>('LoopingSoundLastActive');
 const LoadedSounds = new Resource<Map<string, Sound>>('LoadedSounds');
 const PendingSounds = new Resource<Map<string, Promise<Sound>>>('PendingSounds');
 const FailedSounds = new Resource<Set<string>>('FailedSounds');
@@ -196,16 +198,18 @@ const SoundSystem = new System({
     events: [SoundEvent],
     args: [SoundEvent, GameDataResource, LoopingSounds, LoadedSounds,
         PendingSounds, FailedSounds, VolumeResource, PlayerMovementQuery,
-        SingletonComponent, LoopingSoundRefs] as const,
+        SingletonComponent, LoopingSoundRefs, LoopingSoundLastActive] as const,
     step({ id, loop = false, stop = false, position }, gameData, loopingSounds, loadedSounds,
-        pendingSounds, failedSounds, {volume: masterVolume}, players, _singleton, loopingRefs) {
+        pendingSounds, failedSounds, {volume: masterVolume}, players, _singleton, loopingRefs, loopingLastActive) {
         if (stop) {
             // A stop that lands while the sound is still downloading must
             // also cancel that pending playback.
             if (id) {
                 pendingSounds.delete(id);
+                loopingLastActive.delete(id);
             } else {
                 pendingSounds.clear();
+                loopingLastActive.clear();
             }
             if (id) {
                 loopingRefs.delete(id);
@@ -225,6 +229,7 @@ const SoundSystem = new System({
             return;
         }
         if (loop) {
+            loopingLastActive.set(id, Date.now());
             loopingRefs.set(id, (loopingRefs.get(id) ?? 0) + 1);
             if (loopingSounds.has(id)) {
                 return;
@@ -568,11 +573,67 @@ export function stopHyperjumpSounds(world?: { resources: { get: (res: any) => an
     }
 }
 
+/**
+ * Per-frame safety audit for looping weapon sounds: if a sound in `LoopingSounds`
+ * has no live beam or projectile entity in `Entities` using it for > 160ms,
+ * automatically stop it so no point-defense turret, beam, or chaingun sound
+ * can ever get stuck looping.
+ */
+const LoopingSoundAuditSystem = new System({
+    name: 'LoopingSoundAuditSystem',
+    args: [
+        SingletonComponent,
+        Entities,
+        LoopingSounds,
+        LoadedSounds,
+        LoopingSoundRefs,
+        LoopingSoundLastActive,
+        PendingSounds,
+    ] as const,
+    step(_singleton, entities, loopingSounds, loadedSounds, loopingRefs, loopingLastActive, pendingSounds) {
+        if (loopingSounds.size === 0 && loopingRefs.size === 0) {
+            return;
+        }
+        const now = Date.now();
+        const activeLoopIds = new Set<string>();
+        for (const entity of entities.values()) {
+            const beamData = entity.components.get(BeamDataComponent);
+            if (beamData?.loopSound && beamData.sound) {
+                activeLoopIds.add(beamData.sound);
+            }
+            const projData = entity.components.get(ProjectileDataComponent);
+            if (projData?.loopSound && projData.sound) {
+                activeLoopIds.add(projData.sound);
+            }
+        }
+        const trackedIds = new Set<string>([
+            ...loopingSounds.keys(),
+            ...loopingRefs.keys(),
+        ]);
+        for (const id of trackedIds) {
+            if (activeLoopIds.has(id)) {
+                loopingLastActive.set(id, now);
+                continue;
+            }
+            const lastActive = loopingLastActive.get(id) ?? 0;
+            if (now - lastActive > 160) {
+                loopingRefs.delete(id);
+                loopingLastActive.delete(id);
+                pendingSounds.delete(id);
+                loadedSounds.get(id)?.stop();
+                loopingSounds.get(id)?.stop();
+                loopingSounds.delete(id);
+            }
+        }
+    },
+});
+
 export const SoundPlugin: Plugin = {
     name: 'SoundPlugin',
     build(world) {
         world.resources.set(LoopingSounds, new Map());
         world.resources.set(LoopingSoundRefs, new Map());
+        world.resources.set(LoopingSoundLastActive, new Map());
         world.resources.set(LoadedSounds, new Map());
         world.resources.set(PendingSounds, new Map());
         world.resources.set(FailedSounds, new Set());
@@ -587,6 +648,7 @@ export const SoundPlugin: Plugin = {
             playerWasPresent: false,
         });
         world.addSystem(SoundSystem);
+        world.addSystem(LoopingSoundAuditSystem);
         world.addSystem(VolumeControlSystem);
         world.addSystem(TargetSelectionSoundSystem);
         world.addSystem(IncomingMissileWarningSystem);
@@ -607,6 +669,7 @@ export const SoundPlugin: Plugin = {
             }
         }
         world.removeSystem(SoundSystem);
+        world.removeSystem(LoopingSoundAuditSystem);
         world.removeSystem(VolumeControlSystem);
         world.removeSystem(TargetSelectionSoundSystem);
         world.removeSystem(IncomingMissileWarningSystem);
@@ -627,5 +690,6 @@ export const SoundPlugin: Plugin = {
         world.resources.delete(LoadedSounds);
         world.resources.delete(LoopingSounds);
         world.resources.delete(LoopingSoundRefs);
+        world.resources.delete(LoopingSoundLastActive);
     }
 }
