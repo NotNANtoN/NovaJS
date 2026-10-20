@@ -29,8 +29,10 @@ import {
     drainConquestBotTransfers,
     enqueueConquestBotTransfer,
     ensureConquestPocketState,
+    FEDERATION_GARRISON_TIERS,
     FEDERATION_GOVT,
     FEDERATION_UPGRADE_TIERS,
+    AURORAN_GARRISON_TIERS,
     oppositeConquestSystem,
     pickUniqueConquestCallsign,
     playerConquestFaction,
@@ -473,5 +475,26 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         const updatedPlayer = world.entities.get('player-1')!.components.get(PlayerStateComponent)!;
         expect(updatedPlayer.credits).toBe(45_000);
         expect(updatedPlayer.kills).toBe(1);
+    });
+
+    it('configures permanent Homeworld Defense Fleet Garrisons with Carriers, Destroyers/Cruisers, and Gunboats', () => {
+        const fedGarrisonIds = FEDERATION_GARRISON_TIERS.map(t => FEDERATION_UPGRADE_TIERS[t]);
+        expect(fedGarrisonIds).toContain('nova:143'); // Fed Carrier
+        expect(fedGarrisonIds).toContain('nova:141'); // Fed Destroyer
+        expect(fedGarrisonIds).toContain('nova:172'); // RAGE Gunboat
+        expect(fedGarrisonIds).toContain('nova:142'); // Fed Patrol Boat
+
+        const aurGarrisonIds = AURORAN_GARRISON_TIERS.map(t => [
+            'nova:155',
+            'nova:156',
+            'nova:138',
+            'nova:152',
+            'nova:154',
+            'nova:153',
+        ][t]);
+        expect(aurGarrisonIds).toContain('nova:153'); // Aurora Carrier
+        expect(aurGarrisonIds).toContain('nova:154'); // Aurora Cruiser
+        expect(aurGarrisonIds).toContain('nova:152'); // Abomination
+        expect(aurGarrisonIds).toContain('nova:138'); // Argosy
     });
 });

@@ -2,7 +2,7 @@ import * as t from 'io-ts';
 import { Component } from "nova_ecs/component";
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
-import { replicationPolicies } from "nova_ecs/plugins/multiplayer_plugin";
+import { excludeFromStateHash, replicationPolicies } from "nova_ecs/plugins/multiplayer_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import { PlatformPlugin, PlatformResource } from "./platform_plugin";
@@ -12,6 +12,13 @@ import { applyStatDelta, getStatDelta, PartialStat, stat, Stat } from "./stat";
 export const ShieldComponent = new Component<Stat>('Shield');
 export const ArmorComponent = new Component<Stat>('Armor');
 export const IonizationComponent = new Component<Stat>('Ionization');
+
+// Health stats recharge at 60 Hz on the server while getStatDelta throttles
+// recharge packets to 1 Hz; exclude them from 500ms state hashes so recharging
+// shields in combat never trigger false-positive full-entity resync requests.
+excludeFromStateHash(ShieldComponent.name);
+excludeFromStateHash(ArmorComponent.name);
+excludeFromStateHash(IonizationComponent.name);
 
 replicationPolicies.register(ShieldComponent, {
     codec: stat,

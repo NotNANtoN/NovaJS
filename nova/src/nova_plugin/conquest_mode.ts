@@ -57,6 +57,7 @@ import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 
 import {
+    AURORAN_GARRISON_TIERS,
     AURORAN_GOVT,
     AURORAN_UPGRADE_TIERS,
     CONQUEST_AURORA_SYSTEM,
@@ -74,6 +75,7 @@ import {
     ConquestBotStateCodec,
     conquestOreCreditValue,
     drainConquestBotTransfers,
+    FEDERATION_GARRISON_TIERS,
     FEDERATION_GOVT,
     FEDERATION_UPGRADE_TIERS,
     isConquestMode,
@@ -138,8 +140,16 @@ export function hullTiersForGovt(govt: number): readonly string[] {
         : FEDERATION_UPGRADE_TIERS;
 }
 
+export function garrisonTiersForGovt(govt: number): readonly number[] {
+    return govt === AURORAN_GOVT
+        ? AURORAN_GARRISON_TIERS
+        : FEDERATION_GARRISON_TIERS;
+}
+
 const nextConquestBotSpawnBySystem = new Map<string, number>();
 const nextRivalRaidWaveBySystem = new Map<string, number>();
+const lastEnemySeenByBot = new Map<string, number>();
+const miningCreditAccumByBot = new Map<string, number>();
 const CONQUEST_RIVAL_RAID_WAVE_INTERVAL_MS = 28_000;
 const warmedGameDataSets = new WeakSet<object>();
 
@@ -338,46 +348,57 @@ const ConquestBotLifecycleSystem = new System({
             }
         }
 
-        // 2. Spawn Home Faction Miners/Defenders up to MAX_CONQUEST_BOTS_PER_SYSTEM
+        // 2. Maintain the Homeworld Defense Fleet Garrison (Carriers, Destroyers/Cruisers,
+        // Gunboats, and Patrol Boats) AND spawn Home Faction Miners/Raiders up to MAX_CONQUEST_BOTS_PER_SYSTEM
+        const garrisonTiers = garrisonTiersForGovt(homeGovt);
+        const activeGarrisonTiers = bots
+            .filter(([, b]) => b.factionGovt === homeGovt && b.garrison)
+            .map(([, b]) => b.tier);
+        const missingGarrisonTier = garrisonTiers.find(t => !activeGarrisonTiers.includes(t));
+
         const nextSpawnAt = nextConquestBotSpawnBySystem.get(systemId) ?? 0;
         const homeBotsCount = bots.filter(([, b]) => b.factionGovt === homeGovt).length;
+        // Spawn missing garrison capital ships immediately on room startup or after respawn interval
+        const shouldSpawnGarrison = missingGarrisonTier !== undefined
+            && (activeGarrisonTiers.length === 0 || time.time >= nextSpawnAt);
+
         if (
-            bots.length < MAX_CONQUEST_BOTS_PER_SYSTEM
-            && homeBotsCount < MAX_CONQUEST_BOTS_PER_SYSTEM - 2
-            && time.time >= nextSpawnAt
+            shouldSpawnGarrison
+            || (
+                bots.length < MAX_CONQUEST_BOTS_PER_SYSTEM
+                && homeBotsCount < MAX_CONQUEST_BOTS_PER_SYSTEM - 1
+                && time.time >= nextSpawnAt
+            )
         ) {
             nextConquestBotSpawnBySystem.set(
                 systemId,
-                time.time + CONQUEST_BOT_SPAWN_INTERVAL_MS,
+                time.time + (shouldSpawnGarrison && activeGarrisonTiers.length < garrisonTiers.length - 1
+                    ? 400
+                    : CONQUEST_BOT_SPAWN_INTERVAL_MS),
             );
+            const isGarrison = missingGarrisonTier !== undefined;
             const callsign = pickUniqueConquestCallsign(homeGovt, usedCallsigns);
             usedCallsigns.add(callsign);
             const angle = Math.random() * 2 * Math.PI;
-            const dist = 450 + Math.random() * 750;
+            const dist = isGarrison
+                ? 240 + Math.random() * 320
+                : 480 + Math.random() * 750;
             const pos = new Position(Math.cos(angle) * dist, Math.sin(angle) * dist);
-            // Spawn half of home-faction bots as active patrol warships ('attack' mode, Tier 1-2)
-            // and half as miners ('gather' mode) so incoming rival players/raiders are immediately engaged!
-            const homeAttackers = bots.filter(
-                ([, b]) => b.factionGovt === homeGovt && b.mode === 'attack',
-            ).length;
-            const spawnAsDefender = homeAttackers < 3 && Math.random() < 0.55;
-            const homeTiers = hullTiersForGovt(homeGovt);
-            const initialTier = spawnAsDefender
-                ? Math.min(homeTiers.length - 1, 1 + Math.floor(Math.random() * 2))
-                : 0;
+            const initialTier = isGarrison ? missingGarrisonTier! : 0;
             try {
                 const bot = spawnConquestBotEntity(
                     gameData,
                     budget,
                     {
                         callsign,
-                        mode: spawnAsDefender ? 'attack' : 'gather',
+                        mode: isGarrison ? 'attack' : 'gather',
                         factionGovt: homeGovt,
                         homeSystem: systemId,
                         tier: initialTier,
                         gatheredCredits: 0,
                         lastModeSwitchAt: time.time,
                         upgradePending: false,
+                        ...(isGarrison ? { garrison: true } : {}),
                     },
                     pos,
                 );
@@ -657,8 +678,14 @@ const ConquestBotLifecycleSystem = new System({
                         const noseAngleDiff = Math.abs(movement.rotation.distanceTo(toRock.angle).angle);
                         const canMine = dist <= Math.max(220, effRange * 1.1) && noseAngleDiff <= 0.38;
                         if (canMine) {
-                            botState.gatheredCredits +=
-                                CONQUEST_BOT_GATHER_CREDIT_RATE_PER_SEC * (time.delta_s || 0.016);
+                            const nextAccum = (miningCreditAccumByBot.get(botUuid) ?? 0)
+                                + CONQUEST_BOT_GATHER_CREDIT_RATE_PER_SEC * (time.delta_s || 0.016);
+                            if (nextAccum >= 2_500) {
+                                botState.gatheredCredits += Math.floor(nextAccum);
+                                miningCreditAccumByBot.set(botUuid, nextAccum - Math.floor(nextAccum));
+                            } else {
+                                miningCreditAccumByBot.set(botUuid, nextAccum);
+                            }
                         }
                         if (weapons) {
                             for (const [wId, w] of weapons) {
@@ -741,6 +768,7 @@ const ConquestBotLifecycleSystem = new System({
                                 if (
                                     allyUuid === botUuid
                                     || allyDisabled
+                                    || allyState.garrison
                                     || allyState.factionGovt !== botState.factionGovt
                                     || allyState.tier < 1
                                     || allyEnt.components.has(JumpStateComponent)
@@ -884,8 +912,36 @@ const ConquestBotLifecycleSystem = new System({
 
                 if (chosenEnemy) {
                     targetComp.target = chosenEnemy;
-                    botState.lastModeSwitchAt = time.time;
-                } else if (time.time - botState.lastModeSwitchAt >= CONQUEST_BOT_RAID_IDLE_MS) {
+                    lastEnemySeenByBot.set(botUuid, time.time);
+                } else if (botState.garrison) {
+                    // Homeworld Defense Garrison warships stay on station in a
+                    // defensive orbital patrol around (0, 0) instead of leaving!
+                    targetComp.target = undefined;
+                    if (weapons) {
+                        for (const [, w] of weapons) {
+                            w.firing = false;
+                        }
+                    }
+                    const distFromOrigin = movement.position.length;
+                    if (distFromOrigin > 520) {
+                        movement.turnTo = new Position(0, 0).subtract(movement.position).angle;
+                        movement.accelerating = 1;
+                        movement.turnBack = false;
+                    } else if (distFromOrigin < 220) {
+                        movement.turnTo = movement.position.angle;
+                        movement.accelerating = 1;
+                        movement.turnBack = false;
+                    } else {
+                        // Smooth clockwise orbital patrol around the home planet
+                        const tangentAngle = movement.position.angle.add(Math.PI * 0.5);
+                        movement.turnTo = tangentAngle;
+                        movement.accelerating = 1;
+                        movement.turnBack = false;
+                    }
+                } else if (
+                    time.time - (lastEnemySeenByBot.get(botUuid) ?? botState.lastModeSwitchAt)
+                        >= CONQUEST_BOT_RAID_IDLE_MS
+                ) {
                     // No enemies in sight: either jump to the rival system to raid,
                     // or return to mining asteroids if in home system and below max tier.
                     const inHomeSystem = systemId === botState.homeSystem;
@@ -895,10 +951,12 @@ const ConquestBotLifecycleSystem = new System({
                     ) {
                         botState.mode = 'raid';
                         botState.lastModeSwitchAt = time.time;
+                        lastEnemySeenByBot.set(botUuid, time.time);
                         targetComp.target = undefined;
                     } else {
                         botState.mode = 'gather';
                         botState.lastModeSwitchAt = time.time;
+                        lastEnemySeenByBot.set(botUuid, time.time);
                         delete botState.squadId;
                         delete botState.squadLeaderUuid;
                         targetComp.target = undefined;
@@ -990,6 +1048,23 @@ export const ConquestModePlugin: Plugin = {
         if (deltaMaker) {
             deltaMaker.addComponent(ConquestBotComponent, {
                 componentType: ConquestBotStateCodec,
+                deltaType: ConquestBotStateCodec,
+                getDelta(a, b) {
+                    if (
+                        a.callsign !== b.callsign
+                        || a.mode !== b.mode
+                        || a.factionGovt !== b.factionGovt
+                        || a.tier !== b.tier
+                        || a.squadId !== b.squadId
+                        || a.garrison !== b.garrison
+                    ) {
+                        return b;
+                    }
+                    return undefined;
+                },
+                applyDelta(_current, delta) {
+                    return delta;
+                },
             });
         }
         world.addComponent(ConquestBotComponent);

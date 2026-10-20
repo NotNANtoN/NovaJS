@@ -1,6 +1,6 @@
 import * as t from 'io-ts';
 import { Component } from 'nova_ecs/component';
-import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
+import { excludeFromStateHash, replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
 import type { SystemData } from 'novadatainterface/SystemData';
 import type { PlayerState } from './player_state';
 
@@ -45,6 +45,24 @@ export const AURORAN_UPGRADE_TIERS = [
     'nova:154', // Aurora Cruiser
     'nova:153', // Aurora Carrier
 ] as const;
+
+/**
+ * Permanent Homeworld Defense Garrison tier indices for Sol (Federation):
+ * - Tier 9: Fed Carrier (`nova:143`)
+ * - Tier 8: Fed Destroyer (`nova:141`)
+ * - Tier 6: RAGE Gunboat (`nova:172`)
+ * - Tier 5: Fed Patrol Boat (`nova:142`)
+ */
+export const FEDERATION_GARRISON_TIERS = [9, 8, 6, 5] as const;
+
+/**
+ * Permanent Homeworld Defense Garrison tier indices for Aurora (Auroran Empire):
+ * - Tier 5: Aurora Carrier (`nova:153`)
+ * - Tier 4: Aurora Cruiser (`nova:154`)
+ * - Tier 3: Abomination (`nova:152`)
+ * - Tier 2: Argosy (`nova:138`)
+ */
+export const AURORAN_GARRISON_TIERS = [5, 4, 3, 2] as const;
 
 export const FEDERATION_PILOT_NAMES = [
     'Capt. Vance',
@@ -119,6 +137,7 @@ export const ConquestBotStateCodec = t.intersection([
     t.partial({
         squadId: t.string,
         squadLeaderUuid: t.string,
+        garrison: t.boolean,
     }),
 ]);
 
@@ -131,6 +150,7 @@ replicationPolicies.register(ConquestBotComponent, {
     codec: ConquestBotStateCodec,
     authority: 'server',
 });
+excludeFromStateHash(ConquestBotComponent.name);
 
 export interface ConquestBotTransfer {
     from: string;
@@ -184,8 +204,8 @@ export const CONQUEST_MAGNET_ACCEL = 220;
 export const CONQUEST_ORE_SCATTER_DELAY_MS = 650;
 export const CONQUEST_MIN_ASTEROID_DENSITY = 15;
 export const CONQUEST_ASTEROID_RESPAWN_MS = 2_500;
-export const MAX_CONQUEST_BOTS_PER_SYSTEM = 8;
-export const CONQUEST_BOT_SPAWN_INTERVAL_MS = 4_000;
+export const MAX_CONQUEST_BOTS_PER_SYSTEM = 9;
+export const CONQUEST_BOT_SPAWN_INTERVAL_MS = 3_500;
 export const CONQUEST_BOT_GATHER_CREDIT_RATE_PER_SEC = 1_100;
 export const CONQUEST_BOT_UPGRADE_BASE_COST = 10_000;
 export const CONQUEST_BOT_RAID_IDLE_MS = 24_000;

@@ -342,11 +342,13 @@ const DrawTargetCornersSystem = new System({
             const [disabled, targetGovt, targetLock, targetPlayer, targetEscort, conquestBot] = targetComponents;
             const isWingmate = areWingmates(playerState, targetPlayer);
             if (conquestBot) {
-                const roleTag = conquestBot.mode === 'gather'
-                    ? 'MINER'
-                    : conquestBot.squadId
-                        ? 'SQUAD'
-                        : 'RAIDER';
+                const roleTag = conquestBot.garrison
+                    ? 'FLEET'
+                    : conquestBot.mode === 'gather'
+                        ? 'MINER'
+                        : conquestBot.squadId
+                            ? 'SQUAD'
+                            : 'RAIDER';
                 callsign = `${conquestBot.callsign} [T${conquestBot.tier + 1} ${roleTag}]`;
             }
             if (disabled) {

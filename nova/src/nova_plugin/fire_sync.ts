@@ -6,7 +6,7 @@ import { Vector, VectorType } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
-import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
+import { excludeFromStateHash, replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
 
 export const FIRE_BUFFER_SIZE = 16;
 
@@ -142,6 +142,7 @@ replicationPolicies.register(FireLogComponent, {
     codec: FireLog,
     authority: 'server',
 });
+excludeFromStateHash(FireLogComponent.name);
 
 /**
  * Where the server resolved a synchronized shot's hit. Recorded on the
@@ -180,6 +181,7 @@ replicationPolicies.register(ShotImpactLogComponent, {
     codec: ShotImpactLog,
     authority: 'server',
 });
+excludeFromStateHash(ShotImpactLogComponent.name);
 
 export function getShotImpactDelta(
     previous: ShotImpactLog | undefined,

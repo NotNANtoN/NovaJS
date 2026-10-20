@@ -143,6 +143,24 @@ export function quantizedMovementDelta(
     return Object.keys(delta).length > 0 ? delta : undefined;
 }
 
+function turnToSignificantlyChanged(
+    previous: MovementState,
+    current: MovementState,
+): boolean {
+    if (sameAngle(previous.turnTo, current.turnTo)) {
+        return false;
+    }
+    if (
+        previous.turnTo instanceof Angle
+        && current.turnTo instanceof Angle
+        && previous.turning === current.turning
+        && current.turning !== 0
+    ) {
+        return Math.abs(previous.turnTo.distanceTo(current.turnTo).angle) >= 0.08;
+    }
+    return true;
+}
+
 function movementControlChanged(
     previous: MovementState,
     current: MovementState,
@@ -151,7 +169,7 @@ function movementControlChanged(
         previous.turning !== current.turning
         || previous.turnBack !== current.turnBack
         || previous.accelerating !== current.accelerating
-        || !sameAngle(previous.turnTo, current.turnTo)
+        || turnToSignificantlyChanged(previous, current)
         || previous.targetSpeed !== current.targetSpeed
     ) {
         return true;
@@ -545,16 +563,21 @@ export const RemoteMovementPresentationSystem = new System({
         }
         const elapsed = Math.max(0, sourceRenderTime - (presentation.lastSourceRenderTime ?? sourceRenderTime));
         const decay = Math.pow(0.5, elapsed / MOVEMENT_CORRECTION_HALF_LIFE_MS);
-        let correction = presentation.positionCorrection?.scale(decay) ?? new Vector(0, 0);
-        let rotationCorrection = (presentation.rotationCorrection ?? 0) * decay;
+        const prevCorrection = presentation.positionCorrection ?? new Vector(0, 0);
+        const prevRotCorrection = presentation.rotationCorrection ?? 0;
+        let correction = prevCorrection.scale(decay);
+        let rotationCorrection = prevRotCorrection * decay;
         if (presentation.lastSample && elapsed > 0 && elapsed < 250
             && (presentation.presentedRevision !== presentation.revision
                 || presentation.lastClockOffset !== presentation.clock?.offset)) {
-            const expected = advanceMovementState(presentation.lastSample, physics, elapsed / 1000, entities);
+            const lastRendered = copyMovementState(presentation.lastSample);
+            lastRendered.position = lastRendered.position.add(prevCorrection) as Position;
+            lastRendered.rotation = lastRendered.rotation.add(prevRotCorrection);
+            const expected = advanceMovementState(lastRendered, physics, elapsed / 1000, entities);
             const error = expected.position.subtract(sampled.position);
             if (error.lengthSquared < 256 * 256) {
-                correction = correction.add(error.scale(decay));
-                rotationCorrection += sampled.rotation.distanceTo(expected.rotation).angle * decay;
+                correction = error.scale(decay);
+                rotationCorrection = sampled.rotation.distanceTo(expected.rotation).angle * decay;
             } else {
                 // Teleports/room placement must not animate a long sweep.
                 correction = new Vector(0, 0);
