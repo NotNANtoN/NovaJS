@@ -913,53 +913,52 @@ const ConquestBotLifecycleSystem = new System({
                 if (chosenEnemy) {
                     targetComp.target = chosenEnemy;
                     lastEnemySeenByBot.set(botUuid, time.time);
-                } else if (botState.garrison) {
-                    // Homeworld Defense Garrison warships stay on station in a
-                    // defensive orbital patrol around (0, 0) instead of leaving!
+                } else {
+                    // Clear any disabled or dead target immediately so bots
+                    // never hover motionless around a disabled hulk.
                     targetComp.target = undefined;
                     if (weapons) {
                         for (const [, w] of weapons) {
                             w.firing = false;
                         }
                     }
-                    const distFromOrigin = movement.position.length;
-                    if (distFromOrigin > 520) {
-                        movement.turnTo = new Position(0, 0).subtract(movement.position).angle;
-                        movement.accelerating = 1;
-                        movement.turnBack = false;
-                    } else if (distFromOrigin < 220) {
-                        movement.turnTo = movement.position.angle;
-                        movement.accelerating = 1;
-                        movement.turnBack = false;
+                    const idleElapsed = time.time - (lastEnemySeenByBot.get(botUuid) ?? botState.lastModeSwitchAt);
+                    if (!botState.garrison && idleElapsed >= CONQUEST_BOT_RAID_IDLE_MS) {
+                        // No enemies in sight: either jump to the rival system to raid,
+                        // or return to mining asteroids if in home system.
+                        const inHomeSystem = systemId === botState.homeSystem;
+                        if (
+                            otherSystem
+                            && (!inHomeSystem || (botState.tier >= 1 && Math.random() < 0.45))
+                        ) {
+                            botState.mode = 'raid';
+                            botState.lastModeSwitchAt = time.time;
+                            lastEnemySeenByBot.set(botUuid, time.time);
+                        } else {
+                            botState.mode = 'gather';
+                            botState.lastModeSwitchAt = time.time;
+                            lastEnemySeenByBot.set(botUuid, time.time);
+                            delete botState.squadId;
+                            delete botState.squadLeaderUuid;
+                        }
                     } else {
-                        // Smooth clockwise orbital patrol around the home planet
-                        const tangentAngle = movement.position.angle.add(Math.PI * 0.5);
-                        movement.turnTo = tangentAngle;
-                        movement.accelerating = 1;
-                        movement.turnBack = false;
-                    }
-                } else if (
-                    time.time - (lastEnemySeenByBot.get(botUuid) ?? botState.lastModeSwitchAt)
-                        >= CONQUEST_BOT_RAID_IDLE_MS
-                ) {
-                    // No enemies in sight: either jump to the rival system to raid,
-                    // or return to mining asteroids if in home system and below max tier.
-                    const inHomeSystem = systemId === botState.homeSystem;
-                    if (
-                        otherSystem
-                        && (!inHomeSystem || (botState.tier >= 1 && Math.random() < 0.45))
-                    ) {
-                        botState.mode = 'raid';
-                        botState.lastModeSwitchAt = time.time;
-                        lastEnemySeenByBot.set(botUuid, time.time);
-                        targetComp.target = undefined;
-                    } else {
-                        botState.mode = 'gather';
-                        botState.lastModeSwitchAt = time.time;
-                        lastEnemySeenByBot.set(botUuid, time.time);
-                        delete botState.squadId;
-                        delete botState.squadLeaderUuid;
-                        targetComp.target = undefined;
+                        // Active orbital patrol around the system center while
+                        // scanning for threats (Garrison fleet or post-combat sweep).
+                        const distFromOrigin = movement.position.length;
+                        if (distFromOrigin > 520) {
+                            movement.turnTo = new Position(0, 0).subtract(movement.position).angle;
+                            movement.accelerating = 1;
+                            movement.turnBack = false;
+                        } else if (distFromOrigin < 220) {
+                            movement.turnTo = movement.position.angle;
+                            movement.accelerating = 1;
+                            movement.turnBack = false;
+                        } else {
+                            const tangentAngle = movement.position.angle.add(Math.PI * 0.5);
+                            movement.turnTo = tangentAngle;
+                            movement.accelerating = 1;
+                            movement.turnBack = false;
+                        }
                     }
                 }
             }
@@ -1048,23 +1047,6 @@ export const ConquestModePlugin: Plugin = {
         if (deltaMaker) {
             deltaMaker.addComponent(ConquestBotComponent, {
                 componentType: ConquestBotStateCodec,
-                deltaType: ConquestBotStateCodec,
-                getDelta(a, b) {
-                    if (
-                        a.callsign !== b.callsign
-                        || a.mode !== b.mode
-                        || a.factionGovt !== b.factionGovt
-                        || a.tier !== b.tier
-                        || a.squadId !== b.squadId
-                        || a.garrison !== b.garrison
-                    ) {
-                        return b;
-                    }
-                    return undefined;
-                },
-                applyDelta(_current, delta) {
-                    return delta;
-                },
             });
         }
         world.addComponent(ConquestBotComponent);

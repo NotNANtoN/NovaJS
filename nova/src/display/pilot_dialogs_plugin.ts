@@ -17,7 +17,17 @@ import { MissionInfo } from '../spaceport/mission_bbs';
 import { ShipInfo } from '../spaceport/ship_info';
 import { Comms } from '../spaceport/comms_panel';
 import { BoardingDialog, BoardingDialogResource } from '../spaceport/boarding_dialog';
-import { BoardingRequestComponent, BoardingStateComponent, DisabledBoardingTargets, isBoardingTransferReady, heldCargo, BoardingNoticeComponent } from '../nova_plugin/boarding_plugin';
+import {
+    BoardingNoticeComponent,
+    BoardingRequestComponent,
+    BoardingStateComponent,
+    computeBoardingCaptureChance,
+    DisabledBoardingTargets,
+    heldCargo,
+    isBoardingTransferReady,
+} from '../nova_plugin/boarding_plugin';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
+import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import { SoundEvent } from '../nova_plugin/sound_event';
 import { PlayerChatDialog } from '../spaceport/player_chat_dialog';
 import { TargetComponent } from '../nova_plugin/target_component';
@@ -269,6 +279,18 @@ export const BoardingSystem = new AsyncSystem({
         const credits = isAlreadyPlundered ? 0 : (victimInventory?.credits ?? Math.max(500, Math.floor((victimShipData?.cost ?? 50000) * 0.001)));
         const cargoTons = isAlreadyPlundered ? 0 : (victimInventory ? heldCargo(victimInventory) : Math.floor((victimShipData?.cargoCapacity ?? 20) / 2));
         const crew = isDerelict ? 0 : (victimShipData?.crew ?? 5);
+        const playerShipData = entity.components.get(ShipDataComponent);
+        const playerOutfits = entity.components.get(OutfitsStateComponent);
+        const playerState = entity.components.get(PlayerStateComponent);
+        const captureOddsPercent = Math.round(
+            computeBoardingCaptureChance({
+                playerCrew: playerShipData?.crew ?? 2,
+                marinePlatoons: playerOutfits?.get('nova:227')?.count ?? 0,
+                playerKills: playerState?.kills ?? 0,
+                victimCrew: crew,
+                isDerelict,
+            }) * 100,
+        );
 
         boardingDialog.container.position.set(screenSize.x / 2, screenSize.y / 2);
         await boardingDialog.show({
@@ -279,6 +301,7 @@ export const BoardingSystem = new AsyncSystem({
             cargoTons,
             crew,
             isDerelict,
+            captureOddsPercent,
         });
 
         const action = boardingDialog.getSelectedAction();

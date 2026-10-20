@@ -51,6 +51,32 @@ const DEFENSE_OUTFIT_NUMS = new Set<number>([
     242, 243, 244, 245, 246, 247, 248, 250, 262, 268, 269, 347, 437,
 ]);
 
+/**
+ * In Galactic Conquest mode, retail ships and outfits are unlocked by faction
+ * spaceport rather than Federation/Auroran government licenses or ranks. Strip
+ * retail sentences mentioning required licenses/permits/ranks while keeping
+ * custom `conquest:vellos_*` psychic attunement descriptions intact.
+ */
+export function formatShopItemDescription(
+    desc: string | undefined,
+    itemId: string | undefined,
+    conquestMode: boolean,
+): string {
+    const raw = desc ?? '';
+    if (!conquestMode || !raw || (itemId ?? '').startsWith('conquest:')) {
+        return raw;
+    }
+    const cleaned = raw
+        .replace(
+            /[^.!?\n]*\b(?:license|licensed|permit|rank of|military clearance|not available for civilian|not sold to the general public|cannot be purchased without|requires? a valid)[^.!?\n]*[.!?]?/gi,
+            '',
+        )
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    return cleaned || raw;
+}
+
 export function classifyOutfitCategory(item: PurchaseData): Exclude<OutfitCategory, 'all'> {
     const id = item.id ?? '';
     if (id === 'conquest:shield_overcharger' || id === 'conquest:hull_nanites') {

@@ -18,7 +18,7 @@ import { Button } from './button';
 import { ItemGrid, ItemTile } from './item_grid';
 import { Menu } from './menu';
 import { FONT, formatPrice } from './outfitter';
-import { isPurchaseAvailable } from './availability';
+import { formatShopItemDescription, isPurchaseAvailable } from './availability';
 import { PlanetData } from 'novadatainterface/PlanetData';
 import { ShipyardInfoDialog } from './shipyard_info_dialog';
 import { shipyardInfoPictId } from './shipyard_info_content';
@@ -264,7 +264,11 @@ export class Shipyard extends Menu<Entity> {
         }
 
         // Set Description
-        this.text.description.text = shipTile.item.desc;
+        this.text.description.text = formatShopItemDescription(
+            shipTile.item.desc,
+            shipTile.item.id,
+            this.playerState?.gameMode === 'conquest',
+        );
         this.text.price.text = formatPrice(
             Math.max(0, Math.floor(shipTile.item.cost)));
         this.updateCreditsText();

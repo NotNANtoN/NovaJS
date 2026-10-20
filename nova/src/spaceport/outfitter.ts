@@ -12,7 +12,7 @@ import { Button } from "./button";
 import { ShipData } from "novadatainterface/ShipData";
 import { ItemGrid, ItemTile } from "./item_grid";
 import { Menu } from "./menu";
-import { classifyOutfitCategory, isPurchaseAvailable, OutfitCategory } from "./availability";
+import { classifyOutfitCategory, formatShopItemDescription, isPurchaseAvailable, OutfitCategory } from "./availability";
 import { Entity } from "nova_ecs/entity";
 import { Bits64 } from "../nova_plugin/contribute";
 import { contributeForPlayer } from "./player_contribute_context";
@@ -571,7 +571,11 @@ export class Outfitter extends Menu<OutfitsState> {
         }
 
         // Set Description
-        this.text.description.text = outfitTile.item.desc;
+        this.text.description.text = formatShopItemDescription(
+            outfitTile.item.desc,
+            outfitTile.item.id,
+            this.playerState?.gameMode === 'conquest',
+        );
 
         // Set price text
         this.text.price.text = formatPrice(outfitTile.item.price);

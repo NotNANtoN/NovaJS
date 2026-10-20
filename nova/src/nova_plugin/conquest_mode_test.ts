@@ -46,7 +46,8 @@ import {
     createInitialPlayerState,
     PlayerStateComponent,
 } from './player_state';
-import { classifyOutfitCategory, isPurchaseAvailable } from '../spaceport/availability';
+import { classifyOutfitCategory, formatShopItemDescription, isPurchaseAvailable } from '../spaceport/availability';
+import { computeBoardingCaptureChance } from './boarding_plugin';
 import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
 import { DeathEvent, LastAttackerComponent } from './death_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
@@ -496,5 +497,30 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(aurGarrisonIds).toContain('nova:154'); // Aurora Cruiser
         expect(aurGarrisonIds).toContain('nova:152'); // Abomination
         expect(aurGarrisonIds).toContain('nova:138'); // Argosy
+    });
+
+    it('strips retail license requirement sentences in Galactic Conquest mode and computes realistic crew boarding odds', () => {
+        const retailViperDesc = 'The Viper is a fast interceptor. To purchase a Viper, you must possess a valid Federation Heavy Weapons License.';
+        expect(formatShopItemDescription(retailViperDesc, 'nova:144', true))
+            .toBe('The Viper is a fast interceptor.');
+        expect(formatShopItemDescription(retailViperDesc, 'nova:144', false))
+            .toBe(retailViperDesc);
+
+        const shuttleVsWarship = computeBoardingCaptureChance({
+            playerCrew: 1,
+            marinePlatoons: 0,
+            playerKills: 0,
+            victimCrew: 12,
+            isDerelict: false,
+        });
+        const frigateWithMarinesVsFighter = computeBoardingCaptureChance({
+            playerCrew: 20,
+            marinePlatoons: 2,
+            playerKills: 15,
+            victimCrew: 2,
+            isDerelict: false,
+        });
+        expect(shuttleVsWarship).toBeLessThan(0.15);
+        expect(frigateWithMarinesVsFighter).toBeGreaterThan(0.75);
     });
 });

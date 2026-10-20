@@ -17,6 +17,7 @@ export interface BoardingTargetInfo {
     cargoTons: number;
     crew: number;
     isDerelict?: boolean;
+    captureOddsPercent?: number;
 }
 
 export type BoardingAction = 'plunder' | 'capture' | 'commandeer' | 'leave';
@@ -40,7 +41,12 @@ export class BoardingDialog extends ClassicDialog<BoardingTargetInfo> {
             background: PLUNDER_BACKGROUND,
             title: info => `Boarding: ${info.shipName || info.shipType}`,
             titlePosition: { x: 0, y: -72 },
-            subtitle: info => info.isDerelict ? 'Abandoned Derelict - No Life Signs' : 'Vessel Disabled - Airlock Sealed',
+            subtitle: info => {
+                const odds = info.captureOddsPercent ?? (info.isDerelict ? 65 : 25);
+                return info.isDerelict
+                    ? `Abandoned Derelict • Capture Odds: ${odds}% (Fail = Explodes)`
+                    : `Vessel Disabled • Capture Odds: ${odds}% (Fail = Explodes)`;
+            },
             subtitlePosition: { x: 0, y: -52 },
             sections: [
                 {
@@ -63,7 +69,12 @@ export class BoardingDialog extends ClassicDialog<BoardingTargetInfo> {
                         },
                         {
                             label: 'Crew:',
-                            value: info => info.isDerelict ? '0 (Uncrewed)' : `${info.crew} defenders`,
+                            value: info => {
+                                const odds = info.captureOddsPercent ?? (info.isDerelict ? 65 : 25);
+                                return info.isDerelict
+                                    ? `0 (${odds}% capture)`
+                                    : `${info.crew} defenders (${odds}% capture)`;
+                            },
                         },
                     ],
                 },

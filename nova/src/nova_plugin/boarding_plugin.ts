@@ -54,6 +54,7 @@ import {
     releaseCargo,
 } from './player_state';
 import { PlatformResource } from './platform_plugin';
+import { OutfitsStateComponent } from './outfit_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
@@ -414,6 +415,24 @@ export function applyCaptureBits(
     }
 }
 
+export function computeBoardingCaptureChance(options: {
+    playerCrew?: number;
+    marinePlatoons?: number;
+    playerKills?: number;
+    victimCrew?: number;
+    isDerelict?: boolean;
+}): number {
+    if (options.isDerelict) {
+        return 0.65;
+    }
+    const baseCrew = Math.max(1, options.playerCrew ?? 2);
+    const marines = Math.max(0, options.marinePlatoons ?? 0) * 15;
+    const vetBonus = Math.min(8, Math.floor((options.playerKills ?? 0) / 5));
+    const attackerPower = baseCrew + marines + vetBonus;
+    const defenderPower = Math.max(3, (options.victimCrew ?? 5) * 1.6 + 4);
+    return Math.min(0.85, Math.max(0.08, attackerPower / (attackerPower + defenderPower)));
+}
+
 export function isBoardingTransferReady(
     boarder: Parameters<typeof hasArrived>[0],
     target: Parameters<typeof hasArrived>[1],
@@ -567,11 +586,17 @@ export const PlayerBoardingSystem = new System({
                 const currentEscorts = player.escorts ?? [];
                 const maxEscorts = 6;
                 if (currentEscorts.length < maxEscorts || action === 'commandeer') {
-                    const playerCrew = (player.kills ?? 0) > 10 ? 25 : 15;
+                    const playerShipData = entity.components.get(ShipDataComponent);
+                    const playerOutfits = entity.components.get(OutfitsStateComponent);
+                    const marinePlatoons = playerOutfits?.get('nova:227')?.count ?? 0;
                     const victimCrew = isDerelict ? 0 : (victimShipData?.crew ?? 5);
-                    const captureChance = isDerelict
-                        ? 0.85
-                        : Math.min(0.9, Math.max(0.35, (playerCrew + 10) / (playerCrew + victimCrew + 10)));
+                    const captureChance = computeBoardingCaptureChance({
+                        playerCrew: playerShipData?.crew ?? 2,
+                        marinePlatoons,
+                        playerKills: player.kills ?? 0,
+                        victimCrew,
+                        isDerelict,
+                    });
                     if (Math.random() < captureChance) {
                         if (action === 'commandeer') {
                             commandeered = true;
@@ -607,6 +632,17 @@ export const PlayerBoardingSystem = new System({
                         }
                     } else {
                         resisted = true;
+                        // Defending crew repels the boarding party and triggers
+                        // self-destruct so the ship visibly explodes!
+                        const victimEntity = entities.get(request.target);
+                        if (victimEntity) {
+                            const nowTime: Time = time ?? { time: Date.now(), delta_s: 0, delta_ms: 0, frame: 0 };
+                            victimEntity.components.delete(DisableOnZeroArmorComponent);
+                            victimEntity.components.set(DestructionStartedComponent, true);
+                            victimEntity.components.set(ExplodingComponent, nowTime.time + 1500);
+                            emitNow(ZeroArmorEvent, nowTime, [request.target]);
+                            emitNow(SoundEvent, { id: 'nova:153' });
+                        }
                     }
                 } else {
                     fleetFull = true;

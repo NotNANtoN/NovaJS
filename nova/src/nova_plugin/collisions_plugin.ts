@@ -25,6 +25,10 @@ import { AnimationComponent } from "./animation_plugin";
 import { CollisionEvent, CollisionHitter, CollisionHitterComponent, CollisionVulnerability, CollisionVulnerabilityComponent } from "./collision_interaction";
 import { GameDataResource } from "./game_data_resource";
 import { Entities } from "nova_ecs/arg_types";
+import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { parseLoggedShotEntityId } from "./fire_sync";
+import { OwnerComponent } from "./fire_weapon_plugin";
+import { PlatformResource } from "./platform_plugin";
 import { LAG_COMPENSATION_SEARCH_MARGIN, LagCompensationComponent, rewindOffset } from "./lag_compensation";
 
 type Shape = SAT.Polygon | SAT.Circle;
@@ -472,8 +476,9 @@ export const CollisionSystem = new System({
         new Query([HitboxHullComponent, UUID, CollisionVulnerabilityComponent, Optional(MovementStateComponent)] as const),
         new Query([HurtboxHullComponent, UUID, CollisionHitterComponent, Optional(ProjectileComponent), Optional(MovementStateComponent),
             Optional(LagCompensationComponent)] as const),
-        Emit, Optional(TimeResource), Entities, SingletonComponent] as const,
-    step(rbush, hitboxColliders, hurtboxColliders, emit, time, entities) {
+        Emit, Optional(TimeResource), Entities, SingletonComponent,
+        Optional(PlatformResource), Optional(CommunicatorResource)] as const,
+    step(rbush, hitboxColliders, hurtboxColliders, emit, time, entities, _singleton, platform, communicator) {
         const starts = movementStarts.get(rbush);
         movementStarts.delete(rbush);
         // Hulls and interaction components can be mutable or revocable drafts.
@@ -556,6 +561,21 @@ export const CollisionSystem = new System({
             rbush.load(hitboxEntries);
             for (const entry of hurtboxEntries) {
                 const maybeCollisions = rbush.search(entry);
+                if (maybeCollisions.length === 0) {
+                    continue;
+                }
+                const entryEntity = entry.projectile ? entities.get(entry.uuid) : undefined;
+                const entryOwner = entryEntity?.components.get(OwnerComponent)?.owner;
+                const logged = entry.projectile && platform === 'browser'
+                    ? parseLoggedShotEntityId(entry.uuid)
+                    : undefined;
+                const remoteLoggedProjectileOnBrowser = Boolean(
+                    logged && (() => {
+                        const shooterOwner = entities.get(logged.source)
+                            ?.components.get(MultiplayerData)?.owner;
+                        return shooterOwner !== undefined && shooterOwner !== communicator?.uuid;
+                    })(),
+                );
 
                 for (const other of maybeCollisions) {
                     if (other.type !== RBushEntryType.hitbox || other.uuid === entry.uuid) {
@@ -566,6 +586,23 @@ export const CollisionSystem = new System({
 
                     if (!aHitsB(hitter, vulnerability)) {
                         continue;
+                    }
+                    if (entry.projectile) {
+                        if (entryOwner !== undefined && other.uuid === entryOwner) {
+                            continue;
+                        }
+                        const otherEntity = entities.get(other.uuid);
+                        if (
+                            entryOwner !== undefined
+                            && otherEntity?.components.get(OwnerComponent)?.owner === entryOwner
+                        ) {
+                            continue;
+                        }
+                        // On the browser, remote-owned synchronized shots vs replicated
+                        // ships/asteroids are resolved by the server via ShotImpactLog.
+                        if (remoteLoggedProjectileOnBrowser && otherEntity?.components.has(MultiplayerData)) {
+                            continue;
+                        }
                     }
                     let shift = { x: 0, y: 0 };
                     let otherDisplacement = other.displacement;

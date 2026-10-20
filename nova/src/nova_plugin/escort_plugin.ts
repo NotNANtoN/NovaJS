@@ -26,15 +26,19 @@ import { v4 as uuid } from 'uuid';
 import { GameDataResource } from './game_data_resource';
 import { approachTarget } from './flight_controller';
 import { InitiateJumpEvent, JumpStateComponent } from './jump_plugin';
-import { ChooseRandomTargetComponent, FollowAI, makeNpc, WanderComponent } from './npc_plugin';
-import { CommandedEscortComponent, NpcAIComponent } from './npc_components';
+import { ChooseRandomTargetComponent, FollowAI, makeNpc, ShootAllWeaponsAI, WanderComponent } from './npc_plugin';
+import { CommandedEscortComponent, GovtComponent, NpcAIComponent } from './npc_components';
 import { PlatformResource } from './platform_plugin';
 import { TargetComponent } from './target_component';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
-import { DeathEvent } from './death_plugin';
+import { DeathEvent, DisabledComponent, LastAttackerComponent } from './death_plugin';
+import { DestructionStartedComponent } from './destruction_state';
+import { OutfitsStateComponent } from './outfit_plugin';
+import { WeaponsStateComponent } from './weapons_state';
+import { ConquestBotComponent, isConquestMode, playerConquestFaction } from './conquest_config';
 import { ControlStateEvent } from './control_state_event';
 import { PlayerShipSelector } from './player_ship_plugin';
-import { ShipComponent } from './ship_plugin';
+import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import {
     EscortContract,
     EscortContractData,
@@ -313,6 +317,13 @@ export function makeHiredEscort(
     shape: FormationShape = 'wedge',
 ) {
     const escort = makeNpc(shipData);
+    escort.components.set(ShipDataComponent, shipData);
+    escort.components.set(
+        OutfitsStateComponent,
+        new Map(Object.entries(shipData.outfits ?? {}).map(
+            ([id, count]) => [id, { count }],
+        )),
+    );
     escort.components.set(HiredEscortComponent, {
         ownerUuid,
         contractId,
@@ -581,6 +592,7 @@ function distanceBetween(a: Entity | undefined, b: Entity | undefined): number {
 
 export const EscortDefenseSystem = new System({
     name: 'EscortDefenseSystem',
+    before: [FollowAI, ShootAllWeaponsAI],
     args: [
         HiredEscortComponent,
         TargetComponent,
@@ -609,35 +621,88 @@ export const EscortDefenseSystem = new System({
         const isOwnFleet = (uuid: string) => uuid === escort.ownerUuid
             || entities.get(uuid)?.components.get(HiredEscortComponent)
                 ?.ownerUuid === escort.ownerUuid;
+        const isDisabledOrDying = (ent: Entity | undefined) =>
+            !ent
+            || ent.components.get(DisabledComponent) === true
+            || ent.components.has(DestructionStartedComponent);
 
         if (mode === 'attack') {
             // Focus fire on the ordered target, however far it runs. Once
-            // it is gone the escort falls back to defending the flagship.
+            // it is gone or disabled, the escort falls back to defending the flagship.
             const attackTarget = order?.targetUuid;
-            if (attackTarget && entities.has(attackTarget) && !isOwnFleet(attackTarget)) {
+            const attackEnt = attackTarget ? entities.get(attackTarget) : undefined;
+            if (attackTarget && attackEnt && !isOwnFleet(attackTarget) && !isDisabledOrDying(attackEnt)) {
                 target.target = attackTarget;
                 return;
             }
         }
 
-        // Defend: stay with the flagship and engage only ships that are
-        // attacking it or this escort, and only close to the flagship.
+        // Defend: stay with the flagship and engage ships that are
+        // attacking the fleet or that the flagship is actively attacking.
         const current = target.target;
-        if (current && (!entities.has(current) || isOwnFleet(current)
-            || distanceBetween(entities.get(current), owner) > ESCORT_DEFEND_LEASH)) {
+        const currentEnt = current ? entities.get(current) : undefined;
+        if (
+            current && (
+                !currentEnt
+                || isOwnFleet(current)
+                || isDisabledOrDying(currentEnt)
+                || distanceBetween(currentEnt, owner) > ESCORT_DEFEND_LEASH
+            )
+        ) {
             target.target = undefined;
         }
         if (target.target) {
             return;
         }
+
+        // If the flagship has a valid hostile/attacked target within leash, assist immediately!
+        const ownerTargetUuid = owner.components.get(TargetComponent)?.target;
+        const ownerTargetEnt = ownerTargetUuid ? entities.get(ownerTargetUuid) : undefined;
+        const ownerPlayer = owner.components.get(PlayerStateComponent);
+        const ownerWeapons = owner.components.get(WeaponsStateComponent);
+        const ownerIsFiring = Boolean(
+            ownerWeapons && [...ownerWeapons.values()].some(w => w.firing),
+        );
+        if (
+            ownerTargetUuid
+            && ownerTargetEnt
+            && ownerTargetEnt.components.has(ShipComponent)
+            && !isOwnFleet(ownerTargetUuid)
+            && !isDisabledOrDying(ownerTargetEnt)
+            && distanceBetween(ownerTargetEnt, owner) <= ESCORT_DEFEND_LEASH
+        ) {
+            const attackedByOwner = ownerTargetEnt.components.get(LastAttackerComponent) === escort.ownerUuid;
+            const conquestHostile = Boolean(
+                isConquestMode(ownerPlayer) && (
+                    (ownerTargetEnt.components.get(ConquestBotComponent)?.factionGovt
+                        ?? ownerTargetEnt.components.get(GovtComponent)?.id)
+                    !== playerConquestFaction(ownerPlayer)
+                ),
+            );
+            if (attackedByOwner || ownerIsFiring || conquestHostile) {
+                target.target = ownerTargetUuid;
+                return;
+            }
+        }
+
         let attackerUuid: string | undefined;
         let attackerDistance = ESCORT_DEFEND_LEASH;
         for (const [entityUuid, entity] of entities) {
-            if (isOwnFleet(entityUuid) || !entity.components.has(NpcAIComponent)) {
+            if (
+                isOwnFleet(entityUuid)
+                || !entity.components.has(NpcAIComponent)
+                || isDisabledOrDying(entity)
+            ) {
                 continue;
             }
             const entityTarget = entity.components.get(TargetComponent)?.target;
-            if (entityTarget !== escort.ownerUuid && entityTarget !== escortUuid) {
+            const attackedByOwner = entity.components.get(LastAttackerComponent) === escort.ownerUuid;
+            if (
+                entityTarget !== escort.ownerUuid
+                && entityTarget !== escortUuid
+                && !(entityTarget && isOwnFleet(entityTarget))
+                && !attackedByOwner
+            ) {
                 continue;
             }
             const distance = distanceBetween(entity, owner);

@@ -548,6 +548,28 @@ export function immerGetDelta<T>(_a: T, _b: T, patches: Patch[]) {
 }
 
 export function immerApplyDelta<T>(componentData: T, delta: Patch[]) {
-    // TODO: Fix this type
-    return applyPatches(componentData as Objectish, delta) as T;
+    if (!delta || delta.length === 0) {
+        return componentData;
+    }
+    try {
+        return applyPatches(componentData as Objectish, delta) as T;
+    } catch {
+        // If a batch patch fails (e.g. due to a concurrent local merge or a
+        // missing intermediate path), apply each valid patch individually so
+        // one stale path never aborts delta application for the whole entity.
+        let currentVal = componentData as Objectish;
+        for (const patch of delta) {
+            try {
+                // JSON serialization strips `value: undefined` on replace patches
+                const normalizedPatch: Patch =
+                    patch.op === 'replace' && !('value' in patch)
+                        ? { ...patch, value: undefined }
+                        : patch;
+                currentVal = applyPatches(currentVal, [normalizedPatch]);
+            } catch {
+                // Ignore individual unresolvable patch
+            }
+        }
+        return currentVal as T;
+    }
 }
