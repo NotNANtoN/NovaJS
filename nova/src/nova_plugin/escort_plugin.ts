@@ -549,8 +549,15 @@ const FollowEscortOwner = new System({
             return;
         }
         if (combatTarget?.target) {
-            // FollowAI flies the attack run.
-            return;
+            // In 'defend' mode, if the escort has drifted too far from the
+            // flagship, break off and fly back to the player's side!
+            const selfDist = distanceBetween(entity, owner);
+            if (ownerOrder?.mode !== 'attack' && Number.isFinite(selfDist) && selfDist > ESCORT_MAX_SELF_DISTANCE_FROM_OWNER) {
+                combatTarget.target = undefined;
+            } else {
+                // FollowAI flies the attack run.
+                return;
+            }
         }
         const ownerMovement = owner.components.get(MovementStateComponent);
         if (!ownerMovement) {
@@ -582,7 +589,8 @@ const FollowEscortOwner = new System({
  * How far from the flagship a defending escort will pursue an attacker
  * before giving up and returning to formation.
  */
-export const ESCORT_DEFEND_LEASH = 1200;
+export const ESCORT_DEFEND_LEASH = 600;
+export const ESCORT_MAX_SELF_DISTANCE_FROM_OWNER = 420;
 
 function distanceBetween(a: Entity | undefined, b: Entity | undefined): number {
     const pa = a?.components.get(MovementStateComponent)?.position;
@@ -637,8 +645,15 @@ export const EscortDefenseSystem = new System({
             }
         }
 
-        // Defend: stay with the flagship and engage ships that are
-        // attacking the fleet or that the flagship is actively attacking.
+        // Defend: stay close to the flagship! If this escort itself is too far
+        // from the flagship, drop combat target so FollowEscortOwner flies it
+        // straight back to the player.
+        const selfDist = distanceBetween(entities.get(escortUuid), owner);
+        if (Number.isFinite(selfDist) && selfDist > ESCORT_MAX_SELF_DISTANCE_FROM_OWNER) {
+            target.target = undefined;
+            return;
+        }
+
         const current = target.target;
         const currentEnt = current ? entities.get(current) : undefined;
         if (

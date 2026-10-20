@@ -631,6 +631,9 @@ const PlayerJumpControl = new System({
         };
         entity.components.set(JumpStateComponent, state);
         entity.components.delete(RemoteMovementPresentationComponent);
+        const soundTable = (gameData.data as { Sound?: { get?: (id: string) => Promise<unknown> } }).Sound;
+        void soundTable?.get?.('nova:128')?.catch?.(() => {});
+        void soundTable?.get?.('nova:130')?.catch?.(() => {});
         emit(InitiateJumpEvent, { to: nextSystem });
     }
 });
@@ -685,15 +688,13 @@ const JumpBrakeControlSystem = new System({
                 const source = gameData.data.System.getCached(state.from);
                 const destination = gameData.data.System.getCached(state.to);
                 const useConquestCoords = isConquestMode(playerState) || Boolean(conquestBot);
-                if (source && destination) {
-                    const sourcePos = useConquestCoords
-                        && CONQUEST_SYSTEM_POSITIONS[state.from]
-                        ? CONQUEST_SYSTEM_POSITIONS[state.from]
-                        : source.position;
-                    const destPos = useConquestCoords
-                        && CONQUEST_SYSTEM_POSITIONS[state.to]
-                        ? CONQUEST_SYSTEM_POSITIONS[state.to]
-                        : destination.position;
+                const sourcePos = useConquestCoords && CONQUEST_SYSTEM_POSITIONS[state.from]
+                    ? CONQUEST_SYSTEM_POSITIONS[state.from]
+                    : source?.position;
+                const destPos = useConquestCoords && CONQUEST_SYSTEM_POSITIONS[state.to]
+                    ? CONQUEST_SYSTEM_POSITIONS[state.to]
+                    : destination?.position;
+                if (sourcePos && destPos) {
                     const delta = new Vector(
                         destPos[0] - sourcePos[0],
                         destPos[1] - sourcePos[1],
@@ -765,7 +766,7 @@ export const JumpLifecycleSystem = new System({
                 return;
             }
             const brakeHeading = movement.rotation.getUnitVector();
-            advanceJumpFlight(
+            const fallbackTransition = advanceJumpFlight(
                 state,
                 movement,
                 physics,
@@ -774,6 +775,14 @@ export const JumpLifecycleSystem = new System({
                 undefined,
                 () => emit(SoundEvent, { id: 'nova:128' }),
             );
+            if (fallbackTransition === 'finish-arrival') {
+                const arrivalSound = takeArrivalSound(state);
+                if (arrivalSound) {
+                    emit(SoundEvent, { id: arrivalSound });
+                }
+                movement.turnTo = null;
+                entity.components.delete(JumpStateComponent);
+            }
             return;
         }
 
@@ -859,7 +868,6 @@ export const JumpLifecycleSystem = new System({
             state.arrivalSoundPending = true;
             entity.components.delete(RemoteMovementPresentationComponent);
 
-            emit(SoundEvent, { id: 'nova:128', stop: true });
             entities.delete(uuid);
             deImmerify(entity);
             emit(FinishJumpEvent, {

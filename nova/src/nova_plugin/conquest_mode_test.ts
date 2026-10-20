@@ -48,6 +48,10 @@ import {
 } from './player_state';
 import { classifyOutfitCategory, formatShopItemDescription, isPurchaseAvailable } from '../spaceport/availability';
 import { computeBoardingCaptureChance } from './boarding_plugin';
+import { computeShipDeathShockwave } from './ship_death_blast';
+import { DeathPlugin } from './death_plugin';
+import { ArmorComponent, ShieldComponent } from './health_plugin';
+import { Stat } from './stat';
 import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
 import { DeathEvent, LastAttackerComponent } from './death_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
@@ -522,5 +526,83 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         });
         expect(shuttleVsWarship).toBeLessThan(0.15);
         expect(frigateWithMarinesVsFighter).toBeGreaterThan(0.75);
+    });
+
+    it('scales ship explosion blast damage by ship mass/armor (Leviathan vs Shuttle) and damages both player and NPC ships', async () => {
+        const shuttleData = {
+            ...getDefaultShipData(),
+            id: 'nova:128',
+            name: 'Shuttle',
+            largeExplosion: false,
+            physics: { ...getDefaultShipData().physics, mass: 20, armor: 50, shield: 100 },
+        };
+        const leviathanData = {
+            ...getDefaultShipData(),
+            id: 'nova:131',
+            name: 'Leviathan',
+            largeExplosion: true,
+            physics: { ...getDefaultShipData().physics, mass: 600, armor: 600, shield: 800 },
+        };
+
+        const shuttleWave = computeShipDeathShockwave(shuttleData)!;
+        const leviathanWave = computeShipDeathShockwave(leviathanData)!;
+        expect(leviathanWave.radius).toBeGreaterThan(shuttleWave.radius * 2);
+        expect(leviathanWave.shieldDamage).toBeGreaterThan(shuttleWave.shieldDamage * 4);
+
+        const world = new World();
+        world.resources.set(GameDataResource, new MockGameData());
+        world.resources.set(SystemIdResource, CONQUEST_SOL_SYSTEM);
+        world.resources.set(PlatformResource, 'node');
+        await world.addPlugin(TimePlugin);
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(MovementPlugin);
+        await world.addPlugin(DeathPlugin);
+
+        const dyingLeviathan = new Entity('Dying Leviathan')
+            .addComponent(ShipComponent, { id: 'nova:131' })
+            .addComponent(ShipDataComponent, leviathanData)
+            .addComponent(MovementStateComponent, {
+                position: new Position(0, 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        const nearbyPlayer = new Entity('Nearby Player')
+            .addComponent(ShipComponent, { id: 'nova:144' })
+            .addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(ShieldComponent, new Stat({ current: 300, max: 300, recharge: 0 }))
+            .addComponent(ArmorComponent, new Stat({ current: 200, max: 200, recharge: 0 }))
+            .addComponent(MovementStateComponent, {
+                position: new Position(90, 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        const nearbyNpc = new Entity('Nearby NPC')
+            .addComponent(ShipComponent, { id: 'nova:155' })
+            .addComponent(ShieldComponent, new Stat({ current: 300, max: 300, recharge: 0 }))
+            .addComponent(ArmorComponent, new Stat({ current: 200, max: 200, recharge: 0 }))
+            .addComponent(MovementStateComponent, {
+                position: new Position(0, -110),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+
+        world.entities.set('leviathan', dyingLeviathan);
+        world.entities.set('player', nearbyPlayer);
+        world.entities.set('npc', nearbyNpc);
+
+        const time = world.resources.get(TimeResource)!;
+        world.emitNow(DeathEvent, time, ['leviathan']);
+
+        expect(nearbyPlayer.components.get(ShieldComponent)!.current).toBeLessThan(100);
+        expect(nearbyNpc.components.get(ShieldComponent)!.current).toBeLessThan(120);
     });
 });

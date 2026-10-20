@@ -49,8 +49,11 @@ import { GameDataResource } from "./nova_plugin/game_data_resource";
 import {
     FinishJumpEvent,
     InitiateJumpEvent,
+    JumpStateComponent,
     restartJumpArrival,
 } from "./nova_plugin/jump_plugin";
+import { oppositeConquestSystem } from "./nova_plugin/conquest_config";
+import { copyMovementState } from "nova_ecs/plugins/movement_plugin";
 import { variantIndexForCatalog } from "./nova_plugin/system_variants";
 import {
     PlayerDeathComponent,
@@ -288,8 +291,12 @@ async function preloadNeighboringSystems(
 ) {
     try {
         const currentSystem = await gameData.data.System.get(currentSystemId);
-        if (!currentSystem?.links) return;
-        for (const neighborId of currentSystem.links) {
+        const conquestNeighbor = oppositeConquestSystem(currentSystemId);
+        const neighborIds = new Set<string>([
+            ...(currentSystem?.links ?? []),
+            ...(conquestNeighbor ? [conquestNeighbor] : []),
+        ]);
+        for (const neighborId of neighborIds) {
             if (warmedNeighborSystems.has(neighborId)) continue;
             warmedNeighborSystems.add(neighborId);
             void warmFlightAssets({
@@ -337,9 +344,6 @@ async function transitionTo(
     };
     try {
         if (system) {
-            if (cause === 'hyperjump') {
-                stopHyperjumpSounds(system);
-            }
             await leaveGameWorld();
         }
 
@@ -446,10 +450,14 @@ async function transitionTo(
             await firstValueFrom(room.peers.current.pipe(
                 filter(peers => peers.has('server')), timeout(30_000)));
         }
+        const arrivalJumpSnapshot = cause === 'hyperjump'
+            ? plainSnapshot(transitionEntity.components.get(JumpStateComponent))
+            : undefined;
+        const arrivalMovementSnapshot = cause === 'hyperjump'
+            && transitionEntity.components.has(MovementStateComponent)
+            ? copyMovementState(transitionEntity.components.get(MovementStateComponent)!)
+            : undefined;
         if (cause === 'hyperjump') {
-            stopHyperjumpSounds(system);
-            // World construction and room handshakes can take longer than the
-            // visual arrival phase. Start it when the destination can draw.
             restartJumpArrival(transitionEntity);
         }
         transitionEntity.components.delete(AnimationGraphicComponent);
@@ -496,6 +504,26 @@ async function transitionTo(
             }
             updateProgress(100, 'All systems ready');
             resetGameplayClocks();
+            if (cause === 'hyperjump') {
+                const liveShip = newSystem.entities.get(uuid) ?? transitionEntity;
+                if (arrivalMovementSnapshot) {
+                    liveShip.components.set(
+                        MovementStateComponent,
+                        copyMovementState(arrivalMovementSnapshot),
+                    );
+                }
+                if (arrivalJumpSnapshot) {
+                    liveShip.components.set(JumpStateComponent, {
+                        ...arrivalJumpSnapshot,
+                        phase: 'arriving',
+                        arrivalSoundPending: true,
+                    });
+                }
+                restartJumpArrival(
+                    liveShip,
+                    newSystem.resources.get(TimeResource)?.time,
+                );
+            }
             newStage.visible = true;
             preloadNeighboringSystems(to, gameData as GameData, app);
         }

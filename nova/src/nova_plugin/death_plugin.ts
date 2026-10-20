@@ -55,7 +55,7 @@ import {
 } from './outfit_plugin';
 import { Platform, PlatformPlugin, PlatformResource } from './platform_plugin';
 import { Stat } from './stat';
-import { makeShipExplosionBlast } from './ship_death_blast';
+import { computeShipDeathShockwave, makeShipExplosionBlast } from './ship_death_blast';
 import { authorExternalImpulse, ExternalImpulsePlugin } from './external_impulse';
 import { OwnerComponent, SourceComponent } from './fire_weapon_plugin';
 import { parseLoggedShotEntityId } from './fire_sync';
@@ -341,14 +341,56 @@ const ShipDeathBlastSystem = new System({
     name: 'ShipDeathBlastSystem',
     events: [DeathEvent],
     args: [ShipDataComponent, MovementStateComponent, Entities, UUID,
-        PlatformResource] as const,
-    step(ship, movement, entities, uuid, platform) {
+        PlatformResource, EmitNow] as const,
+    step(ship, movement, entities, uuid, platform, emitNow) {
         if (platform !== 'node') {
             return;
         }
         const blast = makeShipExplosionBlast(ship, movement.position, uuid);
         if (blast) {
             entities.set(v4(), blast);
+        }
+        // Apply radial shockwave damage to nearby Player and NPC ships, scaled
+        // by the exploding ship's mass and armor (e.g. Leviathan/Carrier vs fighter).
+        if (ship.id.startsWith('nova:') && (ship.physics?.armor ?? 0) > 0) {
+            const shockwave = computeShipDeathShockwave(ship);
+            if (shockwave) {
+                for (const [otherUuid, otherEntity] of entities) {
+                    if (
+                        otherUuid === uuid
+                        || !otherEntity.components.has(ShipComponent)
+                        || otherEntity.components.has(DestructionStartedComponent)
+                        || otherEntity.components.has(PlayerDeathComponent)
+                    ) {
+                        continue;
+                    }
+                    const otherMov = otherEntity.components.get(MovementStateComponent);
+                    if (!otherMov) {
+                        continue;
+                    }
+                    const dist = otherMov.position.subtract(movement.position).length;
+                    const effectiveDist = Math.max(0, dist - 24);
+                    if (effectiveDist > shockwave.radius) {
+                        continue;
+                    }
+                    const falloff = Math.max(
+                        0.25,
+                        1 - 0.75 * (effectiveDist / shockwave.radius),
+                    );
+                    emitNow(DamagedEvent, {
+                        damage: {
+                            shield: Math.round(shockwave.shieldDamage * falloff),
+                            armor: Math.round(shockwave.armorDamage * falloff),
+                            ionization: 0,
+                            ionizationColor: 0,
+                            passThroughShield: 0,
+                            knockback: Math.round(shockwave.knockback * falloff),
+                        },
+                        damager: uuid,
+                        fromExplosion: true,
+                    }, [otherUuid]);
+                }
+            }
         }
     }
 });

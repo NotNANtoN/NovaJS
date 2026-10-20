@@ -33,9 +33,16 @@ replicationPolicies.register(AnimationGraphicComponent, { codec: t.any, authorit
 replicationPolicies.register(AnimationGraphicLoadedComponent, { codec: t.any, authority: 'local-only' });
 /** The animation a graphic was built from, to notice a hull change. */
 const builtFrom = new WeakMap<AnimationGraphic, string>();
+const cachedAnimationKeys = new WeakMap<object, string>();
 
 function animationKey(animation: { id?: string, images?: unknown }): string {
-    return `${animation.id ?? ''}|${JSON.stringify(animation.images ?? {})}`;
+    const cached = cachedAnimationKeys.get(animation);
+    if (cached !== undefined) {
+        return cached;
+    }
+    const key = `${animation.id ?? ''}|${JSON.stringify(animation.images ?? {})}`;
+    cachedAnimationKeys.set(animation, key);
+    return key;
 }
 
 const AnimationGraphicLoader = ProvideAsync({

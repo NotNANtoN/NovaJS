@@ -31,7 +31,7 @@ import { v4 } from 'uuid';
 import { FactoryQueue } from '../common/factory_queue';
 import { AnimationComponent } from './animation_plugin';
 import { BlastDamageComponent, BlastIgnoreComponent } from './blast_plugin';
-import { CompositeHull, hullFromAnimation, HurtboxHullComponent, SweptCollisionContact } from './collisions_plugin';
+import { CompositeHull, HitboxHullComponent, hullFromAnimation, HurtboxHullComponent, SweptCollisionContact } from './collisions_plugin';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction';
 import { CreateTime } from './create_time';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin';
@@ -130,6 +130,13 @@ class ProjectileWeaponEntry extends WeaponEntry {
                 projectile.addComponent(CollisionVulnerabilityComponent, {
                     vulnerableTo: new Set(this.data.vulnerableTo),
                 });
+                // Provide an immediate circular hitbox so point-defense weapons
+                // can intercept rockets/missiles on Tick 0 and HitboxHullProvider
+                // does not run 36-frame async polygon construction per rocket.
+                projectile.addComponent(
+                    HitboxHullComponent,
+                    new CompositeHull([new SAT.Circle(new SAT.Vector(0, 0), 6)]),
+                );
             }
             if (this.data.guidance === 'guided') {
                 projectile.addComponent(GuidanceComponent, {
@@ -173,7 +180,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
             }
 
             return projectile;
-        }, 16);
+        }, 2);
         queueHolder.queue = this.factoryQueue;
     }
 
@@ -289,6 +296,12 @@ class ProjectileWeaponEntry extends WeaponEntry {
             hurtbox.pos.x = movementState.position.x;
             hurtbox.pos.y = movementState.position.y;
             hurtbox.angle = movementState.rotation.angle;
+        }
+        const hitbox = projectile.components.get(HitboxHullComponent);
+        if (hitbox) {
+            hitbox.pos.x = movementState.position.x;
+            hitbox.pos.y = movementState.position.y;
+            hitbox.angle = movementState.rotation.angle;
         }
 
         // Reuse the live prediction and its graphic/budget reservation without

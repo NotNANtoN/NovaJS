@@ -33,6 +33,46 @@ export function shipExplosionBlastRadius(mass: number): number {
         : 0;
 }
 
+export interface ShipDeathShockwave {
+    radius: number;
+    shieldDamage: number;
+    armorDamage: number;
+    knockback: number;
+}
+
+/**
+ * Computes the radial explosion shockwave for any real ship (`armor > 0`) when
+ * it explodes. Small fighters produce a compact blast (`~110px`, `~45` dmg),
+ * while heavy hulls like a Leviathan, Destroyer, or Carrier unleash a massive
+ * shockwave (`~280-340px`, `~260-420` dmg) that heavily damages nearby player
+ * and NPC ships alike.
+ */
+export function computeShipDeathShockwave(ship: ShipData): ShipDeathShockwave | undefined {
+    const rawArmor = ship.physics?.armor ?? 0;
+    const rawMass = ship.physics?.mass ?? 0;
+    if (!(rawArmor > 0) && !(rawMass > 0)) {
+        return undefined;
+    }
+    const mass = Math.max(10, rawMass || 25);
+    const armor = Math.max(20, rawArmor || 50);
+    const isHeavy = Boolean(ship.largeExplosion || mass >= 300 || armor >= 400);
+
+    const radius = isHeavy
+        ? Math.min(340, Math.round(160 + Math.sqrt(mass) * 6.5))
+        : Math.min(180, Math.round(85 + Math.sqrt(mass) * 6));
+
+    const peakDamage = isHeavy
+        ? Math.min(420, Math.round(130 + mass * 0.28 + armor * 0.18))
+        : Math.min(140, Math.round(30 + mass * 0.45 + armor * 0.12));
+
+    return {
+        radius,
+        shieldDamage: peakDamage,
+        armorDamage: Math.round(peakDamage * 0.85),
+        knockback: Math.round(peakDamage * 1.2),
+    };
+}
+
 export function makeShipExplosionBlast(
     ship: ShipData,
     position: Position,
