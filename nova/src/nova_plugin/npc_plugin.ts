@@ -556,13 +556,15 @@ export function getMaximumWeaponRange(
 
 /**
  * Determine the effective engagement range from the ship's actual weapon loadout.
- * If the ship carries primary forward guns/beams, use the shortest primary range so
- * all primary forward weapons can bear. Otherwise, fall back to secondary weapons.
+ * Uses the ship's main primary battery range (capped to tactical combat distance)
+ * so warships with mixed batteries (e.g. Destroyers with both Medium and Light Blasters,
+ * or Cruisers with Railguns and pulse turrets) engage at their true primary envelope.
  */
 export function getEffectiveWeaponRange(
     weapons: WeaponsState | undefined,
     gameData: GameDataInterface,
 ): number | undefined {
+    let forwardPrimaryRange: number | undefined;
     let primaryRange: number | undefined;
     let secondaryRange: number | undefined;
 
@@ -582,7 +584,13 @@ export function getEffectiveWeaponRange(
         if (weapon.fireGroup === "primary") {
             primaryRange = primaryRange === undefined
                 ? range
-                : Math.min(primaryRange, range);
+                : Math.max(primaryRange, range);
+            const guidance = "guidance" in weapon ? weapon.guidance : undefined;
+            if (guidance !== "turret" && guidance !== "beamTurret") {
+                forwardPrimaryRange = forwardPrimaryRange === undefined
+                    ? range
+                    : Math.max(forwardPrimaryRange, range);
+            }
         } else {
             secondaryRange = secondaryRange === undefined
                 ? range
@@ -590,7 +598,12 @@ export function getEffectiveWeaponRange(
         }
     }
 
-    return primaryRange ?? secondaryRange;
+    const chosenPrimary = forwardPrimaryRange !== undefined
+        ? Math.min(1_000, forwardPrimaryRange)
+        : primaryRange !== undefined
+            ? Math.min(1_000, primaryRange)
+            : undefined;
+    return chosenPrimary ?? secondaryRange;
 }
 
 /**
@@ -913,10 +926,11 @@ export const FollowAI = new System({
         Optional(NpcFleeComponent),
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent),
-        Optional(JumpStateComponent)] as const,
+        Optional(JumpStateComponent),
+        UUID] as const,
     step(movementState, physics, target, _follow, entities, multiplayer,
         platform, weapons, gameData, shipData, fleeing, destructionStarted,
-        armor, jumpState) {
+        armor, jumpState, selfUuid) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
@@ -974,50 +988,91 @@ export const FollowAI = new System({
             movementState.turnTo = command.turnTo;
             movementState.accelerating = command.accelerating;
             movementState.turnBack = command.turnBack;
-        } else if (tactic === "skirmish" && distance < baseStandoff * 0.5) {
-            // Skirmisher kiting: reverse burn while keeping nose on lead angle
-            movementState.turnTo = leadAngle;
-            movementState.accelerating = 0;
-            movementState.turnBack = true;
-        } else if (tactic === "dogfight" && shipData && distance < 140) {
-            // Dogfighter breakaway: bank away laterally to avoid ramming
-            const breakAngle = leadAngle.add(Math.PI * 0.6);
-            movementState.turnTo = breakAngle;
-            movementState.accelerating = 1;
-            movementState.turnBack = false;
-        } else if (tactic === "broadside" && distance <= baseStandoff * 1.4) {
-            // Capital ship broadside orbit: face perpendicular to target vector
-            // to bring flank and dorsal turret batteries to bear without charging nose-first.
-            // Pick tangent angle (+90° or -90°) closest to current rotation to orbit smoothly.
-            const tangentA = toTarget.angle.add(Math.PI * 0.5);
-            const tangentB = toTarget.angle.subtract(Math.PI * 0.5);
-            const diffA = Math.abs(headingError(movementState.rotation, tangentA));
-            const diffB = Math.abs(headingError(movementState.rotation, tangentB));
-            const orbitAngle = diffA <= diffB ? tangentA : tangentB;
-            movementState.turnTo = orbitAngle;
-            movementState.accelerating = distance > baseStandoff * 0.9 ? 1 : 0;
-            movementState.turnBack = distance < baseStandoff * 0.6;
-        } else {
-            const standoff = tactic === "dogfight" && shipData
-                ? Math.max(150, baseStandoff * 0.75)
-                : baseStandoff;
+        } else if (!shipData) {
+            // Legacy/minimal test entities without ShipDataComponent use the
+            // station-keeping approach controller directly.
             const command = approachTarget(movementState, targetMovement, physics, {
-                standoff,
+                standoff: baseStandoff,
             });
             const isBraking = command.turnTo !== null
                 && Math.abs(headingError(leadAngle, command.turnTo)) > Math.PI * 0.5;
-
             if (isBraking) {
-                // Arresting velocity along braking vector to prevent ramming/overshooting
                 movementState.turnTo = command.turnTo;
             } else if (distance <= effectiveRange * 1.1) {
-                // In combat engagement range: aim nose directly at weapon lead angle
                 movementState.turnTo = leadAngle;
             } else {
                 movementState.turnTo = command.turnTo ?? leadAngle;
             }
             movementState.accelerating = command.accelerating;
             movementState.turnBack = command.turnBack;
+        } else if (tactic === "broadside") {
+            // Capital ship / Carrier combat orbit: stay under power while keeping
+            // 360° heavy turrets, missile tubes, and fighter bays in optimal range.
+            const orbitRadius = Math.max(280, Math.min(480, baseStandoff));
+            if (distance > orbitRadius * 1.35) {
+                movementState.turnTo = leadAngle;
+                const err = Math.abs(headingError(movementState.rotation, leadAngle));
+                movementState.accelerating = err <= Math.PI * 0.35 ? 1 : 0;
+                movementState.turnBack = false;
+            } else {
+                const tangentA = toTarget.angle.add(Math.PI * 0.5);
+                const tangentB = toTarget.angle.subtract(Math.PI * 0.5);
+                const diffA = Math.abs(headingError(movementState.rotation, tangentA));
+                const diffB = Math.abs(headingError(movementState.rotation, tangentB));
+                const sign = diffA <= diffB ? 1 : -1;
+                // Spiral slightly inward when far, tangent at orbitRadius, slightly outward when point-blank
+                const spiralOffset = distance > orbitRadius * 1.05
+                    ? Math.PI * 0.36
+                    : distance < orbitRadius * 0.6
+                        ? Math.PI * 0.66
+                        : Math.PI * 0.48;
+                movementState.turnTo = toTarget.angle.add(sign * spiralOffset);
+                movementState.accelerating = 1;
+                movementState.turnBack = false;
+            }
+        } else {
+            // Active combat engagement for fighters, gunboats, destroyers, and cruisers:
+            // Keep nose aimed at leadAngle inside weapon range so forward guns/beams/railguns
+            // fire continuously instead of spinning 180° around to brake!
+            const breakawayDist = Math.min(65, Math.max(46, effectiveRange * 0.25));
+            const engagementDist = Math.max(effectiveRange * 1.25, baseStandoff * 1.45, 320);
+            const bankSign = (hashUuid(selfUuid) & 1) === 0 ? 1 : -1;
+
+            if (distance < breakawayDist) {
+                // Point-blank slash pass: bank sharply past the target to avoid ramming
+                movementState.turnTo = leadAngle.add(bankSign * Math.PI * 0.55);
+                movementState.accelerating = 1;
+                movementState.turnBack = false;
+            } else if (distance <= engagementDist) {
+                movementState.turnTo = leadAngle;
+                movementState.turnBack = false;
+                const aimError = Math.abs(headingError(movementState.rotation, leadAngle));
+                const relVel = movementState.velocity.subtract(targetMovement.velocity);
+                const closingSpeed = distance > 0
+                    ? (relVel.x * toTarget.x + relVel.y * toTarget.y) / distance
+                    : 0;
+                const desiredMinRange = tactic === "dogfight"
+                    ? Math.max(85, effectiveRange * 0.42)
+                    : Math.max(130, baseStandoff * 0.65);
+                if (aimError > Math.PI * 0.35) {
+                    movementState.accelerating = 0;
+                } else if (
+                    distance > desiredMinRange
+                    || closingSpeed < physics.maxVelocity * 0.25
+                ) {
+                    movementState.accelerating = 1;
+                } else {
+                    movementState.accelerating = 0;
+                }
+            } else {
+                // Long-range pursuit: close rapidly toward weapon range
+                const command = approachTarget(movementState, targetMovement, physics, {
+                    standoff: Math.max(110, baseStandoff * 0.65),
+                });
+                movementState.turnTo = command.turnTo ?? leadAngle;
+                movementState.accelerating = command.accelerating;
+                movementState.turnBack = false;
+            }
         }
 
         if (movementState.turnTo === null && !movementState.turnBack) {
@@ -1073,7 +1128,7 @@ export const ShootAllWeaponsAI = new System({
                 weapon.target = target.target;
                 weapon.firing = Boolean(
                     target.target
-                    && (targetDistance === undefined || targetDistance <= 1_200),
+                    && (targetDistance === undefined || targetDistance <= 1_800),
                 );
                 continue;
             }
@@ -1101,12 +1156,21 @@ export const ShootAllWeaponsAI = new System({
 
                 if (guidance === "turret" || guidance === "beamTurret" || guidance === "guided") {
                     canBear = true;
+                } else if (guidance === "frontQuadrant") {
+                    // EV Nova frontQuadrant weapons auto-track within ±45 degrees (PI / 4)
+                    const angleToTarget = targetMovement.position.subtract(movement.position).angle;
+                    const angleDiff = Math.abs(movement.rotation.distanceTo(angleToTarget).angle);
+                    canBear = angleDiff < (Math.PI / 4);
+                } else if (guidance === "sidesQuadrant") {
+                    const angleToTarget = targetMovement.position.subtract(movement.position).angle;
+                    const angleDiff = Math.abs(movement.rotation.distanceTo(angleToTarget).angle);
+                    canBear = angleDiff >= (Math.PI / 4) && angleDiff <= (3 * Math.PI / 4);
                 } else if (guidance === "rearQuadrant") {
                     const angleToTarget = targetMovement.position.subtract(movement.position).angle;
                     const angleDiff = Math.abs(movement.rotation.distanceTo(angleToTarget).angle);
                     canBear = angleDiff > (Math.PI * 0.65);
                 } else {
-                    // Fixed forward guns, unguided, rockets, frontQuadrant, fixed beams
+                    // Fixed forward guns, unguided, rockets, fixed beams
                     const aimAngle = calculateLeadAimAngle(
                         movement.position,
                         movement.velocity,
@@ -1116,10 +1180,12 @@ export const ShootAllWeaponsAI = new System({
                     );
                     const angleDiff = Math.abs(movement.rotation.distanceTo(aimAngle).angle);
                     const maxArc = weaponData.type === "BeamWeaponData"
-                        ? 0.08  // ~4.6 degrees for precision beams
-                        : 0.18; // ~10.3 degrees for forward projectile guns
+                        ? 0.12  // ~6.9 degrees for precision beams
+                        : guidance === "rocket"
+                            ? 0.34 // ~19.5 degrees for rocket salvos
+                            : 0.26; // ~15 degrees for forward projectile guns
                     const targetAngularRadius = (targetDistance && targetDistance > 0)
-                        ? Math.min(0.28, 24 / targetDistance)
+                        ? Math.min(0.32, 28 / targetDistance)
                         : 0;
                     const allowedArc = Math.max(maxArc, targetAngularRadius);
                     canBear = angleDiff <= allowedArc;

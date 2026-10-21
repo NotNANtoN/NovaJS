@@ -31,9 +31,12 @@ import {
     HitboxHullComponent,
     HurtboxHullComponent,
     RBushResource,
+    recordSpawnMovementStart,
     UpdateHitboxHullSystem,
     UpdateHurtboxHullSystem,
 } from './collisions_plugin';
+import { ArmorComponent, ShieldComponent } from './health_plugin';
+import { Stat } from './stat';
 import { CreateTime } from './create_time';
 import { DamagedEvent } from './death_plugin';
 import { FireSubs, OwnerComponent, SourceComponent } from './fire_weapon_plugin';
@@ -223,5 +226,58 @@ describe('client application of server hit outcomes', () => {
         // Applied exactly once.
         world.step();
         expect(subs).toHaveBeenCalledTimes(1);
+    });
+
+    it('sweeps Tick-0 fast-forwarded projectiles from the muzzle so close-range targets are not tunneled over', async () => {
+        const { world, damaged } = await combatWorld('node', 0);
+        // Remove the default pre-step shot; we will spawn a fast-forwarded shot AFTER CaptureCollisionMovementSystem runs
+        world.entities.delete(SHOT);
+        world.addSystem(new System({
+            name: 'spawn-fast-forwarded-shot-mid-tick',
+            after: [MovementSystem],
+            before: [UpdateHurtboxHullSystem, CollisionSystem],
+            args: [UUID] as const,
+            step(uuid) {
+                if (uuid !== SHOOTER) return;
+                // Shot fired at muzzle (-40, 0) and fast-forwarded to (+40, 0), passing right over target at (0, 0)
+                const shot = new Entity()
+                    .addComponent(HurtboxHullComponent, new CompositeHull([new SAT.Circle(new SAT.Vector(), 1)]))
+                    .addComponent(CollisionHitterComponent, { hitTypes: new Set(['laser']) })
+                    .addComponent(ProjectileComponent, { id: 'test' })
+                    .addComponent(ProjectileDataComponent, getDefaultProjectileWeaponData())
+                    .addComponent(CreateTime, 0)
+                    .addComponent(OwnerComponent, { owner: 'client-a' })
+                    .addComponent(SourceComponent, SHOOTER)
+                    .addComponent(MovementStateComponent, movement(40, 0, 800, 0))
+                    .addComponent(MovementPhysicsComponent, inertial);
+                recordSpawnMovementStart(shot, { x: -40, y: 0 });
+                world.entities.set(SHOT, shot);
+            },
+        }));
+
+        world.step();
+        expect(damaged).toEqual([TARGET]);
+        expect(world.entities.has(SHOT)).toBeFalse();
+    });
+
+    it('optimistically updates target shield/armor on the shooter browser when a predicted projectile hits', async () => {
+        const { world } = await combatWorld('browser', 0);
+        world.resources.set(CommunicatorResource, new MockCommunicator('client-a'));
+        const target = world.entities.get(TARGET)!;
+        target.addComponent(ShieldComponent, new Stat({ current: 100, max: 100, recharge: 0 }));
+        target.addComponent(ArmorComponent, new Stat({ current: 50, max: 50, recharge: 0 }));
+        const shotData = world.entities.get(SHOT)!.components.get(ProjectileDataComponent)!;
+        shotData.damage = {
+            shield: 30,
+            armor: 15,
+            ionization: 0,
+            ionizationColor: 0,
+            passThroughShield: 0,
+            knockback: 0,
+        };
+
+        world.step();
+        expect(target.components.get(ShieldComponent)!.current).toBe(70);
+        expect(target.components.get(ArmorComponent)!.current).toBe(50);
     });
 });

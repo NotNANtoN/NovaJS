@@ -21,6 +21,7 @@ import { mod } from '../util/mod';
 import { ControlStateEvent } from './control_state_event';
 import {
     FiredShot,
+    SourceComponent,
     WeaponEntries,
     WeaponEntry,
     WeaponLocalState,
@@ -64,6 +65,8 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { clampLagMs, LagCompensationComponent, MAX_LAG_COMPENSATION_MS } from './lag_compensation';
 import { CreateTime } from './create_time';
+import { ConquestBotComponent } from './conquest_config';
+import { recordServerBayLaunchTelemetry, recordServerShotIntentTelemetry } from './combat_telemetry';
 
 // Keep payment data on the entity, not keyed by revocable Immer draft identity.
 // Local cadence owns burst boundaries; replay and submunitions bypass this state.
@@ -73,6 +76,25 @@ export const WeaponBurstPaymentsComponent =
 const NpcWeaponFuelComponent = new Component<{ current: number }>('NpcWeaponFuel');
 export const NpcWeaponAmmoComponent = new Component<Map<string, number>>('NpcWeaponAmmo');
 const PlayerBurstPaymentsComponent = new Component<Map<string, { token: number; copies: Set<number> }>>('PlayerBurstPayments');
+
+const BAY_WEAPON_FIGHTER_OUTFIT: Readonly<Record<string, string>> = {
+    'nova:149': 'nova:158', // Viper Bay -> Viper
+    'nova:150': 'nova:160', // Anaconda Bay -> Anaconda
+    'nova:151': 'nova:162', // Firebird Bay -> Firebird
+    'nova:152': 'nova:164', // Phoenix Bay -> Phoenix
+};
+
+export function getNpcBayMaxCapacity(entity: Entity, weaponId: string): number {
+    const outfits = entity.components.get(OutfitsStateComponent);
+    const fighterOutfitId = BAY_WEAPON_FIGHTER_OUTFIT[weaponId];
+    if (outfits && fighterOutfitId) {
+        const installed = outfits.get(fighterOutfitId)?.count;
+        if (installed !== undefined && installed > 0) {
+            return Math.max(4, installed);
+        }
+    }
+    return 4;
+}
 
 function fireWithCost(
     entity: Entity,
@@ -90,7 +112,8 @@ function fireWithCost(
                 npcAmmo = new Map();
                 entity.components.set(NpcWeaponAmmoComponent, npcAmmo);
             }
-            const remaining = npcAmmo.get(weapon.id) ?? 4;
+            const maxCap = getNpcBayMaxCapacity(entity, weapon.id);
+            const remaining = npcAmmo.get(weapon.id) ?? maxCap;
             if (remaining <= 0) {
                 return undefined;
             }
@@ -98,6 +121,7 @@ function fireWithCost(
             if (fired) {
                 npcAmmo.set(weapon.id, remaining - 1);
                 paidCopies?.add(copy);
+                recordServerBayLaunchTelemetry(undefined);
             }
             return fired;
         }
@@ -155,8 +179,19 @@ function fireWithCost(
         }
         const fired = fire();
         if (fired) {
-            outfits.set(ammoId, { ...ammo, count: ammo.count - 1 });
-            entity.components.set(OutfitsStateComponent, outfits);
+            const isPersistentCombatNpc = !entity.components.has(PlayerStateComponent)
+                && (entity.components.has(ConquestBotComponent)
+                    || entity.components.has(SourceComponent));
+            const nextCount = isPersistentCombatNpc
+                ? Math.max(1, ammo.count - 1)
+                : ammo.count - 1;
+            outfits.set(ammoId, { ...ammo, count: nextCount });
+            // Only notify OutfitsStateComponent change listeners on player ships;
+            // mutating the map in-place on NPCs avoids re-running ProvideAsync
+            // (OutfitWeaponProvider & ShipPhysicsProvider) on every chaingun/missile round.
+            if (entity.components.has(PlayerStateComponent)) {
+                entity.components.set(OutfitsStateComponent, outfits);
+            }
             paidCopies?.add(copy);
         }
         return fired;
@@ -589,11 +624,13 @@ export const MAX_CLIENT_MUZZLE_DRIFT = 400;
 
 function fireIntentShot(
     weapon: WeaponEntry, source: string, shot: FireIntentShot, now: number,
+    systemId?: string,
 ): FiredShot | undefined {
     const entityId = loggedShotEntityId(source, shot.seq);
     if (shot.at !== undefined && shot.position && shot.rotation
         && shot.sourceVelocity && shot.inaccuracy !== undefined
         && typeof weapon.fireFromPose === 'function') {
+        const maxAge = MAX_LAG_COMPENSATION_MS + 750;
         const fired = weapon.fireFromPose(source, {
             seed: shot.seed,
             exitIndex: shot.exitIndex,
@@ -604,10 +641,28 @@ function fireIntentShot(
             inaccuracy: shot.inaccuracy,
             entityId,
             target: shot.target,
-        }, now, MAX_LAG_COMPENSATION_MS + 750, MAX_CLIENT_MUZZLE_DRIFT);
+        }, now, maxAge, MAX_CLIENT_MUZZLE_DRIFT);
         if (fired) {
+            recordServerShotIntentTelemetry(
+                systemId,
+                'pose-accepted',
+                Math.max(0, now - shot.at),
+                shot.viewDelayMs ?? 0,
+            );
             return fired;
         }
+        const age = now - shot.at;
+        recordServerShotIntentTelemetry(
+            systemId,
+            (!Number.isFinite(age) || age < -maxAge || age > maxAge)
+                ? 'pose-rejected-age'
+                : 'pose-rejected-drift',
+            age,
+            shot.viewDelayMs ?? 0,
+            MAX_CLIENT_MUZZLE_DRIFT,
+        );
+    } else {
+        recordServerShotIntentTelemetry(systemId, 'entity-fallback');
     }
     return weapon.fireFromEntityDetailed(source, shot.seed, true, shot.exitIndex, {
         entityId, target: shot.target,
@@ -616,13 +671,13 @@ function fireIntentShot(
 
 export function fireScheduledIntent(
     entity: Entity, weapon: WeaponEntry, source: string, shot: FireIntentShot,
-    context: FireCadenceShotContext, now = -Infinity,
+    context: FireCadenceShotContext, now = -Infinity, systemId?: string,
 ): FiredShot | undefined {
     // Even a prepaid burst requires a live flight authority (not a landed or
     // retired pilot). Unlimited also gates asynchronous ledger initialization.
     if (!canPay(entity, 'unlimited')) return undefined;
     const fire = () => {
-        const fired = fireIntentShot(weapon, source, shot, now);
+        const fired = fireIntentShot(weapon, source, shot, now, systemId);
         const viewDelayMs = clampLagMs(shot.viewDelayMs);
         const isTrackedBeam = weapon.data.type === 'BeamWeaponData'
             && (weapon.data.guidance === 'beamTurret'
@@ -794,7 +849,7 @@ export const ServerFireIntentSystem = new System({
         for (const id of active) {
             const weapon = weaponEntries.getCached(id)!;
             local.cadence.drain(id, (shot, at, context) => {
-                const fired = fireScheduledIntent(entity, weapon, uuid, shot, context, time.time);
+                const fired = fireScheduledIntent(entity, weapon, uuid, shot, context, time.time, systemId);
                 if (!fired) return false;
                 rememberSpawnedShot(sync, shot.seq);
                 // A pose-fired shot started at the client's muzzle time, so

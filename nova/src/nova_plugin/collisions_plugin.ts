@@ -1,7 +1,7 @@
 import { isDraft } from 'immer';
 import { Animation } from "novadatainterface/Animation";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
-import { Emit, UUID } from "nova_ecs/arg_types";
+import { Emit, EmitNow, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Angle } from "nova_ecs/datatypes/angle";
 import { Vector } from "nova_ecs/datatypes/vector";
@@ -25,7 +25,7 @@ import { AnimationComponent } from "./animation_plugin";
 import { CollisionEvent, CollisionHitter, CollisionHitterComponent, CollisionVulnerability, CollisionVulnerabilityComponent } from "./collision_interaction";
 import { GameDataResource } from "./game_data_resource";
 import { Entities } from "nova_ecs/arg_types";
-import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { CommunicatorResource, MultiplayerData, MultiplayerPhase } from "nova_ecs/plugins/multiplayer_plugin";
 import { parseLoggedShotEntityId } from "./fire_sync";
 import { OwnerComponent } from "./fire_weapon_plugin";
 import { PlatformResource } from "./platform_plugin";
@@ -359,6 +359,20 @@ type RBushEntry = RBushHurtboxEntry | RBushHitboxEntry;
 
 export const RBushResource = new Resource<RBush<RBushEntry>>("RBushResource");
 const movementStarts = new WeakMap<RBush<RBushEntry>, Map<string, { x: number, y: number }>>();
+const spawnedMovementStarts = new WeakMap<object, { x: number, y: number }>();
+
+/**
+ * Records the initial muzzle position for an entity spawned (and potentially
+ * fast-forwarded) after `CaptureCollisionMovementSystem` has already run for
+ * the current tick, ensuring Tick-0 swept collision checks cover the full
+ * fast-forward path from the muzzle.
+ */
+export function recordSpawnMovementStart(
+    entity: object,
+    position: { x: number, y: number },
+): void {
+    spawnedMovementStarts.set(entity, { x: position.x, y: position.y });
+}
 
 export const CaptureCollisionMovementSystem = new System({
     name: 'CaptureCollisionMovementSystem',
@@ -472,13 +486,14 @@ export interface SweptCollisionContact {
 export const CollisionSystem = new System({
     name: "CollisionSystem",
     after: [UpdateHitboxHullSystem, UpdateHurtboxHullSystem],
+    before: [MultiplayerPhase],
     args: [RBushResource,
         new Query([HitboxHullComponent, UUID, CollisionVulnerabilityComponent, Optional(MovementStateComponent)] as const),
         new Query([HurtboxHullComponent, UUID, CollisionHitterComponent, Optional(ProjectileComponent), Optional(MovementStateComponent),
             Optional(LagCompensationComponent)] as const),
-        Emit, Optional(TimeResource), Entities, SingletonComponent,
+        EmitNow, Optional(TimeResource), Entities, SingletonComponent,
         Optional(PlatformResource), Optional(CommunicatorResource)] as const,
-    step(rbush, hitboxColliders, hurtboxColliders, emit, time, entities, _singleton, platform, communicator) {
+    step(rbush, hitboxColliders, hurtboxColliders, emitNow, time, entities, _singleton, platform, communicator) {
         const starts = movementStarts.get(rbush);
         movementStarts.delete(rbush);
         // Hulls and interaction components can be mutable or revocable drafts.
@@ -495,7 +510,16 @@ export const CollisionSystem = new System({
         function makeEntry(type: RBushEntryType, hull: Hull, uuid: string,
             interaction: CollisionHitter | CollisionVulnerability,
             movement: MovementState | undefined, projectile = false): RBushEntry {
-            const start = starts?.get(uuid);
+            let start = starts?.get(uuid);
+            if (!start) {
+                const entity = entities.get(uuid);
+                if (entity) {
+                    start = spawnedMovementStarts.get(entity);
+                    if (start) {
+                        spawnedMovementStarts.delete(entity);
+                    }
+                }
+            }
             // Translate endpoint geometry by actual entity travel, not by the
             // hull origin: an offset hull is not additional movement.
             let displacement = start && movement
@@ -647,8 +671,8 @@ export const CollisionSystem = new System({
                         y: entry.position.y - entry.displacement.y * (1 - time),
                     };
                 }
-                emit(CollisionEvent, contact, [entry.uuid]);
-                emit(CollisionEvent, { other: entry.uuid, initiator: false }, [other.uuid]);
+                emitNow(CollisionEvent, contact, [entry.uuid]);
+                emitNow(CollisionEvent, { other: entry.uuid, initiator: false }, [other.uuid]);
             }
         } finally {
             rbush.clear();

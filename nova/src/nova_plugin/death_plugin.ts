@@ -60,9 +60,71 @@ import { authorExternalImpulse, ExternalImpulsePlugin } from './external_impulse
 import { OwnerComponent, SourceComponent } from './fire_weapon_plugin';
 import { parseLoggedShotEntityId } from './fire_sync';
 import { ConquestBotComponent, isConquestMode } from './conquest_config';
+import { SystemIdResource } from './system_id_resource';
+import { recordServerDamageTelemetry } from './combat_telemetry';
 
 export const LastAttackerComponent =
     new Component<string>('LastAttackerComponent');
+
+/**
+ * Optimistically updates a replicated target's local Shield / Armor values on
+ * the browser when hit by the local player's own predicted projectile or beam.
+ * Clamps armor above 0 (`0.5`) so the client never triggers local zero-armor
+ * destruction before the authoritative server confirms it, while making
+ * asteroid health bars and target HUD Shield/Armor % respond on the exact
+ * frame of visual impact.
+ */
+export function applyOptimisticClientHitDamage(
+    target: Entity,
+    rawDamage: WeaponDamage,
+    scale = 1,
+    shooter?: Entity,
+): void {
+    if (
+        target.components.has(PlayerDeathComponent)
+        || target.components.has(DestructionStartedComponent)
+    ) {
+        return;
+    }
+    const shield = target.components.get(ShieldComponent);
+    const armor = target.components.get(ArmorComponent);
+    const hasShield = Boolean(shield && shield.max > 0);
+    const isShip = target.components.has(ShipComponent);
+    const isProjectile = target.components.has(ProjectileComponent);
+
+    let armorDamage = rawDamage.armor;
+    if ((isProjectile || !isShip) && !hasShield) {
+        let asteroidBonus = 1;
+        if (!isProjectile && !isShip && shooter) {
+            const shooterOutfits = shooter.components.get(OutfitsStateComponent);
+            const shooterPlayer = shooter.components.get(PlayerStateComponent);
+            if (
+                isConquestMode(shooterPlayer)
+                || shooter.components.has(ConquestBotComponent)
+            ) {
+                asteroidBonus *= 2.5;
+            }
+            const drillCount = shooterOutfits?.get('conquest:seismic_drill')?.count ?? 0;
+            if (drillCount > 0) {
+                asteroidBonus *= (1 + 1.5 * drillCount);
+            }
+        }
+        const energyFactor = (!isProjectile && !isShip) ? 1 : 0.5;
+        armorDamage = (rawDamage.armor + rawDamage.shield * energyFactor) * asteroidBonus;
+    }
+
+    if (shield && !rawDamage.passThroughShield) {
+        const nextShield = shield.current - rawDamage.shield * scale;
+        shield.applyDelta({ current: nextShield });
+        if (nextShield > 0) {
+            return;
+        }
+    }
+    if (armor && armor.current > 0) {
+        const nextArmor = Math.max(0.5, armor.current - armorDamage * scale);
+        armor.applyDelta({ current: nextArmor });
+    }
+}
 
 // const DamageQuery = new Query([Optional(ShieldComponent), Optional(ArmorComponent),
 // Optional(IonizationComponent), Optional(IonizationColorComponent),
@@ -188,10 +250,11 @@ const DamageSystem = new System({
         Optional(IonizationComponent), Optional(IonizationColorComponent),
         Optional(ProjectileComponent), Optional(PlayerDeathComponent),
         TimeResource, UUID, PlatformResource,
-        Optional(MultiplayerData), GetEntity, Entities] as const,
+        Optional(MultiplayerData), GetEntity, Entities,
+        Optional(SystemIdResource)] as const,
     step(emit, emitNow, { damage, scale = 1, damager, fromExplosion },
         shield, armor, ionization, ionizationColor, isProjectile, playerDeath,
-        time, uuid, platform, multiplayer, entity, entities) {
+        time, uuid, platform, multiplayer, entity, entities, systemId) {
         // A shot is not replicated: every world derives it from the same fire
         // event and flies its own copy, so the world holding one is the only
         // one that can resolve what happens to it. That is what lets point
@@ -261,6 +324,15 @@ const DamageSystem = new System({
             shield.current -= damage.shield * scale;
             appliedShield = previousShield - Math.max(0, shield.current);
             if (shield.current > 0) {
+                if (platform === 'node') {
+                    recordServerDamageTelemetry(
+                        systemId,
+                        isShip,
+                        !isShip && !isProjectile,
+                        appliedShield,
+                        0,
+                    );
+                }
                 emitNow(AppliedDamageEvent, {
                     shield: appliedShield,
                     armor: 0,
@@ -277,6 +349,15 @@ const DamageSystem = new System({
             if (armor.current === 0) {
                 emit(ZeroArmorEvent, time, [uuid]);
             }
+        }
+        if (platform === 'node') {
+            recordServerDamageTelemetry(
+                systemId,
+                isShip,
+                !isShip && !isProjectile,
+                appliedShield,
+                appliedArmor,
+            );
         }
         emitNow(AppliedDamageEvent, {
             shield: appliedShield,

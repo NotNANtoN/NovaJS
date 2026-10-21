@@ -32,7 +32,7 @@ import {
     CollisionVulnerabilityComponent,
 } from './collision_interaction';
 import { CreateTime, CreateTimeArgProvider } from './create_time';
-import { DamagedEvent } from './death_plugin';
+import { applyOptimisticClientHitDamage, DamagedEvent } from './death_plugin';
 import { reserveEntity } from './entity_budget';
 import { applyExitPoint, ExitPointData } from './exit_point';
 import { FireSubs, OwnerComponent, ShotCreation, ShotSeedComponent, ShotPresentationDelayComponent, SourceComponent, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
@@ -54,6 +54,13 @@ export interface BeamState {
     exitPointData?: ExitPointData,
     length?: number,
     inaccuracy: number,
+    /**
+     * When a fixed beam is spawned on the server from a client-predicted pose
+     * (`fireFromPose`), preserve the client's aimed rotation offset relative
+     * to the ship's rotation so the server beam does not snap to the server's
+     * slightly older hull heading.
+     */
+    poseRotationOffset?: number,
 }
 
 export const BeamStateComponent = new Component<BeamState>('BeamState');
@@ -265,6 +272,13 @@ class BeamWeaponEntry extends WeaponEntry {
         beamHull.pos.y = position.y;
         beamHull.angle = angle.angle;
 
+        const parentRot = source
+            ? this.entities.get(source)?.components.get(MovementStateComponent)?.rotation
+            : undefined;
+        const poseRotationOffset = parentRot
+            ? angle.subtract(parentRot.add(shot.inaccuracy)).angle
+            : 0;
+
         const beam = new Entity()
             .setName(this.data.name)
             .addComponent(MovementStateComponent, {
@@ -283,6 +297,7 @@ class BeamWeaponEntry extends WeaponEntry {
                     this.data.guidance === "pointDefenseBeam",
                 length: this.data.beamAnimation.length,
                 inaccuracy: shot.inaccuracy,
+                poseRotationOffset,
             }).addComponent(BeamDataComponent, this.data)
             .addComponent(ShotPresentationDelayComponent, shot.presentationDelayMs ?? 0)
             .addComponent(ShotSeedComponent, { seed: shot.seed })
@@ -397,7 +412,9 @@ export const BeamSystem = new System({
             }
         }
         if (resetRotation) {
-            movement.rotation = movement.rotation.add(beamState.inaccuracy);
+            movement.rotation = movement.rotation.add(
+                beamState.inaccuracy + (beamState.poseRotationOffset ?? 0),
+            );
         }
     }
 });
@@ -536,8 +553,16 @@ const BeamCollisionSystem = new System({
                 contact.current = collision.other;
                 contact.currentPosition = { x: hitPoint.x, y: hitPoint.y };
             } else {
-                // The player's own beam: show its contact now. Damage stays
-                // on the server.
+                // The player's own beam: show its contact and optimistic health bar feedback now.
+                // Authoritative damage stays on the server.
+                const logged = parseLoggedShotEntityId(uuid);
+                const shooterEntity = logged ? entities.get(logged.source) : undefined;
+                applyOptimisticClientHitDamage(
+                    other,
+                    beamData.damage,
+                    scale,
+                    shooterEntity,
+                );
                 contact.target = collision.other;
                 contact.position = { x: hitPoint.x, y: hitPoint.y };
                 contact.predictedAt = time;
@@ -590,7 +615,7 @@ const BeamContactReportSystem = new System({
  */
 const BeamContactFeedbackSystem = new System({
     name: 'BeamContactFeedbackSystem',
-    after: [BeamClippingSystem],
+    after: [BeamClippingSystem, CollisionSystem],
     args: [BeamContactComponent, UUID, Entities, TimeResource, EmitNow,
         Optional(PlatformResource)] as const,
     step(contact, uuid, entities, time, emitNow, platform) {

@@ -31,10 +31,10 @@ import { v4 } from 'uuid';
 import { FactoryQueue } from '../common/factory_queue';
 import { AnimationComponent } from './animation_plugin';
 import { BlastDamageComponent, BlastIgnoreComponent } from './blast_plugin';
-import { CompositeHull, HitboxHullComponent, hullFromAnimation, HurtboxHullComponent, SweptCollisionContact } from './collisions_plugin';
+import { CompositeHull, HitboxHullComponent, hullFromAnimation, HurtboxHullComponent, recordSpawnMovementStart, SweptCollisionContact } from './collisions_plugin';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction';
 import { CreateTime } from './create_time';
-import { DamagedEvent, ZeroArmorEvent } from './death_plugin';
+import { applyOptimisticClientHitDamage, DamagedEvent, ZeroArmorEvent } from './death_plugin';
 import { reserveEntity } from './entity_budget';
 import { ExitPointData } from './exit_point';
 import { AttackIntentComponent, FireSubs, OwnerComponent, ShotCreation, ShotSeedComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
@@ -266,6 +266,9 @@ class ProjectileWeaponEntry extends WeaponEntry {
         }
 
         if (shot.fastForwardMs > 0) {
+            if (!existing) {
+                recordSpawnMovementStart(projectile, position);
+            }
             const physics = projectile.components.get(MovementPhysicsComponent)!;
             const guidance = projectile.components.get(GuidanceComponent);
             const targetEntity = target
@@ -531,8 +534,15 @@ export const ProjectileCollisionSystem = new System({
         }
         const predictedOnly = platform === 'browser' && replicatedTarget;
         if (predictedOnly && impact) {
-            // Our own predicted hit: effects only. Damage, knockback and
-            // attribution happen on the server.
+            // Our own predicted hit: effects and optimistic health bar feedback.
+            // Authoritative damage, knockback and attribution happen on the server.
+            const shooterEntity = entities.get(source ?? logged?.source ?? '');
+            applyOptimisticClientHitDamage(
+                other,
+                projectileData.damage,
+                1,
+                shooterEntity,
+            );
             emitNow(HitFeedbackEvent, {
                 damager: uuid, kind: 'projectile' as const, position: impact,
             }, [collision.other]);

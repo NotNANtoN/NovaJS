@@ -36,6 +36,8 @@ import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 import { DestructionStartedComponent } from './destruction_state';
 import { GovernmentFlags } from './govt_relations';
+import { ShipDataComponent } from './ship_plugin';
+import { getDefaultShipData } from 'novadatainterface/ShipData';
 import {
     createProvocationState,
     recordProvocation,
@@ -543,5 +545,99 @@ describe("NPC combat tactics and analytical lead aiming", () => {
         movement.rotation = new Angle(Math.PI / 2);
         world.step();
         expect(weapons.get("long")!.firing).toBeTrue();
+    });
+
+    it("permits frontQuadrant weapons to fire within the ±45 degree forward quadrant", () => {
+        const world = new World("npc-front-quadrant-test");
+        world.resources.set(PlatformResource, "node");
+        world.resources.set(GameDataResource, {
+            data: {
+                Weapon: {
+                    getCached: (id: string) =>
+                        id === "railgun"
+                            ? {
+                                  type: "ProjectileWeaponData",
+                                  fireGroup: "primary",
+                                  guidance: "frontQuadrant",
+                                  physics: { speed: 600 },
+                                  shotDuration: 3_000,
+                              }
+                            : undefined,
+                },
+            },
+        } as never);
+        world.addSystem(ShootAllWeaponsAI);
+
+        const weapons = new Map([["railgun", { count: 2, firing: false }]]);
+        const target = new Entity("target").addComponent(
+            MovementStateComponent,
+            movementAt(300, 0),
+        );
+        // Point NPC 30 degrees off-axis from target (target at PI/2, NPC at PI/2 - PI/6)
+        const npcMov = movementAt(0, 0, Math.PI / 2 - Math.PI / 6);
+        const npc = new Entity("npc")
+            .addComponent(MovementStateComponent, npcMov)
+            .addComponent(WeaponsStateComponent, weapons)
+            .addComponent(TargetComponent, { target: "target" })
+            .addComponent(ShootAllWeaponsComponent, undefined)
+            .addComponent(MultiplayerData, { owner: "server" });
+        world.entities.set("target", target);
+        world.entities.set("npc", npc);
+
+        world.step();
+        expect(weapons.get("railgun")!.firing).toBeTrue();
+    });
+
+    it("keeps fighter nose aimed at lead angle during attack runs instead of turning 180 deg to brake", () => {
+        const { world, npc } = makeFollowWorld(true);
+        const viperData = {
+            ...getDefaultShipData(),
+            id: "nova:144",
+            name: "Fed Viper",
+            inherentAI: 3,
+            physics: {
+                ...getDefaultShipData().physics,
+                mass: 10,
+                speed: 157.5,
+                acceleration: 255,
+                turnRate: 4.19,
+            },
+        };
+        npc.addComponent(ShipDataComponent, viperData);
+        const mov = npc.components.get(MovementStateComponent)!;
+        // Position Viper at 150px from target (0,0), flying toward target at high speed
+        mov.position = new Position(-150, 0);
+        mov.velocity = new Vector(150, 0);
+        mov.rotation = new Angle(Math.PI / 2);
+
+        world.step();
+        // Must keep aiming toward the target (+x = PI/2), never reversing 180° (-x = -PI/2)
+        expect(mov.turnTo).toBeInstanceOf(Angle);
+        expect(Math.abs((mov.turnTo as Angle).distanceTo(new Angle(Math.PI / 2)).angle)).toBeLessThan(0.2);
+    });
+
+    it("keeps broadside carriers under power while orbiting in combat", () => {
+        const { world, npc } = makeFollowWorld(true);
+        const carrierData = {
+            ...getDefaultShipData(),
+            id: "nova:143",
+            name: "Fed Carrier",
+            inherentAI: 3,
+            physics: {
+                ...getDefaultShipData().physics,
+                mass: 2000,
+                speed: 39,
+                acceleration: 45,
+                turnRate: 1.05,
+            },
+        };
+        npc.addComponent(ShipDataComponent, carrierData);
+        const mov = npc.components.get(MovementStateComponent)!;
+        mov.position = new Position(-320, 0);
+        mov.rotation = new Angle(0);
+
+        world.step();
+        expect(mov.accelerating).toBe(1);
+        expect(mov.turnBack).toBeFalse();
     });
 });

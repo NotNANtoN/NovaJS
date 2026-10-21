@@ -4,7 +4,7 @@ import { Entities, UUID, GetEntity, Emit, EmitNow } from 'nova_ecs/arg_types';
 import { DamagedEvent, PlayerDeathComponent } from './death_plugin';
 import { DestructionStartedComponent } from './destruction_state';
 import { SoundEvent } from './sound_event';
-import { HitboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin';
+import { CollisionSystem, HitboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { BoardingNoticeComponent } from './boarding_notice';
 import { OutfitsStateComponent } from './outfit_plugin';
@@ -24,7 +24,7 @@ import {
     MovementType,
     RemoteMovementPresentationSystem,
 } from 'nova_ecs/plugins/movement_plugin';
-import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { MultiplayerData, MultiplayerPhase } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { ProvideAsync } from 'nova_ecs/provide_async';
@@ -347,6 +347,8 @@ const OreCollectorsQuery = new Query([
 
 const AsteroidDestroyedSystem = new System({
     name: 'AsteroidDestroyedSystem',
+    after: [CollisionSystem],
+    before: [MultiplayerPhase],
     args: [AsteroidComponent, AsteroidDataComponent, ArmorComponent,
         MovementStateComponent, UUID, Entities, MultiplayerData,
         PlatformResource, EntityBudgetResource, TimeResource,

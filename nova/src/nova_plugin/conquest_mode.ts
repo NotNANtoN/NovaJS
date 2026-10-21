@@ -19,7 +19,9 @@ import { SingletonComponent } from 'nova_ecs/world';
 import { v4 as uuid } from 'uuid';
 import { AsteroidComponent, makeOre, OreComponent } from './asteroid_plugin';
 import { BoardingNoticeComponent } from './boarding_notice';
-import { DeathEvent, DisabledComponent, LastAttackerComponent } from './death_plugin';
+import { DeathEvent, DisabledComponent, LastAttackerComponent, PlayerDeathComponent } from './death_plugin';
+import { DestructionStartedComponent } from './destruction_state';
+import { CloakStateComponent } from './cloaking_plugin';
 import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { HiredEscortComponent } from './escort_plugin';
 import { OwnerComponent } from './fire_weapon_plugin';
@@ -38,6 +40,7 @@ import {
 import {
     ChooseRandomTargetComponent,
     GovtComponent,
+    NpcCombatRoleComponent,
 } from './npc_components';
 import {
     FollowAI,
@@ -46,7 +49,12 @@ import {
     ShootAllWeaponsAI,
     WanderComponent,
 } from './npc_plugin';
-import { isPersonallyProvoked, isProvoked, ProvocationResource } from './npc_hostility';
+import {
+    isPersonallyProvoked,
+    isProvoked,
+    ProvocationResource,
+    recordProvocation,
+} from './npc_hostility';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { PlatformResource } from './platform_plugin';
 import { PlayerStateComponent } from './player_state';
@@ -128,6 +136,10 @@ const ConquestShipsQuery = new Query([
     Optional(ConquestBotComponent),
     Optional(OwnerComponent),
     Optional(HiredEscortComponent),
+    Optional(DestructionStartedComponent),
+    Optional(PlayerDeathComponent),
+    Optional(JumpStateComponent),
+    Optional(CloakStateComponent),
 ] as const, 'ConquestShips');
 
 function upgradeCostForTier(tier: number): number {
@@ -208,6 +220,7 @@ function spawnConquestBotEntity(
             )),
         )
         .set(GovtComponent, { id: botState.factionGovt })
+        .set(NpcCombatRoleComponent, 'military')
         .set(ConquestBotComponent, botState)
         .set(MultiplayerData, { owner: 'server' });
 
@@ -508,10 +521,12 @@ const ConquestBotLifecycleSystem = new System({
             botUuid: string,
             botState: ConquestBotState,
             position: Position,
+            botEntity: Entity,
             maxRange = Infinity,
         ): string | undefined => {
             let closestEnemy: string | undefined;
             let closestDistSq = maxRange * maxRange;
+            const lastAttacker = botEntity.components.get(LastAttackerComponent);
             for (const [
                 candidateUuid,
                 candidateMov,
@@ -521,8 +536,22 @@ const ConquestBotLifecycleSystem = new System({
                 candidatePlayer,
                 candidateDisabled,
                 candidateBot,
+                ,
+                ,
+                candidateDestruction,
+                candidatePlayerDeath,
+                candidateJump,
+                candidateCloak,
             ] of ships) {
-                if (candidateUuid === botUuid || candidateDisabled) {
+                if (
+                    candidateUuid === botUuid
+                    || candidateDisabled
+                    || candidateDestruction
+                    || candidatePlayerDeath
+                    || candidateJump?.phase === 'departing'
+                    || candidateJump?.phase === 'arriving'
+                    || (candidateCloak?.cloaked && (candidateCloak.alpha ?? 1) < 0.5)
+                ) {
                     continue;
                 }
                 const candGovtId = candidateBot?.factionGovt ?? candidateGovt?.id;
@@ -531,7 +560,19 @@ const ConquestBotLifecycleSystem = new System({
                     && (candGovtId === FEDERATION_GOVT
                         || candGovtId === AURORAN_GOVT
                         || candGovtId === 130);
-                const provoked = Boolean(
+                const directlyAttackedThisBot = lastAttacker === candidateUuid;
+                if (directlyAttackedThisBot && provocations) {
+                    // Propagate player/enemy attack to the entire faction fleet in Conquest
+                    recordProvocation(
+                        provocations,
+                        botState.factionGovt,
+                        candidateUuid,
+                        time.time,
+                        botUuid,
+                        'sustained-fire',
+                    );
+                }
+                const provoked = directlyAttackedThisBot || Boolean(
                     provocations && (
                         isPersonallyProvoked(provocations, botUuid, candidateUuid)
                         || isProvoked(
@@ -589,6 +630,7 @@ const ConquestBotLifecycleSystem = new System({
                     botUuid,
                     botState,
                     movement.position,
+                    botEntity,
                     1_800,
                 );
                 if (nearbyThreat) {
@@ -746,6 +788,7 @@ const ConquestBotLifecycleSystem = new System({
                         botUuid,
                         botState,
                         movement.position,
+                        botEntity,
                     );
                     if (enemyInSystem) {
                         botState.mode = 'attack';
@@ -907,6 +950,7 @@ const ConquestBotLifecycleSystem = new System({
                         botUuid,
                         botState,
                         movement.position,
+                        botEntity,
                     );
                 }
 

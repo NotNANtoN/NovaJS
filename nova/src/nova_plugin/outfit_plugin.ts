@@ -67,6 +67,7 @@ export async function loadOutfitWeapons(outfits: OutfitsState, gameData: GameDat
         // the component drafts, especially when ammunition changes every shot.
         const counts = [...outfits].map(([id, state]) => [id, state.count] as const);
         const firingIntent = new Map([...previous ?? []].map(([id, state]) => [id, state.firing]));
+        const targetIntent = new Map([...previous ?? []].map(([id, state]) => [id, state.target]));
         const weaponsState = new DefaultMap<string, WeaponState>(() => ({
             count: 0,
             firing: false,
@@ -88,11 +89,15 @@ export async function loadOutfitWeapons(outfits: OutfitsState, gameData: GameDat
         // Outfit changes recompute how many copies of a weapon are installed.
         // They say nothing about whether the trigger is currently held, so a
         // recompute must not release the player's (or an NPC's) weapons.
-        if (firingIntent.size) {
+        if (firingIntent.size || targetIntent.size) {
             for (const [weaponId, state] of weaponsState) {
                 const firing = firingIntent.get(weaponId);
                 if (firing !== undefined) {
                     state.firing = firing;
+                }
+                const target = targetIntent.get(weaponId);
+                if (target !== undefined) {
+                    state.target = target;
                 }
             }
         }

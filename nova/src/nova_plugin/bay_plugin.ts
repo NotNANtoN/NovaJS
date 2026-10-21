@@ -15,16 +15,38 @@ import { HitboxHullComponent, HurtboxHullComponent } from './collisions_plugin';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction';
 import { ExitPointData } from './exit_point';
 import { OwnerComponent, ShotCreation, ShotSeedComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
-import { DeathAIComponent, FollowComponent, GovtComponent, ShootAllWeaponsComponent } from './npc_plugin';
+import { DeathAIComponent, FollowComponent, GovtComponent, NpcAIComponent, NpcCombatRoleComponent, ShootAllWeaponsComponent } from './npc_plugin';
 import { reserveEntity } from './entity_budget';
 import { ShipComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { TargetRemovedEvent } from './target_plugin';
 import { WeaponsStateComponent } from './weapons_state';
+import { DestructionStartedComponent } from './destruction_state';
+import { DisabledComponent, LastAttackerComponent } from './death_plugin';
+import { getNpcBayMaxCapacity, NpcWeaponAmmoComponent } from './weapon_plugin';
+import { PlatformResource } from './platform_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { Optional } from 'nova_ecs/optional';
 
 const CollectableEscortComponent = new Component<undefined>('CollectableEscort');
 const ReturnComponent = new Component<undefined>('ReturnComponent');
 const ReturnWhenTargetRemovedComponent = new Component<undefined>('ReturnWhenTargetRemoved');
+export const BayWeaponIdComponent = new Component<string>('BayWeaponId');
+
+function refundBayFighterAmmo(carrier: Entity | undefined, weaponId: string | undefined): void {
+    if (!carrier || !weaponId) {
+        return;
+    }
+    const npcAmmo = carrier.components.get(NpcWeaponAmmoComponent);
+    if (!npcAmmo) {
+        return;
+    }
+    const maxCap = getNpcBayMaxCapacity(carrier, weaponId);
+    const current = npcAmmo.get(weaponId) ?? 0;
+    if (current < maxCap) {
+        npcAmmo.set(weaponId, current + 1);
+    }
+}
 
 class BayWeaponEntry extends WeaponEntry {
     declare data: BayWeaponData;
@@ -72,9 +94,12 @@ class BayWeaponEntry extends WeaponEntry {
             turning: 0,
             velocity: new Vector(0, 0),
         }).set(DeathAIComponent, undefined)
+            .set(NpcAIComponent, undefined)
+            .set(NpcCombatRoleComponent, 'military')
             .set(ShootAllWeaponsComponent, undefined)
             .set(FollowComponent, undefined)
             .set(ReturnWhenTargetRemovedComponent, undefined)
+            .set(BayWeaponIdComponent, this.data.id)
         return ship;
     }
 
@@ -141,9 +166,11 @@ class BayWeaponEntry extends WeaponEntry {
 const CollectableEscortAI = new System({
     name: 'CollectableEscortAI',
     events: [CollisionEvent],
-    args: [CollisionEvent, SourceComponent, Entities, UUID, CollectableEscortComponent] as const,
-    step(collision, source, entities, uuid) {
+    args: [CollisionEvent, SourceComponent, Entities, UUID, CollectableEscortComponent,
+        Optional(BayWeaponIdComponent)] as const,
+    step(collision, source, entities, uuid, _collectable, bayWeaponId) {
         if (collision.other === source) {
+            refundBayFighterAmmo(entities.get(source), bayWeaponId);
             entities.delete(uuid);
         }
     },
@@ -181,6 +208,150 @@ const ReturnAI = new System({
     }
 });
 
+function isLiveCombatTarget(entities: Map<string, Entity>, targetUuid: string | undefined, selfUuid: string, carrierUuid: string): boolean {
+    if (!targetUuid || targetUuid === selfUuid || targetUuid === carrierUuid) {
+        return false;
+    }
+    const ent = entities.get(targetUuid);
+    if (!ent) {
+        return false;
+    }
+    if (
+        ent.components.has(DestructionStartedComponent)
+        || ent.components.get(DisabledComponent) === true
+    ) {
+        return false;
+    }
+    return true;
+}
+
+const BayFighterSupervisorSystem = new System({
+    name: 'BayFighterSupervisor',
+    args: [
+        SourceComponent,
+        TargetComponent,
+        MovementStateComponent,
+        GetEntity,
+        UUID,
+        Entities,
+        ReturnWhenTargetRemovedComponent,
+        Optional(WeaponsStateComponent),
+        Optional(BayWeaponIdComponent),
+        Optional(PlatformResource),
+    ] as const,
+    step(source, target, movement, entity, uuid, entities, _marker, weapons, bayWeaponId, platform) {
+        if (platform && platform !== 'node') {
+            return;
+        }
+        const carrier = entities.get(source);
+        if (!carrier || carrier.components.has(DestructionStartedComponent)) {
+            return;
+        }
+
+        const carrierTarget = carrier.components.get(TargetComponent)?.target
+            ?? carrier.components.get(LastAttackerComponent);
+        const carrierTargetValid = isLiveCombatTarget(entities, carrierTarget, uuid, source);
+        const ownTargetValid = isLiveCombatTarget(entities, target.target, uuid, source);
+
+        if (!ownTargetValid && carrierTargetValid) {
+            // Re-engage the parent Carrier's active target!
+            target.target = carrierTarget;
+            if (entity.components.has(ReturnComponent)) {
+                entity.components.delete(ReturnComponent);
+                entity.components.delete(CollectableEscortComponent);
+                entity.components.set(FollowComponent, undefined);
+                entity.components.set(ShootAllWeaponsComponent, undefined);
+            }
+            return;
+        }
+
+        if (!ownTargetValid && !carrierTargetValid) {
+            target.target = undefined;
+            if (!entity.components.has(ReturnComponent)) {
+                entity.components.delete(ShootAllWeaponsComponent);
+                entity.components.delete(FollowComponent);
+                if (weapons) {
+                    for (const [, weapon] of weapons) {
+                        weapon.firing = false;
+                    }
+                }
+                entity.components.set(ReturnComponent, undefined);
+                entity.components.set(CollectableEscortComponent, undefined);
+                entity.components.set(CollisionHitterComponent, {
+                    hitTypes: new Set([`return_escorts`]),
+                });
+                const hitbox = entity.components.get(HitboxHullComponent);
+                if (hitbox) {
+                    entity.components.set(HurtboxHullComponent, hitbox);
+                }
+            }
+        }
+
+        if (entity.components.has(ReturnComponent)) {
+            const carrierMov = carrier.components.get(MovementStateComponent);
+            if (carrierMov) {
+                const distSq = carrierMov.position.subtract(movement.position).lengthSquared;
+                if (distSq <= 60 * 60) {
+                    refundBayFighterAmmo(carrier, bayWeaponId);
+                    entities.delete(uuid);
+                }
+            }
+        }
+    },
+});
+
+const lastBayReplenishByCarrier = new Map<string, number>();
+const BAY_REPLENISH_INTERVAL_MS = 12_000;
+
+const ActiveBayFightersQuery = new Query([
+    SourceComponent,
+    BayWeaponIdComponent,
+] as const, 'ActiveBayFighters');
+
+const BayCarrierReplenishSystem = new System({
+    name: 'BayCarrierReplenish',
+    args: [
+        NpcWeaponAmmoComponent,
+        WeaponsStateComponent,
+        UUID,
+        GetEntity,
+        ActiveBayFightersQuery,
+        Optional(TimeResource),
+        Optional(PlatformResource),
+    ] as const,
+    step(npcAmmo, weapons, carrierUuid, carrier, activeFighters, time, platform) {
+        if (platform && platform !== 'node') {
+            return;
+        }
+        const now = time?.time ?? 0;
+        const lastAt = lastBayReplenishByCarrier.get(carrierUuid) ?? now;
+        if (!lastBayReplenishByCarrier.has(carrierUuid)) {
+            lastBayReplenishByCarrier.set(carrierUuid, now);
+            return;
+        }
+        if (now - lastAt < BAY_REPLENISH_INTERVAL_MS) {
+            return;
+        }
+        lastBayReplenishByCarrier.set(carrierUuid, now);
+
+        for (const [weaponId, remaining] of npcAmmo) {
+            if (!weapons.has(weaponId)) {
+                continue;
+            }
+            const maxCap = getNpcBayMaxCapacity(carrier, weaponId);
+            let activeCount = 0;
+            for (const [fSource, fWeaponId] of activeFighters) {
+                if (fSource === carrierUuid && fWeaponId === weaponId) {
+                    activeCount++;
+                }
+            }
+            if (remaining + activeCount < maxCap) {
+                npcAmmo.set(weaponId, remaining + 1);
+            }
+        }
+    },
+});
+
 export const BayPlugin: Plugin = {
     name: 'BayPlugin',
     build(world) {
@@ -192,5 +363,7 @@ export const BayPlugin: Plugin = {
         world.addSystem(ReturnAI);
         world.addSystem(ReturnWhenTargetRemovedAI);
         world.addSystem(CollectableEscortAI);
+        world.addSystem(BayFighterSupervisorSystem);
+        world.addSystem(BayCarrierReplenishSystem);
     }
 }
