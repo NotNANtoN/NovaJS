@@ -43,6 +43,15 @@ describe('lossless WebP encoding', () => {
         expect(metadata.height).toBe(2);
     });
 
+    it('rejects SVG buffers as defense-in-depth', async () => {
+        const svg = Buffer.from(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2">'
+                + '<rect width="2" height="2" fill="red"/></svg>',
+        );
+
+        await expectAsync(encodeLosslessWebP(svg)).toBeRejected();
+    });
+
     it('preserves every pixel in real generated artwork', async () => {
         if (!hasRetailData()) {
             pending('retail Nova data is not present in this checkout');

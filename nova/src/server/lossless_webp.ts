@@ -1,5 +1,9 @@
 import sharp from 'sharp';
 
+// NovaJS only encodes raster PNG buffers to WebP; block libvips SVG decoding
+// as defense-in-depth against upstream librsvg vulnerabilities (GHSA-wq5f-xc86-pv6w).
+sharp.block({ operation: ['VipsForeignLoadSvg'] });
+
 export type WebPEncode = (png: Buffer) => Promise<Buffer>;
 
 export async function encodeLosslessWebP(png: Buffer): Promise<Buffer> {

@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.2 AS build
+FROM oven/bun:1.4.3 AS build
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ COPY . .
 # Invoke the checked-in build script with the Bun runtime in this stage.
 RUN bun scripts/build.mjs
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24.22.1-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     NOVA_PORT=8200 \

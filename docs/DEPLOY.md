@@ -306,7 +306,7 @@ offline. `disable_tlsalpn_challenge` forces HTTP-01 because Caddy upstream has
 had TLS-ALPN interoperability failures for IP identifiers. Port 80 must remain
 public for validation.
 
-The Compose image is pinned to `caddy:2.11.4-alpine`. The floating
+The Compose image is pinned to `caddy:2.11.7-alpine`. The floating
 `caddy:2-alpine` tag currently resolves to the same version and is new enough,
 but the explicit patch version makes that verified behavior repeatable.
 
@@ -322,7 +322,7 @@ CADDY_BASIC_AUTH_HASH='$2a$14$PASTE_THE_BCRYPT_HASH_HERE'
 Generate the hash without putting the plaintext password in Git or `.env`:
 
 ```bash
-docker run --rm caddy:2.11.4-alpine caddy hash-password \
+docker run --rm caddy:2.11.7-alpine caddy hash-password \
   --plaintext 'choose-a-long-private-password'
 ```
 
