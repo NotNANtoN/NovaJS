@@ -100,7 +100,7 @@ describe('Co-op Wing & Shared Combat Goals', () => {
             name: 'Sol',
             position: [0, 0],
             links: ['nova:129'],
-            visBit: '!b10',
+            visibility: '!b10',
         });
         gameData.data.System.map.set('nova:371', {
             ...getDefaultSystemData(),
@@ -108,7 +108,7 @@ describe('Co-op Wing & Shared Combat Goals', () => {
             name: 'Sol',
             position: [0, 0],
             links: ['nova:129'],
-            visBit: 'b10',
+            visibility: 'b10',
         });
         gameData.data.System.map.set('nova:129', {
             ...getDefaultSystemData(),

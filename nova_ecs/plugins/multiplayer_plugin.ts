@@ -2693,7 +2693,7 @@ export function broadcastChat(world: World, chat: {
     to: string;
     fromName?: string;
     text: string;
-    kind?: 'chat' | 'sos' | 'coords';
+    kind?: ChatMessageEntry['kind'];
     system?: string;
     coords?: [number, number];
 }) {

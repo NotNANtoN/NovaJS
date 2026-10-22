@@ -16,7 +16,10 @@ import {
 import { NovaIDs } from 'novadatainterface/NovaIDs';
 import { PictImageData } from 'novadatainterface/PictImage';
 import { SoundFile } from 'novadatainterface/SoundFile';
-import { SpriteSheetFramesData } from 'novadatainterface/SpriteSheetData';
+import {
+    SpriteSheetFramesData,
+    SpriteSheetImageData,
+} from 'novadatainterface/SpriteSheetData';
 import { WeaponData } from 'novadatainterface/WeaponData';
 import * as PIXI from 'pixi.js';
 import * as sound from '@pixi/sound';

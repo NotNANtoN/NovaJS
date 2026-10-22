@@ -1,4 +1,9 @@
 import defaultRled from 'novadatainterface/default_rled';
-export function getDefaultSpriteSheetImage() {
-    return Buffer.from(defaultRled.buffer);
+import { SpriteSheetImageData } from './SpriteSheetData';
+
+export function getDefaultSpriteSheetImage(): SpriteSheetImageData {
+    return defaultRled.buffer.slice(
+        defaultRled.byteOffset,
+        defaultRled.byteOffset + defaultRled.byteLength,
+    ) as ArrayBuffer;
 }

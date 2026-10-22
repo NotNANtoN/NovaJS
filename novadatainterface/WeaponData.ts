@@ -12,6 +12,7 @@ export type ProjectileGuidanceType =
     "rocket" |
     "freefallBomb" |
     "frontQuadrant" |
+    "sidesQuadrant" |
     "rearQuadrant" |
     "pointDefense";
 
@@ -23,6 +24,7 @@ export const ProjectileGuidanceSet: Set<string> = new Set(<Array<ProjectileGuida
     "rocket",
     "freefallBomb",
     "frontQuadrant",
+    "sidesQuadrant",
     "rearQuadrant",
     "pointDefense"
 ]);

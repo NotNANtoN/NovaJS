@@ -41,7 +41,6 @@ import {
 } from '../nova_plugin/govt_relations';
 import { describeHail } from '../nova_plugin/hail_target';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
-import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import { PlanetDataComponent } from '../nova_plugin/planet_plugin';
 import { FleetMemberComponent } from '../nova_plugin/fleet_plugin';
 import { ScreenSize } from './screen_size_plugin';

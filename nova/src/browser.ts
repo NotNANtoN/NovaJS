@@ -515,7 +515,7 @@ async function transitionTo(
                 if (arrivalJumpSnapshot) {
                     liveShip.components.set(JumpStateComponent, {
                         ...arrivalJumpSnapshot,
-                        phase: 'arriving',
+                        phase: 'arriving' as const,
                         arrivalSoundPending: true,
                     });
                 }
