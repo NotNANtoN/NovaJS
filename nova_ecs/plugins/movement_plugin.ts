@@ -341,11 +341,11 @@ function movementControlChanged(
     // Advance the baseline position/velocity in-place for normal per-frame
     // integration so single-step position deltas don't accumulate across frames
     // without allocating a new MovementState snapshot every step.
-    previous.position.x = current.position.x;
-    previous.position.y = current.position.y;
+    (previous.position as { x: number; y: number }).x = current.position.x;
+    (previous.position as { x: number; y: number }).y = current.position.y;
     if (current.accelerating !== 0) {
-        previous.velocity.x = current.velocity.x;
-        previous.velocity.y = current.velocity.y;
+        (previous.velocity as { x: number; y: number }).x = current.velocity.x;
+        (previous.velocity as { x: number; y: number }).y = current.velocity.y;
     }
     return false;
 }
