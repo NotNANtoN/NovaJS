@@ -242,7 +242,7 @@ token they also have, so treat it like a password and unset it when done.
   commit a token there).
 
 To use it, open the game once with `?debug=<token>`
-(e.g. `https://69.164.217.141/?debug=<token>`). The browser checks it with
+(e.g. `https://172.104.203.136/?debug=<token>`). The browser checks it with
 `GET /debug/status`, stores it in `localStorage` (`novaDebugToken`) and removes
 it from the address bar; `?debug=off` forgets it. In flight a red `DEBUG`
 button sits at the bottom of the right sidebar. Every debug action is logged by
