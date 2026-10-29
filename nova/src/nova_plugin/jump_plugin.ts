@@ -975,7 +975,7 @@ export const NpcJumpLifecycleSystem = new System({
                     departurePosition: [movement.position.x, movement.position.y],
                     botState: {
                         ...conquestBot,
-                        mode: 'attack',
+                        mode: conquestBot.mode === 'retreat' ? 'retreat' : 'attack',
                     },
                 });
             }

@@ -18,24 +18,34 @@ import {
 import { EntityBudgetPlugin, EntityBudgetResource, createEntityBudget } from './entity_budget';
 import {
     applyConquestPocketSystems,
+    AURORAN_ARCHETYPE_TREES,
+    AURORAN_GARRISON_TIERS,
     AURORAN_GOVT,
+    AURORAN_UPGRADE_TIERS,
     clearConquestBotTransfers,
     CONQUEST_AURORA_SYSTEM,
+    CONQUEST_BOT_ARCHETYPES,
     CONQUEST_ORE_SCATTER_DELAY_MS,
     CONQUEST_SOL_SYSTEM,
+    CONQUEST_STARTING_SHIP_ID,
     ConquestBotComponent,
     ConquestModePlugin,
     conquestOreCreditValue,
     drainConquestBotTransfers,
     enqueueConquestBotTransfer,
     ensureConquestPocketState,
+    estimateHullCombatTier,
+    evaluateShipCombatPower,
+    FEDERATION_ARCHETYPE_TREES,
     FEDERATION_GARRISON_TIERS,
     FEDERATION_GOVT,
     FEDERATION_UPGRADE_TIERS,
-    AURORAN_GARRISON_TIERS,
+    hullTiersForBot,
     oppositeConquestSystem,
+    pickConquestArchetype,
     pickUniqueConquestCallsign,
     playerConquestFaction,
+    shouldBotRetreat,
 } from './conquest_mode';
 import { GameDataResource } from './game_data_resource';
 import { SystemIdResource } from './system_id_resource';
@@ -361,10 +371,14 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         await expectAsync(world.removeAllPlugins()).toBeResolved();
     });
 
-    it('assigns unique faction callsigns, excludes civilian traders from upgrade tiers, and transfers raiding bots across pocket systems', () => {
+    it('assigns unique faction callsigns, starts all upgrade trees in a Tier 0 Shuttle, and transfers raiding bots across pocket systems', () => {
         clearConquestBotTransfers();
-        expect(FEDERATION_UPGRADE_TIERS[0]).toBe('nova:187'); // Fed Scout Ship (no civilian Shuttle)
-        expect(FEDERATION_UPGRADE_TIERS).not.toContain('nova:128' as any);
+        expect(FEDERATION_UPGRADE_TIERS[0]).toBe(CONQUEST_STARTING_SHIP_ID); // Tier 0 Shuttle ('nova:128')
+        expect(AURORAN_UPGRADE_TIERS[0]).toBe(CONQUEST_STARTING_SHIP_ID);
+        for (const arch of CONQUEST_BOT_ARCHETYPES) {
+            expect(FEDERATION_ARCHETYPE_TREES[arch][0]).toBe('nova:128');
+            expect(AURORAN_ARCHETYPE_TREES[arch][0]).toBe('nova:128');
+        }
 
         const used = new Set<string>();
         for (let i = 0; i < 10; i++) {
@@ -502,14 +516,7 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(fedGarrisonIds).toContain('nova:172'); // RAGE Gunboat
         expect(fedGarrisonIds).toContain('nova:142'); // Fed Patrol Boat
 
-        const aurGarrisonIds = AURORAN_GARRISON_TIERS.map(t => [
-            'nova:155',
-            'nova:156',
-            'nova:138',
-            'nova:152',
-            'nova:154',
-            'nova:153',
-        ][t]);
+        const aurGarrisonIds = AURORAN_GARRISON_TIERS.map(t => AURORAN_UPGRADE_TIERS[t]);
         expect(aurGarrisonIds).toContain('nova:153'); // Aurora Carrier
         expect(aurGarrisonIds).toContain('nova:154'); // Aurora Cruiser
         expect(aurGarrisonIds).toContain('nova:152'); // Abomination
@@ -790,10 +797,10 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(entities.has('ore-2')).toBeFalse();
     });
 
-    it('spawns home garrison and miner bots at a planet and requires flying back to a planet to upgrade hulls', () => {
+    it('spawns home bots in Tier 0 Shuttles at a planet and requires flying back to a planet to upgrade along varied archetype branches', () => {
         const world = new World('conquest-planet-spawn-test');
         const gameData = new MockGameData();
-        for (const id of ['nova:187', 'nova:144', 'nova:143', 'nova:141', 'nova:172', 'nova:142']) {
+        for (const id of ['nova:128', 'nova:129', 'nova:187', 'nova:144', 'nova:145', 'nova:143', 'nova:141', 'nova:172', 'nova:142']) {
             gameData.data.Ship.map.set(id, {
                 ...getDefaultShipData(),
                 id,
@@ -855,23 +862,28 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(spawnedBots.length).toBeGreaterThan(0);
         for (const bot of spawnedBots) {
             const mov = bot.components.get(MovementStateComponent)!;
+            const botState = bot.components.get(ConquestBotComponent)!;
             const distFromEarth = mov.position.subtract(earthPos).length;
             expect(distFromEarth).toBeLessThan(1e-3);
+            expect(botState.tier).toBe(0);
+            expect(botState.mode).toBe('gather');
+            expect(bot.components.get(ShipComponent)?.id).toBe('nova:128');
         }
 
-        // Now place a miner bot far out in open space with enough credits to upgrade:
+        // Place a Tier 0 Shuttle miner ('interceptor' branch) far out in open space with enough credits:
         // it must fly back toward Earth (upgradePending = true) instead of morphing in open space!
         const minerBot = new Entity('Miner')
-            .addComponent(ShipComponent, { id: 'nova:187' })
+            .addComponent(ShipComponent, { id: 'nova:128' })
             .addComponent(TargetComponent, { target: undefined })
             .addComponent(MultiplayerData, { owner: 'server' })
             .addComponent(ConquestBotComponent, {
                 callsign: 'Lt. Mercer',
+                archetype: 'interceptor',
                 mode: 'gather',
                 factionGovt: FEDERATION_GOVT,
                 homeSystem: CONQUEST_SOL_SYSTEM,
                 tier: 0,
-                gatheredCredits: 25_000,
+                gatheredCredits: 35_000,
                 lastModeSwitchAt: 0,
                 upgradePending: false,
             })
@@ -889,13 +901,218 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         const minerState = minerBot.components.get(ConquestBotComponent)!;
         expect(minerState.upgradePending).toBeTrue();
         expect(minerState.tier).toBe(0);
-        expect(minerBot.components.get(ShipComponent)?.id).toBe('nova:187');
+        expect(minerBot.components.get(ShipComponent)?.id).toBe('nova:128');
 
-        // Move the miner to Earth so it docks and completes the upgrade at the planet!
+        // Move the miner to Earth so it docks and upgrades from Tier 0 ('nova:128') to Tier 1 ('nova:187')
         minerBot.components.get(MovementStateComponent)!.position = new Position(earthPos.x, earthPos.y);
         world.step();
         expect(minerState.upgradePending).toBeFalse();
         expect(minerState.tier).toBe(1);
+        expect(minerBot.components.get(ShipComponent)?.id).toBe('nova:187');
+
+        // With 25,000 remaining credits (>= 20,000 for Tier 2) and still at Earth,
+        // the next step upgrades to Tier 2 ('nova:144' Fed Viper on the interceptor branch)!
+        minerBot.components.get(MovementStateComponent)!.position = new Position(earthPos.x, earthPos.y);
+        world.step();
+        expect(minerState.tier).toBe(2);
         expect(minerBot.components.get(ShipComponent)?.id).toBe('nova:144');
+
+        // Verify different archetypes produce distinct upgrade paths from the Tier 0 Shuttle
+        expect(hullTiersForBot(FEDERATION_GOVT, 'interceptor').slice(0, 4))
+            .toEqual(['nova:128', 'nova:187', 'nova:144', 'nova:135']);
+        expect(hullTiersForBot(FEDERATION_GOVT, 'gunship').slice(0, 4))
+            .toEqual(['nova:128', 'nova:129', 'nova:145', 'nova:133']);
+        expect(hullTiersForBot(FEDERATION_GOVT, 'striker').slice(0, 4))
+            .toEqual(['nova:128', 'nova:144', 'nova:133', 'nova:165']);
+        expect(hullTiersForBot(AURORAN_GOVT, 'striker').slice(0, 3))
+            .toEqual(['nova:128', 'nova:157', 'nova:155']);
+    });
+
+    it('triggers Tactical Utility AI retreat when a raiding squad encounters superior enemy forces or critical hull damage, and evades with early-game Shuttle miners', () => {
+        // 1. Pure Lanchester combat power & retreat heuristics
+        const shuttlePower = evaluateShipCombatPower(estimateHullCombatTier('nova:128', 0), 1, 100);
+        const cruiserPower = evaluateShipCombatPower(estimateHullCombatTier('nova:154', 5), 1, 1200);
+        expect(cruiserPower).toBeGreaterThan(shuttlePower * 4);
+        expect(shouldBotRetreat({
+            selfTier: 1,
+            selfHealthRatio: 1,
+            friendlyPower: shuttlePower * 2,
+            enemyPower: cruiserPower,
+            maxEnemyTier: 5,
+        })).toBeTrue();
+        expect(shouldBotRetreat({
+            selfTier: 4,
+            selfHealthRatio: 0.25, // critically damaged (< 35%)
+            friendlyPower: 8,
+            enemyPower: 7,
+            maxEnemyTier: 4,
+        })).toBeTrue();
+
+        // 2. Live ECS simulation: Federation raiding squad in Aurora ('nova:315')
+        // confronts an overwhelming Auroran Cruiser + Carrier defense force and retreats!
+        const world = new World('conquest-tactical-retreat-test');
+        const gameData = new MockGameData();
+        for (const id of ['nova:128', 'nova:187', 'nova:144', 'nova:154', 'nova:153']) {
+            gameData.data.Ship.map.set(id, {
+                ...getDefaultShipData(),
+                id,
+                name: `Hull ${id}`,
+                outfits: {},
+            });
+        }
+        world.resources.set(GameDataResource, gameData);
+        world.resources.set(SystemIdResource, CONQUEST_AURORA_SYSTEM);
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(EntityBudgetResource, createEntityBudget('modern'));
+        world.addPlugin(DeltaPlugin);
+        world.addPlugin(TimePlugin);
+        world.addPlugin(MovementPlugin);
+        world.addPlugin(ConquestModePlugin);
+
+        const auroraPos = new Position(0, 0);
+        world.entities.set(
+            'planet-aurora',
+            new Entity('Aurora')
+                .addComponent(PlanetComponent, {
+                    id: 'nova:382',
+                    name: 'Aurora',
+                    inhabited: true,
+                    canLand: true,
+                })
+                .addComponent(MovementStateComponent, {
+                    position: auroraPos,
+                    velocity: new Vector(0, 0),
+                    rotation: new Angle(0),
+                    turning: 0,
+                    turnBack: false,
+                    accelerating: 0,
+                }),
+        );
+
+        const playerState = createInitialPlayerState();
+        playerState.gameMode = 'conquest';
+        playerState.currentSystem = CONQUEST_AURORA_SYSTEM;
+        playerState.lastLandedSystem = CONQUEST_AURORA_SYSTEM;
+        playerState.shipId = 'nova:154'; // Player in an Aurora Cruiser
+        world.entities.set(
+            'player-auroran',
+            new Entity('Auroran Player')
+                .addComponent(PlayerStateComponent, playerState)
+                .addComponent(ShipComponent, { id: 'nova:154' })
+                .addComponent(ShieldComponent, new Stat({ current: 800, max: 800, recharge: 10 }))
+                .addComponent(ArmorComponent, new Stat({ current: 600, max: 600, recharge: 0 }))
+                .addComponent(MultiplayerData, { owner: 'client-1' })
+                .addComponent(MovementStateComponent, {
+                    position: new Position(100, 0),
+                    velocity: new Vector(0, 0),
+                    rotation: new Angle(0),
+                    turning: 0,
+                    turnBack: false,
+                    accelerating: 0,
+                }),
+        );
+
+        // Outmatched Federation raiding leader + wingman in Aurora
+        const fedLeader = new Entity('Fed Raider Leader')
+            .addComponent(ShipComponent, { id: 'nova:187' })
+            .addComponent(TargetComponent, { target: 'player-auroran' })
+            .addComponent(ShieldComponent, new Stat({ current: 100, max: 100, recharge: 2 }))
+            .addComponent(ArmorComponent, new Stat({ current: 80, max: 80, recharge: 0 }))
+            .addComponent(MultiplayerData, { owner: 'server' })
+            .addComponent(ConquestBotComponent, {
+                callsign: 'Capt. Vance',
+                archetype: 'interceptor',
+                mode: 'attack',
+                factionGovt: FEDERATION_GOVT,
+                homeSystem: CONQUEST_SOL_SYSTEM,
+                tier: 1,
+                gatheredCredits: 0,
+                lastModeSwitchAt: 0,
+                upgradePending: false,
+                squadId: 'raid-squad-1',
+                squadLeaderUuid: 'fed-leader',
+            })
+            .addComponent(MovementStateComponent, {
+                position: new Position(300, 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        const fedWingman = new Entity('Fed Raider Wingman')
+            .addComponent(ShipComponent, { id: 'nova:187' })
+            .addComponent(TargetComponent, { target: 'player-auroran' })
+            .addComponent(ShieldComponent, new Stat({ current: 100, max: 100, recharge: 2 }))
+            .addComponent(ArmorComponent, new Stat({ current: 80, max: 80, recharge: 0 }))
+            .addComponent(MultiplayerData, { owner: 'server' })
+            .addComponent(ConquestBotComponent, {
+                callsign: 'Lt. Mercer',
+                archetype: 'interceptor',
+                mode: 'attack',
+                factionGovt: FEDERATION_GOVT,
+                homeSystem: CONQUEST_SOL_SYSTEM,
+                tier: 1,
+                gatheredCredits: 0,
+                lastModeSwitchAt: 0,
+                upgradePending: false,
+                squadId: 'raid-squad-1',
+                squadLeaderUuid: 'fed-leader',
+            })
+            .addComponent(MovementStateComponent, {
+                position: new Position(350, 40),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        world.entities.set('fed-leader', fedLeader);
+        world.entities.set('fed-wingman', fedWingman);
+
+        // Also place an early-game Auroran Tier 0 Shuttle miner out in the belt
+        // near an enemy Federation Destroyer: it must evade to Aurora rather than attack!
+        const auroranShuttleMiner = new Entity('Auroran Shuttle Miner')
+            .addComponent(ShipComponent, { id: 'nova:128' })
+            .addComponent(TargetComponent, { target: undefined })
+            .addComponent(ShieldComponent, new Stat({ current: 40, max: 100, recharge: 1 }))
+            .addComponent(ArmorComponent, new Stat({ current: 30, max: 80, recharge: 0 }))
+            .addComponent(MultiplayerData, { owner: 'server' })
+            .addComponent(ConquestBotComponent, {
+                callsign: "Kar'Vosh",
+                archetype: 'capital',
+                mode: 'gather',
+                factionGovt: AURORAN_GOVT,
+                homeSystem: CONQUEST_AURORA_SYSTEM,
+                tier: 0,
+                gatheredCredits: 0,
+                lastModeSwitchAt: 0,
+                upgradePending: false,
+            })
+            .addComponent(MovementStateComponent, {
+                position: new Position(0, 600),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        world.entities.set('auroran-miner', auroranShuttleMiner);
+
+        world.step();
+
+        // Both Federation raiders recognize they are outmatched by the Cruiser and switch to 'retreat'
+        expect(fedLeader.components.get(ConquestBotComponent)?.mode).toBe('retreat');
+        expect(fedWingman.components.get(ConquestBotComponent)?.mode).toBe('retreat');
+        expect(fedLeader.components.get(TargetComponent)?.target).toBeUndefined();
+
+        // The damaged Auroran Tier 0 Shuttle miner also switches to 'retreat' toward Aurora
+        expect(auroranShuttleMiner.components.get(ConquestBotComponent)?.mode).toBe('retreat');
+
+        // When the retreating Shuttle miner reaches Aurora (0, 0), it repairs its shields & armor!
+        auroranShuttleMiner.components.get(MovementStateComponent)!.position = new Position(0, 0);
+        world.step();
+        expect(auroranShuttleMiner.components.get(ShieldComponent)?.current).toBe(100);
+        expect(auroranShuttleMiner.components.get(ArmorComponent)?.current).toBe(80);
     });
 });

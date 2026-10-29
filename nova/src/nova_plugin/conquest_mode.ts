@@ -71,6 +71,7 @@ import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 
 import {
+    ALL_CONQUEST_UPGRADE_HULLS,
     AURORAN_GARRISON_TIERS,
     AURORAN_GOVT,
     AURORAN_UPGRADE_TIERS,
@@ -80,24 +81,33 @@ import {
     CONQUEST_BOT_RAID_IDLE_MS,
     CONQUEST_BOT_SPAWN_INTERVAL_MS,
     CONQUEST_BOT_UPGRADE_BASE_COST,
+    CONQUEST_EARLY_PEACE_DURATION_MS,
     CONQUEST_MAGNET_ACCEL,
     CONQUEST_ORE_SCATTER_DELAY_MS,
     CONQUEST_SOL_SYSTEM,
     CONQUEST_SYSTEM_POSITIONS,
+    CONQUEST_TACTICAL_AWARENESS_RADIUS,
+    ConquestBotArchetype,
     ConquestBotComponent,
     ConquestBotState,
     ConquestBotStateCodec,
     conquestOreCreditValue,
     drainConquestBotTransfers,
+    estimateHullCombatTier,
+    evaluateShipCombatPower,
     FEDERATION_GARRISON_TIERS,
     FEDERATION_GOVT,
     FEDERATION_UPGRADE_TIERS,
+    hullTiersForBot,
     isConquestMode,
     isConquestPocketSystem,
     MAX_CONQUEST_BOTS_PER_SYSTEM,
     oppositeConquestSystem,
+    pickConquestArchetype,
     pickUniqueConquestCallsign,
     playerConquestFaction,
+    scoreEnemyTargetUtility,
+    shouldBotRetreat,
 } from './conquest_config';
 export * from './conquest_config';
 
@@ -116,6 +126,8 @@ const ConquestBotsQuery = new Query([
     TargetComponent,
     Optional(WeaponsStateComponent),
     Optional(DisabledComponent),
+    Optional(ShieldComponent),
+    Optional(ArmorComponent),
     GetEntity,
 ] as const, 'ConquestBots');
 
@@ -152,16 +164,19 @@ const ConquestShipsQuery = new Query([
     Optional(PlayerDeathComponent),
     Optional(JumpStateComponent),
     Optional(CloakStateComponent),
+    Optional(ShieldComponent),
+    Optional(ArmorComponent),
 ] as const, 'ConquestShips');
 
 function upgradeCostForTier(tier: number): number {
     return CONQUEST_BOT_UPGRADE_BASE_COST * (tier + 1);
 }
 
-export function hullTiersForGovt(govt: number): readonly string[] {
-    return govt === AURORAN_GOVT
-        ? AURORAN_UPGRADE_TIERS
-        : FEDERATION_UPGRADE_TIERS;
+export function hullTiersForGovt(
+    govt: number,
+    archetype?: ConquestBotArchetype,
+): readonly string[] {
+    return hullTiersForBot(govt, archetype);
 }
 
 export function garrisonTiersForGovt(govt: number): readonly number[] {
@@ -172,10 +187,19 @@ export function garrisonTiersForGovt(govt: number): readonly number[] {
 
 const nextConquestBotSpawnBySystem = new Map<string, number>();
 const nextRivalRaidWaveBySystem = new Map<string, number>();
+const conquestMatchStartedAtBySystem = new Map<string, number>();
 const lastEnemySeenByBot = new Map<string, number>();
 const miningCreditAccumByBot = new Map<string, number>();
-const CONQUEST_RIVAL_RAID_WAVE_INTERVAL_MS = 28_000;
+const CONQUEST_RIVAL_RAID_WAVE_INTERVAL_MS = 32_000;
 const warmedGameDataSets = new WeakSet<object>();
+
+export function resetConquestRuntimeState(): void {
+    nextConquestBotSpawnBySystem.clear();
+    nextRivalRaidWaveBySystem.clear();
+    conquestMatchStartedAtBySystem.clear();
+    lastEnemySeenByBot.clear();
+    miningCreditAccumByBot.clear();
+}
 
 function warmConquestHulls(
     gameData: import('novadatainterface/GameDataInterface').GameDataInterface,
@@ -201,7 +225,7 @@ function warmConquestHulls(
         return;
     }
     warmedGameDataSets.add(gameData);
-    for (const id of [...FEDERATION_UPGRADE_TIERS, ...AURORAN_UPGRADE_TIERS]) {
+    for (const id of ALL_CONQUEST_UPGRADE_HULLS) {
         void gameData.data.Ship.get(id).catch(() => {});
     }
 }
@@ -241,6 +265,42 @@ function resolveConquestSystemPlanets(
     return [new Position(0, 0)];
 }
 
+function resolveBotShipData(
+    gameData: import('novadatainterface/GameDataInterface').GameDataInterface,
+    factionGovt: number,
+    tier: number,
+    archetype?: ConquestBotArchetype,
+): import('novadatainterface/ShipData').ShipData | undefined {
+    const branchTiers = hullTiersForBot(factionGovt, archetype);
+    const clampedTier = Math.max(0, Math.min(branchTiers.length - 1, tier));
+    const primaryId = branchTiers[clampedTier];
+    const primary = gameData.data.Ship.getCached(primaryId);
+    if (primary) {
+        return primary;
+    }
+    void gameData.data.Ship.get(primaryId).catch(() => {});
+
+    const fallbackTiers = factionGovt === AURORAN_GOVT
+        ? AURORAN_UPGRADE_TIERS
+        : FEDERATION_UPGRADE_TIERS;
+    const fallbackId = fallbackTiers[Math.min(fallbackTiers.length - 1, clampedTier)];
+    if (fallbackId && fallbackId !== primaryId) {
+        const fallback = gameData.data.Ship.getCached(fallbackId);
+        if (fallback) {
+            return fallback;
+        }
+        void gameData.data.Ship.get(fallbackId).catch(() => {});
+    }
+    // Final fallback for minimal unit test fixtures that only populate a few ships
+    for (const candidateId of fallbackTiers) {
+        const cached = gameData.data.Ship.getCached(candidateId);
+        if (cached) {
+            return cached;
+        }
+    }
+    return undefined;
+}
+
 function spawnConquestBotEntity(
     gameData: import('novadatainterface/GameDataInterface').GameDataInterface,
     budget: import('./entity_budget').EntityBudget,
@@ -250,13 +310,19 @@ function spawnConquestBotEntity(
     velocity = new Vector(0, 0),
     arrivingFrom?: { from: string; to: string; now: number },
 ): Entity | undefined {
-    const tiers = hullTiersForGovt(botState.factionGovt);
+    if (!botState.archetype) {
+        botState.archetype = pickConquestArchetype(botState.callsign);
+    }
+    const tiers = hullTiersForBot(botState.factionGovt, botState.archetype);
     const clampedTier = Math.max(0, Math.min(tiers.length - 1, botState.tier));
     botState.tier = clampedTier;
-    const shipId = tiers[clampedTier];
-    const shipData = gameData.data.Ship.getCached(shipId);
+    const shipData = resolveBotShipData(
+        gameData,
+        botState.factionGovt,
+        clampedTier,
+        botState.archetype,
+    );
     if (!shipData) {
-        void gameData.data.Ship.get(shipId).catch(() => {});
         return undefined;
     }
     const bot = makeNpc(shipData);
@@ -346,8 +412,18 @@ const ConquestBotLifecycleSystem = new System({
         const hasConquestPlayer = players.some(([, state]) =>
             isConquestMode(state));
         if (!hasConquestPlayer) {
+            conquestMatchStartedAtBySystem.delete(systemId);
+            nextConquestBotSpawnBySystem.delete(systemId);
+            nextRivalRaidWaveBySystem.delete(systemId);
             return;
         }
+        const existingMatchStart = conquestMatchStartedAtBySystem.get(systemId);
+        if (existingMatchStart === undefined || time.time < existingMatchStart) {
+            conquestMatchStartedAtBySystem.set(systemId, time.time);
+        }
+        const matchStartedAt = conquestMatchStartedAtBySystem.get(systemId) ?? time.time;
+        const matchElapsedMs = Math.max(0, time.time - matchStartedAt);
+
         warmConquestHulls(gameData, systemId);
         const systemPlanets = resolveConquestSystemPlanets(gameData, systemId, planets);
 
@@ -404,12 +480,16 @@ const ConquestBotLifecycleSystem = new System({
                 ),
             );
             try {
+                const callsign = usedCallsigns.has(transfer.botState.callsign)
+                    ? pickUniqueConquestCallsign(transfer.botState.factionGovt, usedCallsigns)
+                    : transfer.botState.callsign;
+                const returnedHome = transfer.botState.homeSystem === systemId
+                    && transfer.botState.mode === 'retreat';
                 const state: ConquestBotState = {
                     ...transfer.botState,
-                    callsign: usedCallsigns.has(transfer.botState.callsign)
-                        ? pickUniqueConquestCallsign(transfer.botState.factionGovt, usedCallsigns)
-                        : transfer.botState.callsign,
-                    mode: 'attack',
+                    callsign,
+                    archetype: transfer.botState.archetype ?? pickConquestArchetype(callsign),
+                    mode: returnedHome ? 'retreat' : 'attack',
                     lastModeSwitchAt: time.time,
                 };
                 usedCallsigns.add(state.callsign);
@@ -430,39 +510,30 @@ const ConquestBotLifecycleSystem = new System({
             }
         }
 
-        // 2. Maintain the Homeworld Defense Fleet Garrison (Carriers, Destroyers/Cruisers,
-        // Gunboats, and Patrol Boats) AND spawn Home Faction Miners/Raiders up to MAX_CONQUEST_BOTS_PER_SYSTEM
-        const garrisonTiers = garrisonTiersForGovt(homeGovt);
-        const activeGarrisonTiers = bots
-            .filter(([, b]) => b.factionGovt === homeGovt && b.garrison)
-            .map(([, b]) => b.tier);
-        const missingGarrisonTier = garrisonTiers.find(t => !activeGarrisonTiers.includes(t));
-
-        const nextSpawnAt = nextConquestBotSpawnBySystem.get(systemId) ?? 0;
+        // 2. Fair Match Start & Progression:
+        // Every home faction pilot launches from Sol/Earth or Aurora at Tier 0
+        // in a Shuttle (`nova:128`) with 0 credits and progresses upward by
+        // mining asteroids, scooping salvage, and upgrading along their archetype branch.
+        const rawNextSpawnAt = nextConquestBotSpawnBySystem.get(systemId) ?? 0;
+        const nextSpawnAt = time.time < rawNextSpawnAt - CONQUEST_BOT_SPAWN_INTERVAL_MS * 2
+            ? 0
+            : rawNextSpawnAt;
         const homeBotsCount = bots.filter(([, b]) => b.factionGovt === homeGovt).length;
-        // Spawn missing garrison capital ships immediately on room startup or after respawn interval
-        const shouldSpawnGarrison = missingGarrisonTier !== undefined
-            && (activeGarrisonTiers.length === 0 || time.time >= nextSpawnAt);
 
         if (
-            shouldSpawnGarrison
-            || (
-                bots.length < MAX_CONQUEST_BOTS_PER_SYSTEM
-                && homeBotsCount < MAX_CONQUEST_BOTS_PER_SYSTEM - 1
-                && time.time >= nextSpawnAt
-            )
+            bots.length < MAX_CONQUEST_BOTS_PER_SYSTEM
+            && homeBotsCount < MAX_CONQUEST_BOTS_PER_SYSTEM - 1
+            && (homeBotsCount === 0 || time.time >= nextSpawnAt)
         ) {
             nextConquestBotSpawnBySystem.set(
                 systemId,
-                time.time + (shouldSpawnGarrison && activeGarrisonTiers.length < garrisonTiers.length - 1
-                    ? 400
-                    : CONQUEST_BOT_SPAWN_INTERVAL_MS),
+                time.time + CONQUEST_BOT_SPAWN_INTERVAL_MS,
             );
-            const isGarrison = missingGarrisonTier !== undefined;
             const callsign = pickUniqueConquestCallsign(homeGovt, usedCallsigns);
             usedCallsigns.add(callsign);
-            // Always launch home garrison and home faction ships directly from Sol
-            // or another planet in the system — never pop into empty space!
+            const archetype = pickConquestArchetype(callsign);
+            // Always launch home faction ships directly from Sol or another
+            // planet in the system — never pop into empty space!
             const launchPlanet = systemPlanets[
                 Math.floor(Math.random() * systemPlanets.length)
             ] ?? new Position(0, 0);
@@ -473,21 +544,20 @@ const ConquestBotLifecycleSystem = new System({
                 Math.sin(launchBearing) * 45,
                 -Math.cos(launchBearing) * 45,
             );
-            const initialTier = isGarrison ? missingGarrisonTier! : 0;
             try {
                 const bot = spawnConquestBotEntity(
                     gameData,
                     budget,
                     {
                         callsign,
-                        mode: isGarrison ? 'attack' : 'gather',
+                        archetype,
+                        mode: 'gather',
                         factionGovt: homeGovt,
                         homeSystem: systemId,
-                        tier: initialTier,
+                        tier: 0,
                         gatheredCredits: 0,
                         lastModeSwitchAt: time.time,
                         upgradePending: false,
-                        ...(isGarrison ? { garrison: true } : {}),
                     },
                     pos,
                     launchRotation,
@@ -501,17 +571,19 @@ const ConquestBotLifecycleSystem = new System({
             }
         }
 
-        // 3. Periodic Rival Faction Cross-System Raid Waves (Solo or 2-3 Ship Strike Group)
-        // Ensures that even when no player is inside the opposite system room,
-        // upgraded rival bots jump into this system from hyperspace alone or in a group!
+        // 3. Progression-Scaled Rival Faction Cross-System Raid Waves
+        // Only begins after CONQUEST_EARLY_PEACE_DURATION_MS so rival pilots
+        // have time to mine and upgrade out of their starting Shuttles, and
+        // scales raider tier strictly with match elapsed time.
         const nextRaidAt = nextRivalRaidWaveBySystem.get(systemId)
-            ?? (time.time + 14_000);
+            ?? (matchStartedAt + CONQUEST_EARLY_PEACE_DURATION_MS);
         if (!nextRivalRaidWaveBySystem.has(systemId)) {
             nextRivalRaidWaveBySystem.set(systemId, nextRaidAt);
         }
         const activeRivalBots = bots.filter(([, b]) => b.factionGovt === rivalGovt).length;
         if (
             otherSystem
+            && matchElapsedMs >= CONQUEST_EARLY_PEACE_DURATION_MS
             && activeRivalBots < 3
             && bots.length < MAX_CONQUEST_BOTS_PER_SYSTEM + 2
             && time.time >= nextRaidAt
@@ -520,14 +592,14 @@ const ConquestBotLifecycleSystem = new System({
                 systemId,
                 time.time + CONQUEST_RIVAL_RAID_WAVE_INTERVAL_MS,
             );
-            // 45% solo raider, 55% coordinated 2-3 ship strike group
-            const groupSize = Math.random() < 0.45 ? 1 : (Math.random() < 0.65 ? 2 : 3);
-            const squadId = groupSize > 1 ? uuid() : undefined;
-            const rivalTiers = hullTiersForGovt(rivalGovt);
-            const baseTier = Math.min(
-                rivalTiers.length - 1,
-                1 + Math.floor(Math.random() * Math.min(4, rivalTiers.length - 1)),
+            const progressionSteps = Math.floor(
+                (matchElapsedMs - CONQUEST_EARLY_PEACE_DURATION_MS) / 45_000,
             );
+            const maxEarnedTier = Math.max(1, Math.min(4, 1 + progressionSteps));
+            const groupSize = maxEarnedTier >= 2 && Math.random() < 0.55
+                ? (Math.random() < 0.65 ? 2 : 3)
+                : 1;
+            const squadId = groupSize > 1 ? uuid() : undefined;
             const sourcePos = CONQUEST_SYSTEM_POSITIONS[otherSystem] ?? [45, 0];
             const destPos = CONQUEST_SYSTEM_POSITIONS[systemId] ?? [-45, 0];
             const baseLateralY = (Math.random() - 0.5) * 700;
@@ -536,9 +608,12 @@ const ConquestBotLifecycleSystem = new System({
             for (let i = 0; i < groupSize; i++) {
                 const callsign = pickUniqueConquestCallsign(rivalGovt, usedCallsigns);
                 usedCallsigns.add(callsign);
+                const archetype = pickConquestArchetype(callsign);
+                const rivalBranch = hullTiersForBot(rivalGovt, archetype);
+                const baseTier = Math.min(rivalBranch.length - 1, maxEarnedTier);
                 const tier = i === 0
                     ? baseTier
-                    : Math.max(0, baseTier - (Math.random() < 0.5 ? 1 : 0));
+                    : Math.max(1, baseTier - (Math.random() < 0.5 ? 1 : 0));
                 const lateralOffset = baseLateralY + (i - (groupSize - 1) / 2) * 110;
                 const arrival = calculateJumpArrival(
                     sourcePos,
@@ -557,6 +632,7 @@ const ConquestBotLifecycleSystem = new System({
                         budget,
                         {
                             callsign,
+                            archetype,
                             mode: 'attack',
                             factionGovt: rivalGovt,
                             homeSystem: otherSystem,
@@ -594,17 +670,37 @@ const ConquestBotLifecycleSystem = new System({
             }
         }
 
-        // Helper to find closest hostile ship for a given bot
-        const findClosestEnemy = (
+        // Reusable zero-allocation scratch result for 60 Hz Tactical Utility AI
+        const tacticalScratch = {
+            friendlyPower: 0,
+            enemyPower: 0,
+            maxEnemyTier: 0,
+            bestEnemyUuid: undefined as string | undefined,
+            closestEnemyUuid: undefined as string | undefined,
+            closestEnemyDistSq: Infinity,
+        };
+
+        const assessLocalForceBalance = (
             botUuid: string,
             botState: ConquestBotState,
             position: Position,
             botEntity: Entity,
-            maxRange = Infinity,
-        ): string | undefined => {
-            let closestEnemy: string | undefined;
-            let closestDistSq = maxRange * maxRange;
+            selfEffectiveTier: number,
+            selfPower: number,
+            squadLeaderTargetUuid: string | undefined,
+        ) => {
+            tacticalScratch.friendlyPower = selfPower;
+            tacticalScratch.enemyPower = 0;
+            tacticalScratch.maxEnemyTier = 0;
+            tacticalScratch.bestEnemyUuid = undefined;
+            tacticalScratch.closestEnemyUuid = undefined;
+            tacticalScratch.closestEnemyDistSq = Infinity;
+
+            let bestUtility = -Infinity;
+            const awarenessRadiusSq =
+                CONQUEST_TACTICAL_AWARENESS_RADIUS * CONQUEST_TACTICAL_AWARENESS_RADIUS;
             const lastAttacker = botEntity.components.get(LastAttackerComponent);
+
             for (const [
                 candidateUuid,
                 candidateMov,
@@ -620,6 +716,8 @@ const ConquestBotLifecycleSystem = new System({
                 candidatePlayerDeath,
                 candidateJump,
                 candidateCloak,
+                candidateShield,
+                candidateArmor,
             ] of ships) {
                 if (
                     candidateUuid === botUuid
@@ -661,19 +759,65 @@ const ConquestBotLifecycleSystem = new System({
                         )
                     ),
                 );
-                if (!isEnemyNpc && !isEnemyPlayer) {
+                const isEnemy = isEnemyNpc || isEnemyPlayer;
+                const isAlly = !isEnemy && (
+                    candGovtId === botState.factionGovt
+                    || Boolean(
+                        candidatePlayer
+                        && isConquestMode(candidatePlayer)
+                        && playerConquestFaction(candidatePlayer, candidateShip?.id) === botState.factionGovt,
+                    )
+                );
+                if (!isEnemy && !isAlly) {
                     continue;
                 }
-                const dSq = candidateMov.position.subtract(position).lengthSquared;
-                if (dSq < closestDistSq) {
-                    closestDistSq = dSq;
-                    closestEnemy = candidateUuid;
+
+                const dx = candidateMov.position.x - position.x;
+                const dy = candidateMov.position.y - position.y;
+                const dSq = dx * dx + dy * dy;
+
+                const candMaxHp = (candidateShield?.max ?? 0) + (candidateArmor?.max ?? 0);
+                const candCurHp = (candidateShield?.current ?? 0) + (candidateArmor?.current ?? 0);
+                const candHpRatio = candMaxHp > 0 ? candCurHp / candMaxHp : 1;
+                const candTier = estimateHullCombatTier(candidateShip?.id, candidateBot?.tier);
+                const candPower = evaluateShipCombatPower(candTier, candHpRatio, candMaxHp);
+
+                if (isAlly) {
+                    if (dSq <= awarenessRadiusSq) {
+                        tacticalScratch.friendlyPower += candPower;
+                    }
+                    continue;
+                }
+
+                if (dSq < tacticalScratch.closestEnemyDistSq) {
+                    tacticalScratch.closestEnemyDistSq = dSq;
+                    tacticalScratch.closestEnemyUuid = candidateUuid;
+                }
+                if (dSq <= awarenessRadiusSq) {
+                    tacticalScratch.enemyPower += candPower;
+                    if (candTier > tacticalScratch.maxEnemyTier) {
+                        tacticalScratch.maxEnemyTier = candTier;
+                    }
+                }
+
+                const utility = scoreEnemyTargetUtility({
+                    distance: Math.sqrt(dSq),
+                    selfTier: selfEffectiveTier,
+                    targetTier: candTier,
+                    targetHealthRatio: candHpRatio,
+                    isSquadTarget: candidateUuid === squadLeaderTargetUuid,
+                    isLastAttacker: candidateUuid === lastAttacker,
+                });
+                if (utility > bestUtility) {
+                    bestUtility = utility;
+                    tacticalScratch.bestEnemyUuid = candidateUuid;
                 }
             }
-            return closestEnemy;
+            return tacticalScratch;
         };
 
-        // 4. Drive Conquest AI state machine ('gather' -> upgrade -> 'attack' / 'raid')
+        // 4. Drive Conquest Tactical Utility AI state machine
+        // ('gather' -> shipyard upgrade -> 'attack' / 'raid' <-> 'retreat')
         for (const [
             botUuid,
             botState,
@@ -683,30 +827,320 @@ const ConquestBotLifecycleSystem = new System({
             targetComp,
             weapons,
             disabled,
+            selfShield,
+            selfArmor,
             botEntity,
         ] of bots) {
             if (disabled || botEntity.components.has(JumpStateComponent)) {
                 continue;
             }
-            const tiers = hullTiersForGovt(botState.factionGovt);
+            if (!botState.archetype) {
+                botState.archetype = pickConquestArchetype(botState.callsign);
+            }
+            const tiers = hullTiersForBot(botState.factionGovt, botState.archetype);
 
-            if (botState.mode === 'gather') {
-                // Self-defense if an enemy raider or rival player enters range
-                const nearbyThreat = findClosestEnemy(
-                    botUuid,
-                    botState,
-                    movement.position,
-                    botEntity,
-                    1_800,
-                );
-                if (nearbyThreat) {
-                    botState.mode = 'attack';
-                    botState.lastModeSwitchAt = time.time;
-                    targetComp.target = nearbyThreat;
+            const selfMaxHp = (selfShield?.max ?? 0) + (selfArmor?.max ?? 0);
+            const selfCurHp = (selfShield?.current ?? 0) + (selfArmor?.current ?? 0);
+            const selfHealthRatio = selfMaxHp > 0 ? selfCurHp / selfMaxHp : 1;
+            const selfEffectiveTier = estimateHullCombatTier(shipComp.id, botState.tier);
+            const selfPower = evaluateShipCombatPower(selfEffectiveTier, selfHealthRatio, selfMaxHp);
+
+            const squadLeaderTargetUuid = (
+                botState.squadLeaderUuid
+                && botState.squadLeaderUuid !== botUuid
+            )
+                ? entities.get(botState.squadLeaderUuid)?.components.get(TargetComponent)?.target
+                : undefined;
+
+            const tactical = assessLocalForceBalance(
+                botUuid,
+                botState,
+                movement.position,
+                botEntity,
+                selfEffectiveTier,
+                selfPower,
+                squadLeaderTargetUuid,
+            );
+            const retreatRecommended = shouldBotRetreat({
+                selfTier: selfEffectiveTier,
+                selfHealthRatio,
+                friendlyPower: tactical.friendlyPower,
+                enemyPower: tactical.enemyPower,
+                maxEnemyTier: tactical.maxEnemyTier,
+                isGarrison: botState.garrison,
+            });
+
+            let closestPlanet = systemPlanets[0] ?? new Position(0, 0);
+            let closestPlanetDistSq = closestPlanet.subtract(movement.position).lengthSquared;
+            for (let pIdx = 1; pIdx < systemPlanets.length; pIdx++) {
+                const candidatePlanet = systemPlanets[pIdx]!;
+                const dSq = candidatePlanet.subtract(movement.position).lengthSquared;
+                if (dSq < closestPlanetDistSq) {
+                    closestPlanetDistSq = dSq;
+                    closestPlanet = candidatePlanet;
+                }
+            }
+
+            if (botState.mode === 'retreat') {
+                if (targetComp.target !== undefined) {
+                    targetComp.target = undefined;
+                }
+                if (weapons) {
+                    for (const [, w] of weapons) {
+                        if (w.firing) {
+                            w.firing = false;
+                        }
+                    }
+                }
+                const inHomeSystem = systemId === botState.homeSystem;
+                if (!inHomeSystem && otherSystem) {
+                    // Outmatched in enemy territory: rally squad to retreat and hyperjump back home!
+                    if (botState.squadId && botState.squadLeaderUuid === botUuid) {
+                        for (const [allyUuid, allyState, , , , allyTarget, , allyDisabled] of bots) {
+                            if (
+                                allyUuid !== botUuid
+                                && !allyDisabled
+                                && allyState.squadId === botState.squadId
+                                && allyState.mode !== 'retreat'
+                            ) {
+                                allyState.mode = 'retreat';
+                                allyState.lastModeSwitchAt = time.time;
+                                allyTarget.target = undefined;
+                            }
+                        }
+                    }
+                    const sourcePos = CONQUEST_SYSTEM_POSITIONS[systemId] ?? [-45, 0];
+                    const destPos = CONQUEST_SYSTEM_POSITIONS[otherSystem] ?? [45, 0];
+                    const jumpDir = new Vector(
+                        destPos[0] - sourcePos[0],
+                        destPos[1] - sourcePos[1],
+                    ).normalize();
+
+                    if (distanceFromSystemOrigin(movement.position) < 950) {
+                        movement.turnTo = jumpDir.angle;
+                        movement.accelerating = 1;
+                        movement.turnBack = false;
+                    } else {
+                        botEntity.components.set(JumpStateComponent, {
+                            from: systemId,
+                            to: otherSystem,
+                            phase: 'braking',
+                            phaseStartedAt: time.time,
+                            transitionAt: time.time + JUMP_BRAKE_MS,
+                            requiresAdjacency: false,
+                            arrivalSoundPending: false,
+                            createdAt: time.time,
+                        });
+                    }
                     continue;
                 }
 
-                // Physically pull and scoop nearby floating Ore / Salvage packages!
+                // In home system: fall back to Sol/Earth or Aurora for planetary cover and repairs!
+                if (closestPlanetDistSq > 150 * 150) {
+                    if (physics) {
+                        const cmd = approachTarget(
+                            movement,
+                            { position: closestPlanet, velocity: new Vector(0, 0) },
+                            physics,
+                            { standoff: 0 },
+                        );
+                        movement.turnTo = cmd.turnTo ?? closestPlanet.subtract(movement.position).angle;
+                        movement.accelerating = 1;
+                        movement.turnBack = false;
+                    } else {
+                        movement.turnTo = closestPlanet.subtract(movement.position).angle;
+                        movement.accelerating = 1;
+                        movement.turnBack = false;
+                    }
+                    continue;
+                }
+
+                // Docked at home planet: restore shields and armor
+                if (selfShield) {
+                    selfShield.current = selfShield.max;
+                }
+                if (selfArmor) {
+                    selfArmor.current = selfArmor.max;
+                }
+                const canAffordUpgrade = botState.gatheredCredits >= upgradeCostForTier(botState.tier);
+                if (canAffordUpgrade || tactical.closestEnemyDistSq > 850 * 850 || !retreatRecommended) {
+                    botState.mode = 'gather';
+                    botState.lastModeSwitchAt = time.time;
+                    delete botState.squadId;
+                    delete botState.squadLeaderUuid;
+                } else {
+                    // Hold tight defensive orbit around homeworld while superior threat is nearby
+                    const tangentAngle = movement.position.angle.add(Math.PI * 0.5);
+                    movement.turnTo = tangentAngle;
+                    movement.accelerating = 1;
+                    movement.turnBack = false;
+                }
+                continue;
+            }
+
+            if (botState.mode === 'gather') {
+                // 1. Check if ready to upgrade hull first: return to Sol / nearest planet
+                // so ships refit at a planet shipyard rather than morphing in open space!
+                const cost = upgradeCostForTier(botState.tier);
+                if (botState.gatheredCredits >= cost) {
+                    botState.upgradePending = true;
+                    if (closestPlanetDistSq > 150 * 150) {
+                        if (targetComp.target !== undefined) {
+                            targetComp.target = undefined;
+                        }
+                        if (weapons) {
+                            for (const [, w] of weapons) {
+                                if (w.firing) {
+                                    w.firing = false;
+                                }
+                            }
+                        }
+                        if (physics) {
+                            const cmd = approachTarget(
+                                movement,
+                                { position: closestPlanet, velocity: new Vector(0, 0) },
+                                physics,
+                                { standoff: 0 },
+                            );
+                            movement.turnTo = cmd.turnTo ?? closestPlanet.subtract(movement.position).angle;
+                            movement.accelerating = 1;
+                            movement.turnBack = false;
+                        } else {
+                            movement.turnTo = closestPlanet.subtract(movement.position).angle;
+                            movement.accelerating = 1;
+                            movement.turnBack = false;
+                        }
+                        continue;
+                    }
+
+                    botState.upgradePending = false;
+                    botState.gatheredCredits -= cost;
+                    movement.position = new Position(closestPlanet.x, closestPlanet.y);
+                    const launchBearing = Math.random() * 2 * Math.PI;
+                    movement.rotation = new Angle(launchBearing);
+                    movement.velocity = new Vector(
+                        Math.sin(launchBearing) * 45,
+                        -Math.cos(launchBearing) * 45,
+                    );
+                    if (botState.tier + 1 < tiers.length) {
+                        botState.tier += 1;
+                        const nextShipData = resolveBotShipData(
+                            gameData,
+                            botState.factionGovt,
+                            botState.tier,
+                            botState.archetype,
+                        );
+                        if (nextShipData) {
+                            shipComp.id = nextShipData.id;
+                            botEntity.name = `${botState.callsign} (${nextShipData.name})`;
+                            botEntity.components.set(ShipComponent, { id: nextShipData.id });
+                            botEntity.components.set(ShipDataComponent, nextShipData);
+                            botEntity.components.set(ShipPhysicsComponent, { ...nextShipData.physics });
+                            botEntity.components.set(
+                                MovementPhysicsComponent,
+                                getShipMovementPhysics(nextShipData.physics, false),
+                            );
+                            botEntity.components.set(
+                                OutfitsStateComponent,
+                                new Map(Object.entries(nextShipData.outfits).map(
+                                    ([id, count]) => [id, { count }],
+                                )),
+                            );
+                            if (selfShield) {
+                                selfShield.max = nextShipData.physics.shield;
+                                selfShield.current = nextShipData.physics.shield;
+                            }
+                            if (selfArmor) {
+                                selfArmor.max = nextShipData.physics.armor;
+                                selfArmor.current = nextShipData.physics.armor;
+                            }
+                        }
+                    }
+
+                    targetComp.target = undefined;
+                    const newEffectiveTier = estimateHullCombatTier(shipComp.id, botState.tier);
+                    const outmatchedAfterUpgrade = shouldBotRetreat({
+                        selfTier: newEffectiveTier,
+                        selfHealthRatio: 1,
+                        friendlyPower: tactical.friendlyPower + 2,
+                        enemyPower: tactical.enemyPower,
+                        maxEnemyTier: tactical.maxEnemyTier,
+                        isGarrison: botState.garrison,
+                    });
+
+                    if (tactical.bestEnemyUuid && !outmatchedAfterUpgrade) {
+                        botState.mode = 'attack';
+                        botState.lastModeSwitchAt = time.time;
+                        targetComp.target = tactical.bestEnemyUuid;
+                    } else if (
+                        otherSystem
+                        && botState.tier >= 2
+                        && !tactical.bestEnemyUuid
+                        && Math.random() < 0.65
+                    ) {
+                        // Upgraded to Tier 2+: organize a cross-system strike raid (solo or squad)!
+                        botState.mode = 'raid';
+                        botState.lastModeSwitchAt = time.time;
+                        if (Math.random() < 0.7) {
+                            const newSquadId = uuid();
+                            botState.squadId = newSquadId;
+                            botState.squadLeaderUuid = botUuid;
+                            let recruited = 0;
+                            for (const [allyUuid, allyState, , , , allyTarget, , allyDisabled, , , allyEnt] of bots) {
+                                if (
+                                    allyUuid === botUuid
+                                    || allyDisabled
+                                    || allyState.garrison
+                                    || allyState.factionGovt !== botState.factionGovt
+                                    || allyState.tier < 1
+                                    || allyState.mode === 'retreat'
+                                    || allyEnt.components.has(JumpStateComponent)
+                                ) {
+                                    continue;
+                                }
+                                allyState.mode = 'raid';
+                                allyState.squadId = newSquadId;
+                                allyState.squadLeaderUuid = botUuid;
+                                allyState.lastModeSwitchAt = time.time;
+                                allyTarget.target = undefined;
+                                recruited++;
+                                if (recruited >= 2) break;
+                            }
+                        } else {
+                            delete botState.squadId;
+                            delete botState.squadLeaderUuid;
+                        }
+                    } else if (botState.tier >= 2) {
+                        botState.mode = 'attack';
+                        botState.lastModeSwitchAt = time.time;
+                    } else {
+                        // Early-game Tier 1 hull: keep gathering credits toward Tier 2 unless enemies attack
+                        botState.mode = 'gather';
+                        botState.lastModeSwitchAt = time.time;
+                    }
+                    continue;
+                }
+
+                // 2. Tactical threat evaluation while mining:
+                // If an enemy approaches within 1,600 units, evaluate force balance!
+                // Evade to home planet if outmatched (e.g. Shuttle vs Warship), or attack if winnable.
+                if (tactical.closestEnemyDistSq <= 1_600 * 1_600 && tactical.bestEnemyUuid) {
+                    if (retreatRecommended) {
+                        if (closestPlanetDistSq > 150 * 150) {
+                            botState.mode = 'retreat';
+                            botState.lastModeSwitchAt = time.time;
+                            targetComp.target = undefined;
+                            continue;
+                        }
+                    } else {
+                        botState.mode = 'attack';
+                        botState.lastModeSwitchAt = time.time;
+                        targetComp.target = tactical.bestEnemyUuid;
+                        continue;
+                    }
+                }
+
+                // 3. Physically pull and scoop nearby floating Ore / Salvage packages!
                 let nearestOreUuid: string | undefined;
                 let nearestOreMov: import('nova_ecs/plugins/movement_plugin').MovementState | undefined;
                 let nearestOreDist = 550;
@@ -825,149 +1259,14 @@ const ConquestBotLifecycleSystem = new System({
                         }
                     }
                 }
-
-                // Check if ready to upgrade hull: return to Sol / nearest planet
-                // first so ships refit at a planet rather than morphing in open space!
-                const cost = upgradeCostForTier(botState.tier);
-                if (botState.gatheredCredits >= cost) {
-                    botState.upgradePending = true;
-                    let closestPlanet = systemPlanets[0] ?? new Position(0, 0);
-                    let closestPlanetDistSq = closestPlanet.subtract(movement.position).lengthSquared;
-                    for (let pIdx = 1; pIdx < systemPlanets.length; pIdx++) {
-                        const candidatePlanet = systemPlanets[pIdx]!;
-                        const dSq = candidatePlanet.subtract(movement.position).lengthSquared;
-                        if (dSq < closestPlanetDistSq) {
-                            closestPlanetDistSq = dSq;
-                            closestPlanet = candidatePlanet;
-                        }
-                    }
-
-                    if (closestPlanetDistSq > 150 * 150) {
-                        if (targetComp.target !== undefined) {
-                            targetComp.target = undefined;
-                        }
-                        if (weapons) {
-                            for (const [, w] of weapons) {
-                                if (w.firing) {
-                                    w.firing = false;
-                                }
-                            }
-                        }
-                        if (physics) {
-                            const cmd = approachTarget(
-                                movement,
-                                { position: closestPlanet, velocity: new Vector(0, 0) },
-                                physics,
-                                { standoff: 0 },
-                            );
-                            movement.turnTo = cmd.turnTo ?? closestPlanet.subtract(movement.position).angle;
-                            movement.accelerating = 1;
-                            movement.turnBack = false;
-                        } else {
-                            movement.turnTo = closestPlanet.subtract(movement.position).angle;
-                            movement.accelerating = 1;
-                            movement.turnBack = false;
-                        }
-                        continue;
-                    }
-
-                    botState.upgradePending = false;
-                    botState.gatheredCredits -= cost;
-                    movement.position = new Position(closestPlanet.x, closestPlanet.y);
-                    const launchBearing = Math.random() * 2 * Math.PI;
-                    movement.rotation = new Angle(launchBearing);
-                    movement.velocity = new Vector(
-                        Math.sin(launchBearing) * 45,
-                        -Math.cos(launchBearing) * 45,
-                    );
-                    if (botState.tier + 1 < tiers.length) {
-                        botState.tier += 1;
-                        const nextHullId = tiers[botState.tier];
-                        const nextShipData = gameData.data.Ship.getCached(nextHullId);
-                        if (nextShipData) {
-                            shipComp.id = nextShipData.id;
-                            botEntity.name = `${botState.callsign} (${nextShipData.name})`;
-                            botEntity.components.set(ShipComponent, { id: nextShipData.id });
-                            botEntity.components.set(ShipDataComponent, nextShipData);
-                            botEntity.components.set(ShipPhysicsComponent, { ...nextShipData.physics });
-                            botEntity.components.set(
-                                MovementPhysicsComponent,
-                                getShipMovementPhysics(nextShipData.physics, false),
-                            );
-                            botEntity.components.set(
-                                OutfitsStateComponent,
-                                new Map(Object.entries(nextShipData.outfits).map(
-                                    ([id, count]) => [id, { count }],
-                                )),
-                            );
-                            const shield = botEntity.components.get(ShieldComponent);
-                            if (shield) {
-                                shield.max = nextShipData.physics.shield;
-                                shield.current = nextShipData.physics.shield;
-                            }
-                            const armor = botEntity.components.get(ArmorComponent);
-                            if (armor) {
-                                armor.max = nextShipData.physics.armor;
-                                armor.current = nextShipData.physics.armor;
-                            }
-                        } else {
-                            void gameData.data.Ship.get(nextHullId).catch(() => {});
-                        }
-                    }
-
-                    targetComp.target = undefined;
-                    const enemyInSystem = findClosestEnemy(
-                        botUuid,
-                        botState,
-                        movement.position,
-                        botEntity,
-                    );
-                    if (enemyInSystem) {
-                        botState.mode = 'attack';
-                        botState.lastModeSwitchAt = time.time;
-                        targetComp.target = enemyInSystem;
-                    } else if (
-                        otherSystem
-                        && botState.tier >= 1
-                        && Math.random() < 0.65
-                    ) {
-                        // Decide to hyperjump to the rival system to attack (alone or in a group)!
-                        botState.mode = 'raid';
-                        botState.lastModeSwitchAt = time.time;
-                        if (Math.random() < 0.55) {
-                            const newSquadId = uuid();
-                            botState.squadId = newSquadId;
-                            botState.squadLeaderUuid = botUuid;
-                            let recruited = 0;
-                            for (const [allyUuid, allyState, , , , allyTarget, , allyDisabled, allyEnt] of bots) {
-                                if (
-                                    allyUuid === botUuid
-                                    || allyDisabled
-                                    || allyState.garrison
-                                    || allyState.factionGovt !== botState.factionGovt
-                                    || allyState.tier < 1
-                                    || allyEnt.components.has(JumpStateComponent)
-                                ) {
-                                    continue;
-                                }
-                                allyState.mode = 'raid';
-                                allyState.squadId = newSquadId;
-                                allyState.squadLeaderUuid = botUuid;
-                                allyState.lastModeSwitchAt = time.time;
-                                allyTarget.target = undefined;
-                                recruited++;
-                                if (recruited >= 2) break;
-                            }
-                        } else {
-                            delete botState.squadId;
-                            delete botState.squadLeaderUuid;
-                        }
-                    } else {
-                        botState.mode = 'attack';
-                        botState.lastModeSwitchAt = time.time;
-                    }
-                }
             } else if (botState.mode === 'raid') {
+                // If ambushed by an overwhelming force in home system before jumping, retreat to planet
+                if (retreatRecommended && systemId === botState.homeSystem) {
+                    botState.mode = 'retreat';
+                    botState.lastModeSwitchAt = time.time;
+                    targetComp.target = undefined;
+                    continue;
+                }
                 // Fly outward along the jump vector (alone or in squad formation)
                 // and hyperjump to the opposite system!
                 if (!otherSystem) {
@@ -1043,7 +1342,7 @@ const ConquestBotLifecycleSystem = new System({
                     });
                     // Trigger hyperjump for any squad wingmen in this squad!
                     if (botState.squadId) {
-                        for (const [allyUuid, allyState, , , , , , allyDisabled, allyEnt] of bots) {
+                        for (const [allyUuid, allyState, , , , , , allyDisabled, , , allyEnt] of bots) {
                             if (
                                 allyUuid !== botUuid
                                 && !allyDisabled
@@ -1065,33 +1364,30 @@ const ConquestBotLifecycleSystem = new System({
                     }
                 }
             } else {
-                // 'attack' mode: coordinate with squad leader if present, or engage closest enemy
-                let chosenEnemy: string | undefined;
-                if (
-                    botState.squadLeaderUuid
-                    && botState.squadLeaderUuid !== botUuid
-                ) {
-                    const leaderTarget = entities.get(botState.squadLeaderUuid)
-                        ?.components.get(TargetComponent)?.target;
-                    const leaderTargetEnt = leaderTarget ? entities.get(leaderTarget) : undefined;
-                    if (
-                        leaderTarget
-                        && leaderTargetEnt
-                        && !leaderTargetEnt.components.has(DisabledComponent)
-                        && !leaderTargetEnt.components.has(DestructionStartedComponent)
-                        && !leaderTargetEnt.components.has(PlayerDeathComponent)
-                    ) {
-                        chosenEnemy = leaderTarget;
+                // 'attack' mode: check Tactical Utility AI retreat condition first!
+                if (retreatRecommended) {
+                    botState.mode = 'retreat';
+                    botState.lastModeSwitchAt = time.time;
+                    targetComp.target = undefined;
+                    if (botState.squadId && botState.squadLeaderUuid === botUuid) {
+                        for (const [allyUuid, allyState, , , , allyTarget, , allyDisabled] of bots) {
+                            if (
+                                allyUuid !== botUuid
+                                && !allyDisabled
+                                && allyState.squadId === botState.squadId
+                                && allyState.mode !== 'retreat'
+                            ) {
+                                allyState.mode = 'retreat';
+                                allyState.lastModeSwitchAt = time.time;
+                                allyTarget.target = undefined;
+                            }
+                        }
                     }
+                    continue;
                 }
-                if (!chosenEnemy) {
-                    chosenEnemy = findClosestEnemy(
-                        botUuid,
-                        botState,
-                        movement.position,
-                        botEntity,
-                    );
-                }
+
+                // Select highest-utility hostile target (includes squad focus-fire bonus)
+                const chosenEnemy = tactical.bestEnemyUuid ?? tactical.closestEnemyUuid;
 
                 if (chosenEnemy) {
                     if (targetComp.target !== chosenEnemy) {
@@ -1113,12 +1409,12 @@ const ConquestBotLifecycleSystem = new System({
                     }
                     const idleElapsed = time.time - (lastEnemySeenByBot.get(botUuid) ?? botState.lastModeSwitchAt);
                     if (!botState.garrison && idleElapsed >= CONQUEST_BOT_RAID_IDLE_MS) {
-                        // No enemies in sight: either jump to the rival system to raid,
+                        // No enemies in sight: either jump to the rival system to raid (if Tier 2+),
                         // or return to mining asteroids if in home system.
                         const inHomeSystem = systemId === botState.homeSystem;
                         if (
                             otherSystem
-                            && (!inHomeSystem || (botState.tier >= 1 && Math.random() < 0.45))
+                            && (!inHomeSystem || (botState.tier >= 2 && Math.random() < 0.45))
                         ) {
                             botState.mode = 'raid';
                             botState.lastModeSwitchAt = time.time;
@@ -1132,7 +1428,7 @@ const ConquestBotLifecycleSystem = new System({
                         }
                     } else {
                         // Active orbital patrol around the system center while
-                        // scanning for threats (Garrison fleet or post-combat sweep).
+                        // scanning for threats.
                         const distFromOrigin = movement.position.length;
                         if (distFromOrigin > 520) {
                             movement.turnTo = new Position(0, 0).subtract(movement.position).angle;
@@ -1234,6 +1530,7 @@ const ConquestSalvageDropSystem = new System({
 export const ConquestModePlugin: Plugin = {
     name: 'ConquestModePlugin',
     build(world) {
+        resetConquestRuntimeState();
         const deltaMaker = world.resources.get(DeltaResource);
         if (deltaMaker) {
             deltaMaker.addComponent(ConquestBotComponent, {
@@ -1246,6 +1543,7 @@ export const ConquestModePlugin: Plugin = {
         world.addSystem(VellosFuelRegenSystem);
     },
     remove(world) {
+        resetConquestRuntimeState();
         world.removeSystem(VellosFuelRegenSystem);
         world.removeSystem(ConquestSalvageDropSystem);
         world.removeSystem(ConquestBotLifecycleSystem);
