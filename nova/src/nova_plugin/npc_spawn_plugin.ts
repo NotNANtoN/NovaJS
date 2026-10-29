@@ -616,6 +616,23 @@ const NpcSpawnSystem = new AsyncSystem({
         EntityBudgetResource,
     ] as const,
     exclusive: true,
+    canSkipStep(_singleton, _gameData, systemId, time, state, npcs, world) {
+        if (!activeWorlds.has(world) || state.disabled) {
+            return true;
+        }
+        if (isConquestPocketSystem(systemId)) {
+            for (const entity of world.entities.values()) {
+                const playerState = entity.components.get(PlayerStateComponent);
+                if (playerState && isConquestMode(playerState)) {
+                    return true;
+                }
+            }
+        }
+        if (!state.initialized) {
+            return false;
+        }
+        return time.time < state.nextSpawnAt || npcs.length >= state.target;
+    },
     async step(_singleton, gameData, systemId, time, state, npcs, world, budget) {
         if (!activeWorlds.has(world) || state.disabled) {
             return;

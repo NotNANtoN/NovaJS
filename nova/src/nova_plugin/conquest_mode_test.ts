@@ -10,7 +10,7 @@ import { TimePlugin } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
 import { MockGameData } from 'novadatainterface/MockGameData';
 import { getDefaultSystemData } from 'novadatainterface/SystemData';
-import { AsteroidPlugin, makeOre } from './asteroid_plugin';
+import { AsteroidPlugin, enforceOreEntityCap, makeOre, MAX_ACTIVE_ORE_ENTITIES, OreComponent } from './asteroid_plugin';
 import {
     ASTEROID_SPAWN_MIN_RADIUS,
     offscreenAsteroidSpawn,
@@ -60,10 +60,15 @@ import { DeathPlugin } from './death_plugin';
 import { ArmorComponent, ShieldComponent } from './health_plugin';
 import { Stat } from './stat';
 import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
-import { DeathEvent, LastAttackerComponent } from './death_plugin';
+import { DeathEvent, LastAttackerComponent, PlayerDeathComponent } from './death_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { createProvocationState, NpcHostilitySystems, ProvocationResource, recordProvocation } from './npc_hostility';
+import { GovtComponent, NpcAIComponent } from './npc_components';
+import { TargetComponent } from './target_component';
+import { OutfitsStateComponent } from './outfit_plugin';
+import { BASIC_ESCAPE_POD_SHIP_ID } from './escape_pod';
 
 describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
     it('preserves lateral offset when hyperjumping from a lower or upper point in System A to System B', () => {
@@ -649,5 +654,138 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         const stepDelta = deltaMaker.getDelta(ship);
         expect(stepDelta?.componentDeltas?.has(MovementStateComponent.name)).toBeTrue();
         expect(isDraft(ship.components.get(MovementStateComponent))).toBeFalse();
+    });
+
+    it('clears allied Federation hostility, LastAttackerComponent, and TargetComponent when a Conquest player dies and respawns', async () => {
+        const world = new World();
+        const gameData = new MockGameData();
+        const shuttleHull = {
+            ...getDefaultShipData(),
+            id: BASIC_ESCAPE_POD_SHIP_ID,
+            name: 'Shuttle',
+            outfits: {},
+        };
+        const carrierHull = {
+            ...getDefaultShipData(),
+            id: 'nova:143',
+            name: 'Fed Carrier',
+            outfits: {},
+        };
+        gameData.data.Ship.map.set(BASIC_ESCAPE_POD_SHIP_ID, shuttleHull);
+        gameData.data.Ship.map.set('nova:143', carrierHull);
+        await gameData.data.Ship.get(BASIC_ESCAPE_POD_SHIP_ID);
+        await gameData.data.Ship.get('nova:143');
+        world.resources.set(GameDataResource, gameData);
+        world.resources.set(SystemIdResource, CONQUEST_SOL_SYSTEM);
+        world.resources.set(PlatformResource, 'node');
+        const provocations = createProvocationState();
+        world.resources.set(ProvocationResource, provocations);
+
+        await world.addPlugin(TimePlugin);
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(MovementPlugin);
+        await world.addPlugin(EntityBudgetPlugin);
+        await world.addPlugin(DeathPlugin);
+        world.addSystem(NpcHostilitySystems.playerDeathCleanup);
+        await world.addPlugin(ConquestModePlugin);
+
+        const playerState = createInitialPlayerState();
+        playerState.gameMode = 'conquest';
+        playerState.shipId = 'nova:144';
+        playerState.currentSystem = CONQUEST_SOL_SYSTEM;
+        playerState.lastLandedSystem = CONQUEST_SOL_SYSTEM;
+        playerState.legalRecords = { 'nova:128': -50 };
+
+        const playerEnt = new Entity('Player')
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(ShipComponent, { id: 'nova:144' })
+            .addComponent(ShipDataComponent, shuttleHull)
+            .addComponent(OutfitsStateComponent, new Map())
+            .addComponent(ShieldComponent, new Stat({ current: 100, max: 100, recharge: 0 }))
+            .addComponent(ArmorComponent, new Stat({ current: 100, max: 100, recharge: 0 }))
+            .addComponent(MultiplayerData, { owner: 'player-1' })
+            .addComponent(MovementStateComponent, {
+                position: new Position(100, 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        world.entities.set('player-1', playerEnt);
+
+        const fedBot = new Entity('Fed Carrier')
+            .addComponent(ShipComponent, { id: 'nova:143' })
+            .addComponent(ShipDataComponent, carrierHull)
+            .addComponent(NpcAIComponent, undefined)
+            .addComponent(GovtComponent, { id: FEDERATION_GOVT })
+            .addComponent(TargetComponent, { target: undefined })
+            .addComponent(LastAttackerComponent, 'player-1')
+            .addComponent(ConquestBotComponent, {
+                callsign: 'Capt. Vance',
+                mode: 'attack',
+                factionGovt: FEDERATION_GOVT,
+                homeSystem: CONQUEST_SOL_SYSTEM,
+                tier: 9,
+                gatheredCredits: 0,
+                lastModeSwitchAt: 0,
+                upgradePending: false,
+                garrison: true,
+            })
+            .addComponent(MultiplayerData, { owner: 'server' })
+            .addComponent(MovementStateComponent, {
+                position: new Position(200, 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        world.entities.set('fed-bot-1', fedBot);
+
+        // 1. With ProvocationResource present and unprovoked, a stale LastAttackerComponent
+        // alone (e.g. from an accidental stray hit below the 3% threshold) must not trigger
+        // allied fleet retaliation.
+        world.step();
+        expect(fedBot.components.get(TargetComponent)?.target).toBeUndefined();
+
+        // 2. When sustained fire provokes the Federation fleet, the bot targets the player.
+        const time = world.resources.get(TimeResource)!;
+        recordProvocation(provocations, FEDERATION_GOVT, 'player-1', time.time, 'fed-bot-1', 'sustained-fire');
+        world.step();
+        expect(fedBot.components.get(TargetComponent)?.target).toBe('player-1');
+
+        // 3. Player dies: hostility, LastAttackerComponent, and TargetComponent are cleared.
+        world.emitNow(DeathEvent, time, ['player-1']);
+        expect(playerEnt.components.has(PlayerDeathComponent)).toBeTrue();
+        expect(fedBot.components.has(LastAttackerComponent)).toBeFalse();
+        expect(fedBot.components.get(TargetComponent)?.target).toBeUndefined();
+
+        // 4. Advance past respawn timer: player respawns with clean legal record,
+        // and the allied Federation bot does NOT re-target the respawned player!
+        const deathState = playerEnt.components.get(PlayerDeathComponent)!;
+        time.fixedDelta_ms = 3_000;
+        time.time = (deathState.respawnAt ?? time.time) + 100;
+        world.step();
+        world.step();
+
+        expect(playerEnt.components.has(PlayerDeathComponent)).toBeFalse();
+        expect(playerEnt.components.get(PlayerStateComponent)?.legalRecords?.['nova:128']).toBe(0);
+        expect(fedBot.components.get(TargetComponent)?.target).toBeUndefined();
+    });
+
+    it('caps simultaneous floating OreComponent entities via enforceOreEntityCap', () => {
+        const entities = new Map<string, Entity>();
+        for (let i = 0; i < MAX_ACTIVE_ORE_ENTITIES; i++) {
+            const ore = makeOre('nova:130', 'Metal', 1, new Position(i, 0), undefined, 100 + i);
+            entities.set(`ore-${i}`, ore);
+        }
+        expect(entities.size).toBe(MAX_ACTIVE_ORE_ENTITIES);
+
+        enforceOreEntityCap(entities, 3);
+        expect(entities.size).toBe(MAX_ACTIVE_ORE_ENTITIES - 3);
+        expect(entities.has('ore-0')).toBeFalse();
+        expect(entities.has('ore-1')).toBeFalse();
+        expect(entities.has('ore-2')).toBeFalse();
     });
 });

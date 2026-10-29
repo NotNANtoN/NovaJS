@@ -34,6 +34,7 @@ export interface AsyncSystemArgs<StepArgTypes extends readonly ArgTypes[]>
     exclusive?: boolean; // Run this system only once at a time (per entity)
     skipIfApplyingPatches?: boolean; // Don't run the system if there are patches to apply from previous runs. Just apply the patches.
     alwaysRunOnEvents?: boolean; // Always run the system on events other than the step event.
+    canSkipStep?: (...args: ArgsToData<StepArgTypes>) => boolean;
 }
 
 enablePatches();
@@ -65,18 +66,21 @@ export class AsyncSystem<StepArgTypes extends readonly ArgTypes[] = readonly Arg
                 // Apply patches from the previous complete run.
                 // Note that this only runs if the entity still exists.
 
-                // This is a hack to force immer to treat stepArgs
-                // as if it were a draft. It greatly simplifies the rest
-                // of the code, but may break in the future.
-                (stepArgs as any)[Symbol.for('immer-state')] = true;
+                const hasPatches = entityStatus.patches.length > 0;
                 const willSkip = systemArgs.skipIfApplyingPatches &&
-                    entityStatus.patches.length > 0 && canSkip;
-                for (const patches of entityStatus.patches) {
-                    applyPatches(stepArgs, patches);
+                    hasPatches && canSkip;
+                if (hasPatches) {
+                    // This is a hack to force immer to treat stepArgs
+                    // as if it were a draft. It greatly simplifies the rest
+                    // of the code, but may break in the future.
+                    (stepArgs as any)[Symbol.for('immer-state')] = true;
+                    for (const patches of entityStatus.patches) {
+                        applyPatches(stepArgs, patches);
+                    }
+                    (stepArgs as any)[Symbol.for('immer-state')] = false;
+                    entityStatus.patches = [];
                 }
-                (stepArgs as any)[Symbol.for('immer-state')] = false;
-                entityStatus.patches = [];
-                if (willSkip) {
+                if (willSkip || (canSkip && systemArgs.canSkipStep?.(...stepArgs))) {
                     entityStatus.running = false;
                     return;
                 }

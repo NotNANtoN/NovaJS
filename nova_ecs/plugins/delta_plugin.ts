@@ -344,6 +344,9 @@ export class DeltaMaker {
                     }
                 } else if (isDraft(data)) {
                     const originalData = original(data);
+                    if (current(data) === originalData) {
+                        continue;
+                    }
 
                     let patches: Patch[] | undefined;
                     const currentData = this.finishAndInstall(

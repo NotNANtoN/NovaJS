@@ -79,6 +79,32 @@ const ORE_MAGNET_RADIUS = 180;
 const ORE_MAGNET_ACCEL = 160;
 /** Ore is spread over at most this many chunks. */
 const MAX_ORE_CHUNKS = 4;
+/** Maximum lifetime of floating ore/salvage chunks before they dissipate. */
+export const ORE_LIFESPAN_MS = 25_000;
+/** Hard cap on simultaneous floating OreComponent entities per star system. */
+export const MAX_ACTIVE_ORE_ENTITIES = 24;
+
+export function enforceOreEntityCap(
+    entities: Map<string, Entity>,
+    incomingCount = 1,
+    maxActive = MAX_ACTIVE_ORE_ENTITIES,
+): void {
+    const activeOres: Array<{ uuid: string; spawnedAt: number }> = [];
+    for (const [id, ent] of entities) {
+        const ore = ent.components.get(OreComponent);
+        if (ore) {
+            activeOres.push({ uuid: id, spawnedAt: ore.spawnedAt ?? 0 });
+        }
+    }
+    const excess = activeOres.length + incomingCount - maxActive;
+    if (excess <= 0) {
+        return;
+    }
+    activeOres.sort((a, b) => a.spawnedAt - b.spawnedAt);
+    for (let i = 0; i < excess && i < activeOres.length; i++) {
+        entities.delete(activeOres[i].uuid);
+    }
+}
 
 export const AsteroidType = t.type({
     id: t.string,
@@ -375,7 +401,14 @@ const AsteroidDestroyedSystem = new System({
         const origin = () => new Position(
             movement.position.x, movement.position.y);
 
-        for (let index = 0; index < data.fragmentCount; index++) {
+        let activeAsteroids = 0;
+        for (const ent of entities.values()) {
+            if (ent.components.has(AsteroidComponent)) {
+                activeAsteroids++;
+            }
+        }
+        const maxFragments = activeAsteroids >= 24 ? 0 : data.fragmentCount;
+        for (let index = 0; index < maxFragments; index++) {
             const fragmentId = data.fragments[index % data.fragments.length];
             if (!fragmentId) {
                 break;
@@ -409,6 +442,7 @@ const AsteroidDestroyedSystem = new System({
             : (conquestActive ? 3 : 0);
         if (commodity && yieldQty > 0) {
             const chunks = oreChunkTons(yieldQty);
+            enforceOreEntityCap(entities, chunks.length);
             for (let idx = 0; idx < chunks.length; idx++) {
                 const tons = chunks[idx];
                 let ore: Entity;
@@ -455,6 +489,10 @@ const OrePickupSystem = new System({
         TimeResource] as const,
     step(ore, movement, selfUuid, entities, collectors, multiplayer, platform, emit, time) {
         if (platform !== 'node' || multiplayer.owner !== 'server') {
+            return;
+        }
+        if (ore.spawnedAt !== undefined && time.time - ore.spawnedAt >= ORE_LIFESPAN_MS) {
+            entities.delete(selfUuid);
             return;
         }
         // Let newly shattered ore chunks burst outward before being scooped

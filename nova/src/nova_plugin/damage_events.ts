@@ -1,6 +1,34 @@
+import * as t from 'io-ts';
+import { Component } from 'nova_ecs/component';
 import { EcsEvent } from 'nova_ecs/events';
 import { Time } from 'nova_ecs/plugins/time_plugin';
 import { WeaponDamage } from 'novadatainterface/WeaponData';
+
+export const LastAttackerComponent =
+    new Component<string>('LastAttackerComponent');
+export const DisabledComponent = new Component<boolean>('DisabledComponent');
+export const DisableOnZeroArmorComponent =
+    new Component<undefined>('DisableOnZeroArmorComponent');
+
+export const PlayerDeathStateCodec = t.intersection([
+    t.type({
+        wreckPosition: t.tuple([t.number, t.number]),
+        visualFallbackAt: t.number,
+    }),
+    t.partial({
+        messageAt: t.number,
+        respawnAt: t.number,
+        outcome: t.union([
+            t.literal('escaped'),
+            t.literal('killed'),
+        ]),
+        message: t.string,
+        escapePodOutfitId: t.string,
+    }),
+]);
+export type PlayerDeathState = t.TypeOf<typeof PlayerDeathStateCodec>;
+export const PlayerDeathComponent = new Component<PlayerDeathState>(
+    'PlayerDeathComponent');
 
 export const DeathEvent = new EcsEvent<Time>('DeathEvent');
 export const ZeroArmorEvent = new EcsEvent<Time>('ZeroArmorEvent');

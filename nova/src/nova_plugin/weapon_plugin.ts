@@ -733,6 +733,7 @@ export const ServerFireIntentSystem = new System({
         entity, log, systemId) {
         if (platform !== 'node') return;
         let local = entity.components.get(ServerFireCadenceComponent);
+        if (multiplayer.owner === 'server' && !local) return;
         const authority = entity.components.get(CombatAuthorityComponent);
         const shared = authority && pilotCadences.get(authority);
         if (!local && !weapons) return;

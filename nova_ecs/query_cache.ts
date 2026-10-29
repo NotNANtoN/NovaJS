@@ -63,17 +63,24 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
                 if (this.entities.get(uuid) === entity) {
                     return;
                 }
+                const wasPresent = this.entities.has(uuid);
                 if (supported(query, entity)) {
                     this.entities.set(uuid, entity);
-                } else {
+                    this.entityResults.delete(entity);
+                    this.resultValid = false;
+                } else if (wasPresent) {
+                    const prev = this.entities.get(uuid);
                     this.entities.delete(uuid);
+                    if (prev) {
+                        this.entityResults.delete(prev);
+                    }
+                    this.entityResults.delete(entity);
+                    this.resultValid = false;
                 }
-                this.entityResults.delete(entity);
-                this.resultValid = false;
             }),
             entities.events.delete.subscribe((vals) => {
                 for (const [uuid, entity] of vals) {
-                    if (supported(query, entity)) {
+                    if (this.entities.has(uuid) || supported(query, entity)) {
                         this.resultValid = false;
                     }
                     this.entities.delete(uuid);
@@ -81,17 +88,29 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
                 }
             }),
             entities.events.addComponent.subscribe(([uuid, entity]) => {
-                if (supported(query, entity)) {
+                const wasPresent = this.entities.has(uuid);
+                const isSupported = supported(query, entity);
+                if (!wasPresent && !isSupported) {
+                    return;
+                }
+                if (isSupported) {
                     this.entities.set(uuid, entity);
                 }
                 this.entityResults.delete(entity); // for `Optional` etc.
                 this.resultValid = false;
             }),
-            entities.events.changeComponentAlways.subscribe(([, entity]) => {
+            entities.events.changeComponentAlways.subscribe(([uuid, entity]) => {
+                if (!this.entities.has(uuid)) {
+                    return;
+                }
                 this.entityResults.delete(entity);
                 this.resultValid = false;
             }),
             entities.events.deleteComponent.subscribe(([uuid, entity, component]) => {
+                const wasPresent = this.entities.has(uuid);
+                if (!wasPresent && !supported(query, entity)) {
+                    return;
+                }
                 if (query.components.has(component) && !supported(query, entity)) {
                     this.entities.delete(uuid);
                 }

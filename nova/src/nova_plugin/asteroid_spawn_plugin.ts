@@ -174,6 +174,19 @@ const AsteroidSpawnSystem = new AsyncSystem({
         TimeResource, AsteroidSpawnStateResource, AsteroidsQuery, GetWorld,
         EntityBudgetResource, AsteroidFieldPlayersQuery] as const,
     exclusive: true,
+    canSkipStep(_singleton, _gameData, _systemId, time, state, asteroids, world, _budget, players) {
+        if (!activeWorlds.has(world) || state.disabled) {
+            return true;
+        }
+        if (!state.initialized) {
+            return false;
+        }
+        const hasConquest = players.some(([, pState]) => isConquestMode(pState));
+        if (!hasConquest && asteroids.length >= state.target) {
+            return true;
+        }
+        return time.time < state.nextSpawnAt;
+    },
     async step(_singleton, gameData, systemId, time, state, asteroids, world,
         budget, players) {
         if (!activeWorlds.has(world) || state.disabled) {

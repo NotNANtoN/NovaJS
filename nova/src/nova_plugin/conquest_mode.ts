@@ -17,7 +17,7 @@ import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { v4 as uuid } from 'uuid';
-import { AsteroidComponent, makeOre, OreComponent } from './asteroid_plugin';
+import { AsteroidComponent, enforceOreEntityCap, makeOre, OreComponent } from './asteroid_plugin';
 import { BoardingNoticeComponent } from './boarding_notice';
 import { DeathEvent, DisabledComponent, LastAttackerComponent, PlayerDeathComponent } from './death_plugin';
 import { DestructionStartedComponent } from './destruction_state';
@@ -560,20 +560,8 @@ const ConquestBotLifecycleSystem = new System({
                     && (candGovtId === FEDERATION_GOVT
                         || candGovtId === AURORAN_GOVT
                         || candGovtId === 130);
-                const directlyAttackedThisBot = lastAttacker === candidateUuid;
-                if (directlyAttackedThisBot && provocations) {
-                    // Propagate player/enemy attack to the entire faction fleet in Conquest
-                    recordProvocation(
-                        provocations,
-                        botState.factionGovt,
-                        candidateUuid,
-                        time.time,
-                        botUuid,
-                        'sustained-fire',
-                    );
-                }
-                const provoked = directlyAttackedThisBot || Boolean(
-                    provocations && (
+                const provoked = provocations
+                    ? (
                         isPersonallyProvoked(provocations, botUuid, candidateUuid)
                         || isProvoked(
                             provocations,
@@ -581,8 +569,8 @@ const ConquestBotLifecycleSystem = new System({
                             candidateUuid,
                             (a, b) => (a === b ? 'ally' : 'enemy'),
                         )
-                    ),
-                );
+                    )
+                    : lastAttacker === candidateUuid;
                 const isEnemyPlayer = Boolean(
                     candidatePlayer && (
                         provoked
@@ -941,7 +929,14 @@ const ConquestBotLifecycleSystem = new System({
                 ) {
                     const leaderTarget = entities.get(botState.squadLeaderUuid)
                         ?.components.get(TargetComponent)?.target;
-                    if (leaderTarget && entities.has(leaderTarget)) {
+                    const leaderTargetEnt = leaderTarget ? entities.get(leaderTarget) : undefined;
+                    if (
+                        leaderTarget
+                        && leaderTargetEnt
+                        && !leaderTargetEnt.components.has(DisabledComponent)
+                        && !leaderTargetEnt.components.has(DestructionStartedComponent)
+                        && !leaderTargetEnt.components.has(PlayerDeathComponent)
+                    ) {
                         chosenEnemy = leaderTarget;
                     }
                 }
@@ -1029,8 +1024,9 @@ const ConquestSalvageDropSystem = new System({
         SystemIdResource,
         EntityBudgetResource,
         ConquestPlayersQuery,
+        Optional(TimeResource),
     ] as const,
-    step(_ship, shipData, victimBot, lastAttackerUuid, movement, entities, platform, systemId, budget, players) {
+    step(_ship, shipData, victimBot, lastAttackerUuid, movement, entities, platform, systemId, budget, players, time) {
         if (platform !== 'node' || !isConquestPocketSystem(systemId)) {
             return;
         }
@@ -1069,12 +1065,13 @@ const ConquestSalvageDropSystem = new System({
         const totalTons = Math.max(3, Math.min(24, Math.round(cost / 12_000)));
         const chunks = Math.min(3, totalTons);
         const tonsPerChunk = Math.max(1, Math.floor(totalTons / chunks));
+        enforceOreEntityCap(entities, chunks);
         for (let i = 0; i < chunks; i++) {
             const origin = new Position(
                 movement.position.x + (Math.random() - 0.5) * 30,
                 movement.position.y + (Math.random() - 0.5) * 30,
             );
-            const salvage = makeOre('nova:140', 'Salvage Core', tonsPerChunk, origin);
+            const salvage = makeOre('nova:140', 'Salvage Core', tonsPerChunk, origin, undefined, time?.time);
             if (!reserveEntity(budget, salvage, 'asteroid')) {
                 break;
             }

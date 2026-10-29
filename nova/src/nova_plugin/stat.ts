@@ -11,8 +11,10 @@ class Box<T> {
     constructor(public wrappedVal: T) { }
 
     set val(t: T) {
-        this.wrappedVal = t;
-        this.changed = true;
+        if (this.wrappedVal !== t) {
+            this.wrappedVal = t;
+            this.changed = true;
+        }
     }
     get val() {
         return this.wrappedVal;
@@ -63,12 +65,18 @@ export class Stat {
     }
 
     step(delta: number) {
+        if (this.recharge === 0) {
+            return;
+        }
         // Through the setter, so recharge is reported as a change and reaches
         // clients: they no longer compute health themselves. `getStatDelta`
         // throttles the result, so this does not put a stat on the wire per
         // frame.
-        this.current = Math.max(this.min,
+        const next = Math.max(this.min,
             Math.min(this.max, this.current + this.recharge * delta));
+        if (next !== this.current) {
+            this.current = next;
+        }
     }
 
     get percent() {

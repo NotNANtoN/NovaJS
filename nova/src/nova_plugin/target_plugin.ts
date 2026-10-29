@@ -110,7 +110,9 @@ const TargetRemovedSystem = new System({
                 targetRemoved.push(targeterUuid);
             }
         }
-        emit(TargetRemovedEvent, uuid, targetRemoved);
+        if (targetRemoved.length > 0) {
+            emit(TargetRemovedEvent, uuid, targetRemoved);
+        }
     }
 });
 

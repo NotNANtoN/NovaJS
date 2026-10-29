@@ -6,12 +6,15 @@ import {
     CollisionHitter,
     CollisionHitterComponent,
 } from "./collision_interaction";
-import { AppliedDamageEvent, PlayerDeathComponent } from "./death_plugin";
+import { AppliedDamageEvent, LastAttackerComponent, PlayerDeathComponent } from "./damage_events";
 import {
     AttackIntentComponent,
     OwnerComponent,
     SourceComponent,
 } from "./fire_weapon_plugin";
+import { parseLoggedShotEntityId } from "./fire_sync";
+import { ConquestBotComponent } from "./conquest_config";
+import { WeaponsStateComponent } from "./weapons_state";
 import {
     GovernmentRelation,
     GovernmentRelationResource,
@@ -463,7 +466,8 @@ export function resolveDamageSource(
     ) ?? findShipUuid(
         damageEntity?.components.get(OwnerComponent)?.owner,
         entities,
-    ) ?? tracked?.attacker;
+    ) ?? tracked?.attacker
+    ?? findShipUuid(parseLoggedShotEntityId(damager)?.source, entities);
     return attacker ? {
         attacker,
         intendedTarget: damageEntity?.components
@@ -622,14 +626,57 @@ const ProvocationCleanupSystem = new System({
     },
 });
 
+export function clearEntityHostility(
+    entities: EntityMap,
+    provocations: ProvocationState | undefined,
+    entityUuid: string,
+): void {
+    if (provocations) {
+        clearProvocation(provocations, entityUuid);
+    }
+    const associatedUuids = new Set<string>([entityUuid]);
+    for (const [otherUuid, otherEntity] of entities) {
+        if (otherEntity.components.get(OwnerComponent)?.owner === entityUuid) {
+            associatedUuids.add(otherUuid);
+            if (provocations) {
+                clearProvocation(provocations, otherUuid);
+            }
+        }
+    }
+    for (const [, otherEntity] of entities) {
+        const lastAttacker = otherEntity.components.get(LastAttackerComponent);
+        if (lastAttacker && associatedUuids.has(lastAttacker)) {
+            otherEntity.components.delete(LastAttackerComponent);
+        }
+        const isNpcOrBot = otherEntity.components.has(NpcAIComponent)
+            || otherEntity.components.has(ConquestBotComponent);
+        if (!isNpcOrBot) {
+            continue;
+        }
+        const target = otherEntity.components.get(TargetComponent);
+        if (target?.target && associatedUuids.has(target.target)) {
+            target.target = undefined;
+            const weapons = otherEntity.components.get(WeaponsStateComponent);
+            if (weapons) {
+                for (const [, weapon] of weapons) {
+                    weapon.firing = false;
+                    if (weapon.target && associatedUuids.has(weapon.target)) {
+                        weapon.target = undefined;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // On the authoritative server, the client's local PlayerDeathEvent is not
 // emitted. The replicated death marker lets hostility state be cleared in
 // both local and server worlds before the player can respawn.
 const PlayerDeathProvocationCleanupSystem = new System({
     name: "PlayerDeathProvocationCleanup",
-    args: [PlayerDeathComponent, UUID, ProvocationResource] as const,
-    step: (_death, uuid, provocations) => {
-        clearProvocation(provocations, uuid);
+    args: [PlayerDeathComponent, UUID, ProvocationResource, Entities] as const,
+    step: (_death, uuid, provocations, entities) => {
+        clearEntityHostility(entities, provocations, uuid);
     },
 });
 

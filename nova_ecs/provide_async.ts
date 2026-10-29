@@ -1,6 +1,6 @@
 import { isDraft, original } from "immer";
 import { unwrapDraftsDeep } from "./draft_snapshot";
-import { ArgsToData, ArgTypes, Entities, GetEntity, UUID } from "./arg_types";
+import { ArgsToData, ArgTypes, GetEntity, GetWorld, UUID } from "./arg_types";
 import { AsyncSystem } from "./async_system";
 import { Component } from "./component";
 import { DeleteEvent, StepEvent } from "./events";
@@ -34,11 +34,21 @@ export function ProvideAsync<Data, Args extends readonly ArgTypes[]>({ name, pro
         name,
         events: [StepEvent, ...updateEvents],
         before, after,
-        args: [Optional(provided), AsyncProviderResource, Entities, UUID,
+        args: [Optional(provided), AsyncProviderResource, GetWorld, UUID,
             GetEntity, Optional(StepEvent), ...args] as const,
         skipIfApplyingPatches: true,
         exclusive: true,
-        async step(providedValue, asyncProviderData, entities, uuid, entity, step, ...args) {
+        canSkipStep(providedValue, asyncProviderData, _world, uuid, _entity, step, ..._args) {
+            if (!step) {
+                return false;
+            }
+            if (providedValue !== undefined) {
+                return true;
+            }
+            const originalData = originalIfDraft(asyncProviderData);
+            return Boolean(originalData.get(name)?.get(uuid));
+        },
+        async step(providedValue, asyncProviderData, world, uuid, entity, step, ...args) {
             const originalProvidedValue = entity.components.get(provided);
 
             const originalData = originalIfDraft(asyncProviderData);
@@ -65,7 +75,7 @@ export function ProvideAsync<Data, Args extends readonly ArgTypes[]>({ name, pro
                 // The entity may have been deleted while the factory was
                 // waiting for network or asset data. Do not retain the
                 // completed graphic (or any other owned async resource).
-                if (entities.get(uuid) !== entity) {
+                if (world.entities.get(uuid) !== entity) {
                     dispose?.(providedValue);
                     return;
                 }

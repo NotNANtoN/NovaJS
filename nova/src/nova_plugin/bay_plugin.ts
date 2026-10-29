@@ -22,7 +22,8 @@ import { TargetComponent } from './target_component';
 import { TargetRemovedEvent } from './target_plugin';
 import { WeaponsStateComponent } from './weapons_state';
 import { DestructionStartedComponent } from './destruction_state';
-import { DisabledComponent, LastAttackerComponent } from './death_plugin';
+import { DisabledComponent, LastAttackerComponent, PlayerDeathComponent } from './death_plugin';
+import { ConquestBotComponent } from './conquest_config';
 import { getNpcBayMaxCapacity, NpcWeaponAmmoComponent } from './weapon_plugin';
 import { PlatformResource } from './platform_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
@@ -201,9 +202,10 @@ const ReturnWhenTargetRemovedAI = new System({
 
 const ReturnAI = new System({
     name: 'ReturnToBase',
-    args: [OwnerComponent, MovementStateComponent, ReturnComponent] as const,
-    step(owner, movementState) {
-        movementState.turnTo = owner.owner;
+    args: [OwnerComponent, MovementStateComponent, ReturnComponent,
+        Optional(SourceComponent), Entities] as const,
+    step(owner, movementState, _return, source, entities) {
+        movementState.turnTo = (source && entities.has(source)) ? source : owner.owner;
         movementState.accelerating = 1;
     }
 });
@@ -218,6 +220,7 @@ function isLiveCombatTarget(entities: Map<string, Entity>, targetUuid: string | 
     }
     if (
         ent.components.has(DestructionStartedComponent)
+        || ent.components.has(PlayerDeathComponent)
         || ent.components.get(DisabledComponent) === true
     ) {
         return false;
@@ -243,15 +246,22 @@ const BayFighterSupervisorSystem = new System({
         if (platform && platform !== 'node') {
             return;
         }
+        const ownTargetValid = isLiveCombatTarget(entities, target.target, uuid, source);
         const carrier = entities.get(source);
         if (!carrier || carrier.components.has(DestructionStartedComponent)) {
+            if (!ownTargetValid) {
+                entities.delete(uuid);
+            }
             return;
         }
 
-        const carrierTarget = carrier.components.get(TargetComponent)?.target
-            ?? carrier.components.get(LastAttackerComponent);
+        const isNpcCarrier = carrier.components.has(NpcAIComponent)
+            || carrier.components.has(ConquestBotComponent);
+        const carrierTarget = isNpcCarrier
+            ? carrier.components.get(TargetComponent)?.target
+            : (carrier.components.get(TargetComponent)?.target
+                ?? carrier.components.get(LastAttackerComponent));
         const carrierTargetValid = isLiveCombatTarget(entities, carrierTarget, uuid, source);
-        const ownTargetValid = isLiveCombatTarget(entities, target.target, uuid, source);
 
         if (!ownTargetValid && carrierTargetValid) {
             // Re-engage the parent Carrier's active target!

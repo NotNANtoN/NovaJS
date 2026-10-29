@@ -641,6 +641,22 @@ export const CollisionSystem = new System({
                     const rewind = target && time && entry.viewDelayMs !== undefined
                         ? rewindOffset(target, other.position, time.time - entry.viewDelayMs, entities)
                         : undefined;
+                    if (rewind && time) {
+                        const margin = entry.viewDelayMs !== undefined ? LAG_COMPENSATION_SEARCH_MARGIN : 0;
+                        const rawMinX = entry.minX + margin - rewind.x;
+                        const rawMaxX = entry.maxX - margin - rewind.x;
+                        const rawMinY = entry.minY + margin - rewind.y;
+                        const rawMaxY = entry.maxY - margin - rewind.y;
+                        const rotPad = 48;
+                        if (
+                            rawMaxX < other.minX - rotPad
+                            || rawMinX > other.maxX + rotPad
+                            || rawMaxY < other.minY - rotPad
+                            || rawMinY > other.maxY + rotPad
+                        ) {
+                            continue;
+                        }
+                    }
                     const prevAngle = other.hull.angle;
                     const prevFrame = other.hull instanceof MultiFrameHull
                         ? other.hull.frame

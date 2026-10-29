@@ -62,9 +62,35 @@ import { parseLoggedShotEntityId } from './fire_sync';
 import { ConquestBotComponent, isConquestMode } from './conquest_config';
 import { SystemIdResource } from './system_id_resource';
 import { recordServerDamageTelemetry } from './combat_telemetry';
+import { clearEntityHostility, ProvocationResource } from './npc_hostility';
 
-export const LastAttackerComponent =
-    new Component<string>('LastAttackerComponent');
+import {
+    DeathEvent,
+    ZeroArmorEvent,
+    DamagedEvent,
+    AppliedDamageEvent,
+    type PlayerDestructionComplete,
+    PlayerDestructionCompleteEvent,
+    LastAttackerComponent,
+    DisabledComponent,
+    DisableOnZeroArmorComponent,
+    PlayerDeathStateCodec,
+    type PlayerDeathState,
+    PlayerDeathComponent,
+} from './damage_events';
+export {
+    DeathEvent,
+    ZeroArmorEvent,
+    DamagedEvent,
+    AppliedDamageEvent,
+    type PlayerDestructionComplete,
+    PlayerDestructionCompleteEvent,
+    LastAttackerComponent,
+    DisabledComponent,
+    DisableOnZeroArmorComponent,
+    type PlayerDeathState,
+    PlayerDeathComponent,
+};
 
 /**
  * Optimistically updates a replicated target's local Shield / Armor values on
@@ -130,22 +156,6 @@ export function applyOptimisticClientHitDamage(
 // Optional(IonizationComponent), Optional(IonizationColorComponent),
 // Optional(ProjectileComponent), TimeResource] as const);
 
-import {
-    DeathEvent,
-    ZeroArmorEvent,
-    DamagedEvent,
-    AppliedDamageEvent,
-    type PlayerDestructionComplete,
-    PlayerDestructionCompleteEvent,
-} from './damage_events';
-export {
-    DeathEvent,
-    ZeroArmorEvent,
-    DamagedEvent,
-    AppliedDamageEvent,
-    type PlayerDestructionComplete,
-    PlayerDestructionCompleteEvent,
-};
 export interface RespawnRelocation {
     cause: 'respawn';
     entity: Entity;
@@ -155,28 +165,6 @@ export interface RespawnRelocation {
 }
 export const RespawnRelocationEvent =
     new EcsEvent<RespawnRelocation>('RespawnRelocationEvent');
-export const DisabledComponent = new Component<boolean>('DisabledComponent');
-export const DisableOnZeroArmorComponent =
-    new Component<undefined>('DisableOnZeroArmorComponent');
-const PlayerDeathStateCodec = t.intersection([
-    t.type({
-        wreckPosition: t.tuple([t.number, t.number]),
-        visualFallbackAt: t.number,
-    }),
-    t.partial({
-        messageAt: t.number,
-        respawnAt: t.number,
-        outcome: t.union([
-            t.literal('escaped'),
-            t.literal('killed'),
-        ]),
-        message: t.string,
-        escapePodOutfitId: t.string,
-    }),
-]);
-export type PlayerDeathState = t.TypeOf<typeof PlayerDeathStateCodec>;
-export const PlayerDeathComponent = new Component<PlayerDeathState>(
-    'PlayerDeathComponent');
 replicationPolicies.register(DisabledComponent, {
     codec: t.boolean,
     authority: 'server',
@@ -272,7 +260,14 @@ const DamageSystem = new System({
                 ?? damagerEnt?.components.get(OwnerComponent)?.owner
                 ?? parseLoggedShotEntityId(damager)?.source
                 ?? damager;
-            if (shooterId && shooterId !== uuid) {
+            const shooterEnt = shooterId ? entities.get(shooterId) : undefined;
+            const shooterDead = Boolean(
+                shooterEnt && (
+                    shooterEnt.components.has(PlayerDeathComponent)
+                    || shooterEnt.components.has(DestructionStartedComponent)
+                ),
+            );
+            if (shooterId && shooterId !== uuid && !(fromExplosion && shooterDead)) {
                 entity.components.set(LastAttackerComponent, shooterId);
             }
         }
@@ -621,6 +616,11 @@ function resolvePlayerDeath(
         // derive stable message and respawn timing from the same visual data.
         completePlayerDestruction(deathState, time + visualDuration);
         entity.components.set(PlayerDeathComponent, deathState);
+        clearEntityHostility(
+            world.entities,
+            world.resources.get(ProvocationResource),
+            entity.uuid,
+        );
     }
 }
 
@@ -833,6 +833,18 @@ function resolvePlayerRespawn(
         entity.components.delete(DisabledComponent);
         entity.components.delete(DestructionStartedComponent);
         entity.components.delete(PlayerDeathComponent);
+        if (isConquestMode(playerState) && playerState?.legalRecords) {
+            for (const key of ['nova:128', '128', 'nova:129', '129']) {
+                if ((playerState.legalRecords[key] ?? 0) < 0) {
+                    playerState.legalRecords[key] = 0;
+                }
+            }
+        }
+        clearEntityHostility(
+            entities,
+            world.resources.get(ProvocationResource),
+            uuid,
+        );
         if (from && to && from !== to) {
             entities.delete(uuid);
             deImmerify(entity);

@@ -7,6 +7,7 @@ import fs from "fs";
 import http from "http";
 import * as t from 'io-ts';
 import { multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import path from "path";
 import { v4 } from "uuid";
@@ -235,10 +236,24 @@ function stepper() {
         }
         nextStepTime += STEP_TIME;
         steps++;
+        if (performance.timeOrigin + performance.now() - now >= STEP_TIME) {
+            break;
+        }
     }
-    if (nextStepTime <= now) {
-        // Too far behind; drop the backlog rather than spiraling.
-        nextStepTime = now + STEP_TIME;
+    const afterNow = performance.timeOrigin + performance.now();
+    if (nextStepTime <= afterNow) {
+        // Too far behind; drop the backlog rather than spiraling, and keep
+        // fixed-step system clocks aligned with wall clock so client shot
+        // timestamps do not drift after a transient stall.
+        const droppedMs = afterNow + STEP_TIME - nextStepTime;
+        for (const entity of world.entities.values()) {
+            const sysWorld = entity.components.get(SystemComponent);
+            const sysTime = sysWorld?.resources.get(TimeResource);
+            if (sysTime && sysTime.fixedDelta_ms !== undefined) {
+                sysTime.time += droppedMs;
+            }
+        }
+        nextStepTime = afterNow + STEP_TIME;
     }
     setTimeout(stepper, Math.max(0, nextStepTime - (performance.timeOrigin + performance.now())));
 }

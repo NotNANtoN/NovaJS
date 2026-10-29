@@ -949,6 +949,7 @@ export const FollowAI = new System({
         const targetEntity = entities.get(target.target);
         if (!targetEntity
             || targetEntity.components.has(DestructionStartedComponent)
+            || targetEntity.components.has(PlayerDeathComponent)
             || targetEntity.components.get(JumpStateComponent)?.phase === 'departing') {
             target.target = undefined;
             movementState.turnTo = null;
@@ -1107,6 +1108,7 @@ export const ShootAllWeaponsAI = new System({
             const ent = entities.get(targetUuid);
             if (!ent
                 || ent.components.has(DestructionStartedComponent)
+                || ent.components.has(PlayerDeathComponent)
                 || ent.components.get(JumpStateComponent)?.phase === 'departing') {
                 target.target = undefined;
             }
