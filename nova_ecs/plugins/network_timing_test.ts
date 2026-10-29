@@ -74,15 +74,15 @@ describe('round-trip network clock', () => {
 });
 
 describe('adaptive low-latency presentation', () => {
-    it('settles at one 30 Hz interval on a stable link', () => {
+    it('settles at one 60 Hz interval on a stable link', () => {
         const timing = synchronizedTiming();
         for (let i = 0; i < 180; i++) {
-            const at = i * 1000 / 30;
+            const at = i * 1000 / 60;
             timing.observeServerPacket('server', at, at + 25);
             timing.advance(at + 25);
         }
         expect(timing.delayMs).toBeCloseTo(MIN_PRESENTATION_DELAY_MS, 6);
-        expect(timing.presentationDelay(179 * 1000 / 30 + 25)).toBeLessThanOrEqual(50);
+        expect(timing.presentationDelay(179 * 1000 / 60 + 25)).toBeLessThanOrEqual(50);
         expect(timing.stats.synchronized).toBeTrue();
         expect(timing.stats.rttMs).toBe(50);
     });
@@ -92,8 +92,8 @@ describe('adaptive low-latency presentation', () => {
         let lastArrival = 0;
         let cursor = -Infinity;
         let peak = 0;
-        for (let i = 0; i < 420; i++) {
-            const at = i * 1000 / 30;
+        for (let i = 0; i < 600; i++) {
+            const at = i * 1000 / 60;
             const extra = i < 90 && i % 6 === 0 ? 140 : 0;
             const arrival = Math.max(lastArrival + 1, at + 25 + extra);
             timing.observeServerPacket('server', at, arrival);

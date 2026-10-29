@@ -1,6 +1,13 @@
 import { isRight } from 'nova_ecs/either';
 import { BehaviorSubject, Subject } from "rxjs";
+import {
+    decodeFastBinaryPacket,
+    isBinaryPacket,
+    isUnreliableDatagramCandidate,
+    tryEncodeFastBinaryPacket,
+} from "./binary_packet";
 import { ChannelClient } from "./Channel";
+import { UnreliableDatagramClient } from "./datagram_channel";
 import { getPersistentPlayerToken } from "./player_identity";
 import { SocketMessage } from "./SocketMessage";
 
@@ -43,15 +50,17 @@ export class SocketChannelClient implements ChannelClient {
     private readonly maxQueuedMessageAgeMs = 1000;
     private maxPings: number
     readonly playerToken: string;
+    private datagram?: UnreliableDatagramClient;
 
     constructor({ webSocket, warn, timeout, webSocketFactory, maxPings,
-        playerToken }: {
+        playerToken, datagram }: {
         webSocket?: WebSocket,
         warn?: ((m: string) => void),
         timeout?: number,
         webSocketFactory?: () => WebSocket,
         maxPings?: number,
         playerToken?: string,
+        datagram?: UnreliableDatagramClient,
     }) {
         this.playerToken = playerToken ?? getPersistentPlayerToken();
         this.webSocketFactory = webSocketFactory ?? (() => {
@@ -70,11 +79,29 @@ export class SocketChannelClient implements ChannelClient {
         this.maxPings = maxPings ?? 4;
 
         this.messageListener = this.handleMessage.bind(this)
+        if (datagram) {
+            this.setDatagramChannel(datagram);
+        }
         this.bindSocket();
         this.resetTimeout();
     }
 
+    setDatagramChannel(datagram: UnreliableDatagramClient | undefined) {
+        if (this.datagram && this.datagram !== datagram) {
+            this.datagram.onDatagram = undefined;
+        }
+        this.datagram = datagram;
+        if (this.datagram) {
+            this.datagram.onDatagram = (payload) => {
+                this.handleMessage({ data: payload } as MessageEvent);
+            };
+        }
+    }
+
     private bindSocket() {
+        try {
+            this.webSocket.binaryType = 'arraybuffer';
+        } catch {}
         this.webSocket.addEventListener('message', this.messageListener);
         this.webSocket.addEventListener('open', this.openListener);
         this.webSocket.addEventListener('close', this.closeListener);
@@ -88,12 +115,23 @@ export class SocketChannelClient implements ChannelClient {
         this.webSocket.removeEventListener('error', this.errorListener);
     }
 
+    private sendWireMessage(message: SocketMessage) {
+        const encoded = SocketMessage.encode(message);
+        const binary = tryEncodeFastBinaryPacket(encoded);
+        if (binary && this.datagram?.isOpen && isUnreliableDatagramCandidate(encoded)) {
+            if (this.datagram.send(binary)) {
+                return;
+            }
+        }
+        this.webSocket.send(binary ?? JSON.stringify(encoded));
+    }
+
     private flushQueue() {
         if (this.webSocket.readyState !== this.webSocket.OPEN) return;
         const now = Date.now();
         for (const { message, queuedAt } of this.messageQueue) {
             if (now - queuedAt > this.maxQueuedMessageAgeMs) continue;
-            this.webSocket.send(JSON.stringify(SocketMessage.encode(message)));
+            this.sendWireMessage(message);
         }
         this.messageQueue.length = 0;
     }
@@ -200,7 +238,7 @@ export class SocketChannelClient implements ChannelClient {
         this.reconnectIfClosed();
         if (this.webSocket.readyState === this.webSocket.OPEN) {
             this.flushQueue();
-            this.webSocket.send(JSON.stringify(SocketMessage.encode(message)));
+            this.sendWireMessage(message);
         } else {
             if (this.messageQueue.length >= 300) {
                 this.messageQueue.shift();
@@ -219,20 +257,29 @@ export class SocketChannelClient implements ChannelClient {
 
         const data = messageEvent.data;
         let socketMessage: SocketMessage;
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(data);
-        } catch {
-            this.warn('Failed to deserialize message from server: invalid JSON');
-            return;
-        }
-        const maybeSocketMessage = SocketMessage.decode(parsed);
-        if (isRight(maybeSocketMessage)) {
-            socketMessage = maybeSocketMessage.right;
+        if (isBinaryPacket(data)) {
+            const decodedBinary = decodeFastBinaryPacket(data);
+            if (!decodedBinary) {
+                this.warn('Failed to deserialize binary message from server');
+                return;
+            }
+            socketMessage = decodedBinary;
         } else {
-            this.warn(`Failed to deserialize message from server. `
-                + `Errors: ${maybeSocketMessage.left}`);
-            return;
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(data);
+            } catch {
+                this.warn('Failed to deserialize message from server: invalid JSON');
+                return;
+            }
+            const maybeSocketMessage = SocketMessage.decode(parsed);
+            if (isRight(maybeSocketMessage)) {
+                socketMessage = maybeSocketMessage.right;
+            } else {
+                this.warn(`Failed to deserialize message from server. `
+                    + `Errors: ${maybeSocketMessage.left}`);
+                return;
+            }
         }
 
         if (socketMessage.pong) {
@@ -267,6 +314,9 @@ export class SocketChannelClient implements ChannelClient {
             clearTimeout(this.reconnectTimeout);
             this.reconnectTimeout = undefined;
         }
+        try {
+            this.datagram?.close();
+        } catch {}
         try {
             this.webSocket.close();
         } catch {}

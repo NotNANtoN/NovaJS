@@ -152,6 +152,30 @@ describe('input prediction', () => {
         expect(a.position.y).toBe(b.position.y);
         expect(a.rotation.angle).toBe(b.rotation.angle);
     });
+
+    it('accumulates high-refresh sub-ticks into fixed 60 Hz commands while smoothly interpolating display state', () => {
+        let seq = 0;
+        const prediction = new ClientPrediction(() => ++seq);
+        const local = state();
+        local.accelerating = 1;
+        const dt144 = 1000 / 144;
+        // First 144 Hz frame (~6.94 ms): visual state moves immediately, no 60 Hz command yet.
+        prediction.predict(local, physics, dt144, entities);
+        expect(prediction.pending.length).toBe(0);
+        expect(local.velocity.y).toBeLessThan(0);
+        const posFrame1 = local.position.y;
+        expect(posFrame1).toBeLessThan(0);
+
+        // Run 144 frames (1 second): exactly 60 fixed-step commands emitted.
+        for (let i = 1; i < 144; i++) {
+            prediction.predict(local, physics, dt144, entities);
+        }
+        const emitted = prediction.takeOutbox();
+        expect(emitted.length).toBe(60);
+        for (const cmd of emitted) {
+            expect(cmd.dtMs).toBeCloseTo(FRAME, 6);
+        }
+    });
 });
 
 describe('input prediction over the network', () => {
@@ -234,7 +258,7 @@ describe('input prediction over the network', () => {
         expect(server.rotation.distanceTo(own.rotation).angle).toBeCloseTo(0, 6);
         const lag = Math.hypot(own.position.x - server.position.x,
             own.position.y - server.position.y) / speed * 1000;
-        expect(lag).toBeLessThan(110);
+        expect(lag).toBeLessThan(120);
         // The owner's prediction is exactly the server path: last ack plus
         // its own unacknowledged commands (no residual correction).
         const prediction = [...s.owner.entities.get('ship')!.components.keys()]

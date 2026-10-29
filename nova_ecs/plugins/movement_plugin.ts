@@ -455,8 +455,8 @@ export function queueRemoteMovementSnapshot(
     });
     // Reordered packets older than the retained interpolation window cannot
     // affect presentation and should not grow the component indefinitely.
-    if (presentation.snapshots.length > 8) {
-        presentation.snapshots.splice(0, presentation.snapshots.length - 8);
+    if (presentation.snapshots.length > 24) {
+        presentation.snapshots.splice(0, presentation.snapshots.length - 24);
     }
 }
 

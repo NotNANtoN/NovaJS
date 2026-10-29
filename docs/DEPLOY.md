@@ -42,7 +42,7 @@ non-retriable create request and post-timeout label recheck explicit.
    `GET /v4/linode/instances?label=novajs&page_size=100`. If exactly one
    instance exists, it uses that instance. If none exists, it makes one
    `POST /v4/linode/instances` call with an Ubuntu 24.04 image, the 2 GB
-   `g6-standard-1` plan in `us-east`, and base64-encoded cloud-init in
+   `g6-standard-1` plan in `eu-central` (Frankfurt), and base64-encoded cloud-init in
    `metadata.user_data`.
 4. Cloud-init installs Docker, the Compose plugin, `s3cmd`, `zstd`, `ufw`,
    and unattended upgrades. It writes the initial deployment assets and
@@ -589,7 +589,7 @@ restored file. Starting NovaJS reloads it before accepting players.
 This change deliberately does not call the Linode API, create a resource, or
 run a deployment. The first real run should verify:
 
-1. The API token can list and create Linodes in `us-east` and the selected
+1. The API token can list and create Linodes in `eu-central` and the selected
    `g6-standard-1` plan is available to the account.
 2. `cloud-init status --long` shows completion and
    `systemctl status novajs-updater.timer` shows an active timer.

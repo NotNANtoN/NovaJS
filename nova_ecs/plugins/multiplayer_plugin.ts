@@ -167,7 +167,7 @@ export interface MultiplayerOptions {
     readonly inputPrediction?: boolean;
 }
 
-export const INPUT_ACK_INTERVAL_MS = 1000 / 30;
+export const INPUT_ACK_INTERVAL_MS = 1000 / 60;
 /** High refresh-rate clients batch commands instead of sending per frame. */
 const INPUT_SEND_INTERVAL_MS = 1000 / 60 - 1;
 /** After prediction starves (no acks), use the pose path for this long. */

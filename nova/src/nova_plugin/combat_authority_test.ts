@@ -181,6 +181,39 @@ describe('server hit authority with lag compensation', () => {
         expect(offset!.x).toBeCloseTo(0);
         expect(offset!.y).toBeCloseTo(-25);
     });
+
+    it('rewinds target hull rotation so shots hit elongated ships at their seen orientation', async () => {
+        const { world, damaged } = await combatWorld('node', 0, { viewDelayMs: 100 });
+        const target = world.entities.get(TARGET)!;
+        // Elongated hull: 4 wide along X (-2..2), 40 tall along Y (-20..20) when angle = 0.
+        // When rotated by PI/2 (present), it spans X (-20..20) and Y (-2..2).
+        // Shot flies along y = 12 from x = -10 to x = +10:
+        // - At angle = 0 (rewound 100 ms ago), y = 12 hits the elongated hull!
+        // - At angle = PI/2 (present), y = 12 misses the hull (which only spans y in -2..2)!
+        const elongatedHull = new CompositeHull([
+            new SAT.Box(new SAT.Vector(-2, -20), 4, 40).toPolygon(),
+        ]);
+        target.components.set(HitboxHullComponent, elongatedHull);
+        const nowState = movement(0, 0);
+        nowState.rotation = new Angle(Math.PI / 2);
+        target.components.set(MovementStateComponent, nowState);
+
+        const pastState = movement(0, 0);
+        pastState.rotation = new Angle(0);
+        const track = { snapshots: [] };
+        queueGuidanceTargetSnapshot(track, pastState, 850);
+        queueGuidanceTargetSnapshot(track, pastState, 950);
+        queueGuidanceTargetSnapshot(track, nowState, 1000);
+        target.components.set(GuidanceTargetTrackComponent, track);
+
+        const shot = world.entities.get(SHOT)!;
+        shot.components.set(MovementStateComponent, movement(-10, 12, 200, 0));
+
+        world.step();
+        expect(damaged).toEqual([TARGET]);
+        // Present hull angle is restored after the lag-compensated narrowphase check.
+        expect(elongatedHull.angle).toBeCloseTo(Math.PI / 2, 5);
+    });
 });
 
 describe('client application of server hit outcomes', () => {

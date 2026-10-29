@@ -4,7 +4,14 @@ import http from "http";
 import { BehaviorSubject, Subject } from "rxjs";
 import { v4 } from "uuid";
 import WebSocket, { WebSocketServer } from "ws";
+import {
+    decodeFastBinaryPacket,
+    isBinaryPacket,
+    isUnreliableDatagramCandidate,
+    tryEncodeFastBinaryPacket,
+} from "./binary_packet";
 import { ChannelServer, MessageWithSourceType } from "./Channel";
+import { UnreliableDatagramServer } from "./datagram_channel";
 import { SocketMessage } from "./SocketMessage";
 
 const MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
@@ -28,11 +35,14 @@ export class SocketChannelServer implements ChannelServer {
     // Send a ping if a packet hasn't been received in this long
     // If the ping doesn't get back in this much time, disconnect them.
     readonly timeout: number;
+    private datagram?: UnreliableDatagramServer;
 
-    constructor({ server, warn, wss, timeout }: {
+    constructor({ server, warn, wss, timeout, datagram }: {
         server?: http.Server | https.Server,
         warn?: ((m: string) => void),
-        wss?: WebSocketServer, timeout?: number
+        wss?: WebSocketServer,
+        timeout?: number,
+        datagram?: UnreliableDatagramServer,
     }) {
 
         if (warn) {
@@ -59,7 +69,24 @@ export class SocketChannelServer implements ChannelServer {
             this.timeout = 30000;
         }
 
+        if (datagram) {
+            this.setDatagramServer(datagram);
+        }
         this.wss.on("connection", this.onConnect.bind(this));
+    }
+
+    setDatagramServer(datagram: UnreliableDatagramServer | undefined) {
+        if (this.datagram && this.datagram !== datagram) {
+            this.datagram.onDatagram = undefined;
+        }
+        this.datagram = datagram;
+        if (this.datagram) {
+            this.datagram.onDatagram = (clientId, payload) => {
+                if (this.clientMap.has(clientId)) {
+                    this.handleMessageFromClient(clientId, payload);
+                }
+            };
+        }
     }
 
     get clients() {
@@ -73,7 +100,14 @@ export class SocketChannelServer implements ChannelServer {
         if (!client) {
             this.warn(`No such client ${destination}`);
         } else if (client.socket.readyState === WebSocket.OPEN) {
-            client.socket.send(JSON.stringify(SocketMessage.encode(socketMessage)));
+            const encoded = SocketMessage.encode(socketMessage);
+            const binary = tryEncodeFastBinaryPacket(encoded);
+            if (binary && this.datagram?.isOpen(destination) && isUnreliableDatagramCandidate(encoded)) {
+                if (this.datagram.send(destination, binary)) {
+                    return true;
+                }
+            }
+            client.socket.send(binary ?? JSON.stringify(encoded));
             return true;
         }
         return false;
@@ -156,28 +190,40 @@ export class SocketChannelServer implements ChannelServer {
     }
 
     // Handles messages received from clients. Forwards messages to their destination.
-    private handleMessageFromClient(clientUUID: string, serialized: string) {
+    private handleMessageFromClient(
+        clientUUID: string,
+        serialized: string | ArrayBuffer | ArrayBufferView,
+    ) {
         this.resetClientTimeout(clientUUID);
         const client = this.clientMap.get(clientUUID);
         if (!client) {
             throw new Error(`Missing client object for ${clientUUID}`);
         }
 
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(String(serialized));
-        } catch {
-            this.warn(`Received invalid JSON from client ${clientUUID}`);
-            return;
-        }
-        const maybeSocketMessage = SocketMessage.decode(parsed);
+        let socketMessage: SocketMessage;
+        if (isBinaryPacket(serialized)) {
+            const decodedBinary = decodeFastBinaryPacket(serialized);
+            if (!decodedBinary) {
+                this.warn(`Received invalid binary packet from client ${clientUUID}`);
+                return;
+            }
+            socketMessage = decodedBinary;
+        } else {
+            let parsed: unknown;
+            try {
+                parsed = JSON.parse(String(serialized));
+            } catch {
+                this.warn(`Received invalid JSON from client ${clientUUID}`);
+                return;
+            }
+            const maybeSocketMessage = SocketMessage.decode(parsed);
 
-        if (isLeft(maybeSocketMessage)) {
-            console.warn(`Received bad message from client ${clientUUID}: ${maybeSocketMessage.left}`);
-            return;
+            if (isLeft(maybeSocketMessage)) {
+                console.warn(`Received bad message from client ${clientUUID}: ${maybeSocketMessage.left}`);
+                return;
+            }
+            socketMessage = maybeSocketMessage.right;
         }
-
-        const socketMessage = maybeSocketMessage.right;
         if (socketMessage.pong) {
             // We already reset the client timeout above.
             // No need to do anything if it's a pong.
@@ -213,6 +259,7 @@ export class SocketChannelServer implements ChannelServer {
         }
 
         client.socket.removeAllListeners();
+        this.datagram?.removeClient?.(clientUUID);
         this.clientMap.delete(clientUUID);
         this.clientDisconnect.next(clientUUID);
     }

@@ -693,9 +693,9 @@ describe('Multiplayer Plugin', () => {
         const serverRotation = world1.entities.get(playerUuid)!.components
             .get(MovementStateComponent)!.rotation.angle;
         expect(serverRotation).toBeCloseTo(clientRotations.at(-1)!, 2);
-        // Two seconds at 30 Hz plus bounded clock probes, not 60 Hz pose spam.
+        // Two seconds at 60 Hz plus bounded clock probes.
         expect(world1Communicator.allMessages.length - messagesBeforeInput)
-            .toBeLessThanOrEqual(70);
+            .toBeLessThanOrEqual(135);
         expect(JSON.stringify(world2Communicator.allMessages
             .slice(serverMessagesBeforeInput))).toContain('MovementState');
 

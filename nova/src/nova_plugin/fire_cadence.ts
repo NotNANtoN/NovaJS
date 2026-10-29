@@ -8,11 +8,12 @@ export interface FireCadenceWeapon {
     count: number;
 }
 
-export interface FireCadenceOptions {
+export interface FireCadenceOptions<T = unknown> {
     maxPendingPerWeapon?: number;
     maxWeapons?: number;
     maxCopies?: number;
     maxAgeMs?: number;
+    onDiscard?: (intent: T) => void;
 }
 
 /** Per-copy burst metadata. Stable on a failed callback/retry; debit costs only on success. */
@@ -55,14 +56,16 @@ export class FireCadence<T> {
     private readonly maxWeapons: number;
     private readonly maxCopies: number;
     private readonly maxAgeMs: number;
+    private readonly onDiscard?: (intent: T) => void;
     private lastNow = -Infinity;
     private draining = false;
 
-    constructor(private readonly clock: () => number, options: FireCadenceOptions = {}) {
+    constructor(private readonly clock: () => number, options: FireCadenceOptions<T> = {}) {
         this.maxPending = options.maxPendingPerWeapon ?? 16;
         this.maxWeapons = options.maxWeapons ?? 64;
         this.maxCopies = options.maxCopies ?? 256;
         this.maxAgeMs = options.maxAgeMs ?? 2000;
+        this.onDiscard = options.onDiscard;
         for (const value of [this.maxPending, this.maxWeapons, this.maxCopies]) {
             if (!Number.isSafeInteger(value) || value < 1) {
                 throw new RangeError('Fire cadence bounds must be positive safe integers');
@@ -97,6 +100,9 @@ export class FireCadence<T> {
                 || old.burstReload !== weapon.burstReload
                 || old.burstCount !== weapon.burstCount
                 || old.fireSimultaneously !== weapon.fireSimultaneously) {
+                for (const entry of state.pending) {
+                    this.onDiscard?.(entry.intent);
+                }
                 state.pending.length = 0;
                 state.salvoRemaining = 0;
                 state.weapon = { ...weapon };
@@ -220,6 +226,9 @@ export class FireCadence<T> {
         const states = key === undefined ? this.weapons.values()
             : this.weapons.has(key) ? [this.weapons.get(key)!] : [];
         for (const state of states) {
+            for (const entry of state.pending) {
+                this.onDiscard?.(entry.intent);
+            }
             state.pending.length = 0;
             state.salvoRemaining = 0;
         }
@@ -239,7 +248,8 @@ export class FireCadence<T> {
     private expire(state: WeaponQueue<T>, now: number): void {
         while (state.pending.length > 0
             && now - state.pending[0].receivedAt >= this.maxAgeMs) {
-            state.pending.shift();
+            const expired = state.pending.shift()!;
+            this.onDiscard?.(expired.intent);
         }
     }
 

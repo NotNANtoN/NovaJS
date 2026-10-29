@@ -343,7 +343,7 @@ jobs:
             payload="$(
               jq -n \
                 --arg label "$label" \
-                --arg region 'us-east' \
+                --arg region 'eu-central' \
                 --arg type 'g6-standard-1' \
                 --arg image 'linode/ubuntu24.04' \
                 --arg root_pass "$root_password" \

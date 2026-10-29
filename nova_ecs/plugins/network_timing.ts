@@ -7,7 +7,7 @@ import { TimeResource, TimeSystem } from './time_plugin';
 export const NetworkReceivePhase = new Phase({ name: 'InboundMultiplayerPhase', after: [TimeSystem] });
 
 export const MOVEMENT_SNAPSHOT_INTERVAL_MS = 1000 / 30;
-export const MIN_PRESENTATION_DELAY_MS = 1000 / 30;
+export const MIN_PRESENTATION_DELAY_MS = 1000 / 60;
 export const DEFAULT_PRESENTATION_DELAY_MS = 50;
 export const MAX_PRESENTATION_DELAY_MS = 200;
 export const MAX_MOVEMENT_EXTRAPOLATION_MS = 100;

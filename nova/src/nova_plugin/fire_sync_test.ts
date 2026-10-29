@@ -515,4 +515,39 @@ describe('clock skew protection with ServerClockOffsetResource', () => {
         // 2010 (server time) + 3000 (offset) = 5010 (mapped to client clock domain)
         expect(loggedShotSeenAt).toBe(5010);
     });
+
+    it('immediately despawns client-predicted shots when the server logs an explicit rejection', async () => {
+        const testWeapon = {
+            data: getDefaultProjectileWeaponData(),
+            syncAsFireEvent: true,
+            fireFromLog: () => new Entity('shot'),
+        } as unknown as WeaponEntry;
+        const entries = new Gettable<WeaponEntry | undefined>(async () => testWeapon);
+        entries.gotten[testWeapon.data.id] = testWeapon;
+
+        const world = new World('client');
+        world.resources.set(PlatformResource, 'browser');
+        world.resources.set(WeaponEntries, entries);
+        world.resources.set(TimeResource, { time: 1000, delta_ms: 16.6, delta_s: 0.0166, frame: 1 });
+        world.addSystem(FireLogSpawnSystem);
+
+        const ship = new Entity('ship-a')
+            .addComponent(MultiplayerData, { owner: 'client-a' });
+        const sync = getFireSyncLocalState(ship);
+        rememberSpawnedShot(sync, 5, true);
+        const predictedId = loggedShotEntityId('ship-a', 5);
+        world.entities.set(predictedId, new Entity('predicted-projectile'));
+        world.entities.set('ship-a', ship);
+
+        // Server rejects seq=5 (e.g. out of authoritative ammo or disabled)
+        ship.components.set(FireLogComponent, {
+            shots: [],
+            rejectedSeqs: [5],
+        });
+        world.step();
+
+        expect(world.entities.has(predictedId)).toBeFalse();
+        expect(sync.spawnedSeqs.has(5)).toBeFalse();
+        expect(sync.highestRejectedSeq).toBe(5);
+    });
 });

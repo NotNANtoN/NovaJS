@@ -37,6 +37,9 @@ export const InputAck = t.type({
 });
 export type InputAck = t.TypeOf<typeof InputAck>;
 
+/** Fixed simulation step for emitted movement commands (60 Hz). */
+export const FIXED_COMMAND_DT_MS = 1000 / 60;
+const COMMAND_DT_EPSILON_MS = 1e-4;
 /** Browser frames longer than this are split across real time, not replayed. */
 export const MAX_COMMAND_DT_MS = 100;
 /** Corrections above this distance snap (respawn, teleport, jump arrival). */
@@ -155,21 +158,75 @@ export class ClientPrediction {
     firstSeq?: number;
     /** Last correction distance, for diagnostics and tests. */
     lastError = 0;
+    /** Sub-tick time accumulated toward the next 60 Hz command step. */
+    accumulatorMs = 0;
+    private simState?: MovementState;
+    private lastPresentedState?: MovementState;
 
     constructor(private nextSeq: () => number) { }
 
-    /** Record this frame's controls and integrate them. */
+    private syncExternalMutation(state: MovementState): void {
+        if (!this.simState || !this.lastPresentedState) {
+            this.simState = copyMovementState(state);
+            this.accumulatorMs = 0;
+            return;
+        }
+        const last = this.lastPresentedState;
+        if (state.position.x !== last.position.x
+            || state.position.y !== last.position.y
+            || state.velocity.x !== last.velocity.x
+            || state.velocity.y !== last.velocity.y
+            || state.rotation.angle !== last.rotation.angle
+            || state.targetSpeed !== last.targetSpeed) {
+            const dx = wrappedDelta(last.position.x, state.position.x);
+            const dy = wrappedDelta(last.position.y, state.position.y);
+            const dAngle = last.rotation.distanceTo(state.rotation).angle;
+            this.simState.position = this.simState.position.add(
+                new Vector(dx, dy)) as typeof state.position;
+            this.simState.velocity = this.simState.velocity.add(
+                state.velocity.subtract(last.velocity));
+            this.simState.rotation = this.simState.rotation.add(dAngle);
+            if (state.targetSpeed === undefined) {
+                delete this.simState.targetSpeed;
+            } else {
+                this.simState.targetSpeed = state.targetSpeed;
+            }
+        }
+    }
+
+    /** Record this frame's controls, step fixed 60 Hz commands, and interpolate sub-ticks. */
     predict(state: MovementState, physics: MovementPhysics, dtMs: number,
         entities: EntityMap): void {
         const dt = clampCommandDt(dtMs);
         if (dt <= 0) {
             return;
         }
-        const command = commandFromState(state, this.nextSeq(), dt);
-        this.firstSeq ??= command.seq;
-        assignMovement(state, applyCommand(state, physics, command, entities));
-        this.pending.push(command);
-        this.outbox.push(command);
+        this.syncExternalMutation(state);
+        const sim = this.simState!;
+        sim.accelerating = state.accelerating;
+        sim.turning = state.turning;
+        sim.turnBack = state.turnBack;
+        sim.turnTo = state.turnTo;
+
+        this.accumulatorMs += dt;
+        while (this.accumulatorMs + COMMAND_DT_EPSILON_MS >= FIXED_COMMAND_DT_MS) {
+            const command = commandFromState(state, this.nextSeq(), FIXED_COMMAND_DT_MS);
+            this.firstSeq ??= command.seq;
+            assignMovement(sim, applyCommand(sim, physics, command, entities));
+            this.pending.push(command);
+            this.outbox.push(command);
+            this.accumulatorMs = Math.max(0, this.accumulatorMs - FIXED_COMMAND_DT_MS);
+        }
+        if (this.accumulatorMs > COMMAND_DT_EPSILON_MS) {
+            const subCommand = commandFromState(state, 0, this.accumulatorMs);
+            assignMovement(
+                state,
+                applyCommand(sim, physics, subCommand, entities, this.accumulatorMs),
+            );
+        } else {
+            assignMovement(state, sim);
+        }
+        this.lastPresentedState = copyMovementState(state);
     }
 
     takeOutbox(): MovementCommand[] {
@@ -192,6 +249,7 @@ export class ClientPrediction {
             || ack.seq < this.lastAckSeq) {
             return 'stale';
         }
+        this.syncExternalMutation(current);
         this.lastAckSeq = ack.seq;
         while (this.pending.length > 0 && this.pending[0].seq <= ack.seq) {
             this.pending.shift();
@@ -200,10 +258,11 @@ export class ClientPrediction {
         for (const command of this.pending) {
             corrected = applyCommand(corrected, physics, command, entities);
         }
-        const dx = wrappedDelta(current.position.x, corrected.position.x);
-        const dy = wrappedDelta(current.position.y, corrected.position.y);
+        const sim = this.simState ?? copyMovementState(current);
+        const dx = wrappedDelta(sim.position.x, corrected.position.x);
+        const dy = wrappedDelta(sim.position.y, corrected.position.y);
         const distance = Math.hypot(dx, dy);
-        const angle = current.rotation.distanceTo(corrected.rotation).angle;
+        const angle = sim.rotation.distanceTo(corrected.rotation).angle;
         this.lastError = distance;
         // Controls stay local: they are this frame's input, and the replay
         // ended with the same controls anyway.
@@ -213,28 +272,43 @@ export class ClientPrediction {
             turnBack: current.turnBack,
             turnTo: current.turnTo,
         };
+        let result: ReconcileResult;
         if (distance > SNAP_DISTANCE) {
-            assignMovement(current, corrected);
-            Object.assign(current, controls);
-            return 'snapped';
-        }
-        if (distance <= ADOPT_DISTANCE && Math.abs(angle) <= ADOPT_ANGLE) {
-            assignMovement(current, corrected);
-            Object.assign(current, controls);
-            return 'adopted';
-        }
-        // The next acknowledgement recomputes `corrected` from the server,
-        // so a partial step converges geometrically without drifting.
-        current.position = current.position.add(
-            new Vector(dx * CORRECTION_BLEND, dy * CORRECTION_BLEND)) as typeof current.position;
-        current.rotation = current.rotation.add(angle * CORRECTION_BLEND);
-        current.velocity = corrected.velocity;
-        if (corrected.targetSpeed === undefined) {
-            delete current.targetSpeed;
+            assignMovement(sim, corrected);
+            Object.assign(sim, controls);
+            result = 'snapped';
+        } else if (distance <= ADOPT_DISTANCE && Math.abs(angle) <= ADOPT_ANGLE) {
+            assignMovement(sim, corrected);
+            Object.assign(sim, controls);
+            result = 'adopted';
         } else {
-            current.targetSpeed = corrected.targetSpeed;
+            // The next acknowledgement recomputes `corrected` from the server,
+            // so a partial step converges geometrically without drifting.
+            sim.position = sim.position.add(
+                new Vector(dx * CORRECTION_BLEND, dy * CORRECTION_BLEND)) as typeof sim.position;
+            sim.rotation = sim.rotation.add(angle * CORRECTION_BLEND);
+            sim.velocity = corrected.velocity;
+            if (corrected.targetSpeed === undefined) {
+                delete sim.targetSpeed;
+            } else {
+                sim.targetSpeed = corrected.targetSpeed;
+            }
+            Object.assign(sim, controls);
+            result = 'blended';
         }
-        return 'blended';
+        this.simState = sim;
+        if (this.accumulatorMs > COMMAND_DT_EPSILON_MS) {
+            const subCommand = commandFromState(current, 0, this.accumulatorMs);
+            assignMovement(
+                current,
+                applyCommand(sim, physics, subCommand, entities, this.accumulatorMs),
+            );
+            Object.assign(current, controls);
+        } else {
+            assignMovement(current, sim);
+        }
+        this.lastPresentedState = copyMovementState(current);
+        return result;
     }
 }
 

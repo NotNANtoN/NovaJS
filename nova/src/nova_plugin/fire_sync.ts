@@ -67,9 +67,19 @@ export const FireLogShot = t.intersection([
 ]);
 export type FireLogShot = t.TypeOf<typeof FireLogShot>;
 
-export const FireLog = t.type({
-    shots: t.array(FireLogShot),
-});
+export const FireLog = t.intersection([
+    t.type({
+        shots: t.array(FireLogShot),
+    }),
+    t.partial({
+        /**
+         * Client intent sequences explicitly rejected by the server (e.g., due
+         * to exhausted authoritative ammo, disabled/jumping state, or cadence
+         * overflow) so the owning client can immediately despawn predicted shots.
+         */
+        rejectedSeqs: t.array(t.number),
+    }),
+]);
 export type FireLog = t.TypeOf<typeof FireLog>;
 export const FireLogComponent = new Component<FireLog>('FireLogComponent');
 
@@ -103,21 +113,38 @@ export function applyFireIntentDelta(
     return currentData;
 }
 
-export const FireLogDelta = t.type({
-    shots: t.array(FireLogShot),
-});
+export const FireLogDelta = t.intersection([
+    t.type({
+        shots: t.array(FireLogShot),
+    }),
+    t.partial({
+        rejectedSeqs: t.array(t.number),
+    }),
+]);
 export type FireLogDelta = t.TypeOf<typeof FireLogDelta>;
 
 export function getFireLogDelta(
     previous: FireLog | undefined,
     current: FireLog,
 ): FireLogDelta | undefined {
-    if (!previous || !previous.shots || previous.shots.length === 0) {
-        return current.shots && current.shots.length > 0 ? { shots: [...current.shots] } : undefined;
+    const prevShots = previous?.shots ?? [];
+    const prevRejected = previous?.rejectedSeqs ?? [];
+    const highestPrevSeq = prevShots.length > 0
+        ? Math.max(0, ...prevShots.map(fireLogSequence))
+        : 0;
+    const highestPrevRejected = prevRejected.length > 0
+        ? Math.max(0, ...prevRejected)
+        : 0;
+    const newShots = (current.shots ?? []).filter(s => fireLogSequence(s) > highestPrevSeq);
+    const newRejected = (current.rejectedSeqs ?? []).filter(seq => seq > highestPrevRejected);
+    if (newShots.length === 0 && newRejected.length === 0) {
+        return undefined;
     }
-    const highestPrevSeq = Math.max(0, ...previous.shots.map(fireLogSequence));
-    const newShots = current.shots.filter(s => fireLogSequence(s) > highestPrevSeq);
-    return newShots.length > 0 ? { shots: newShots } : undefined;
+    const delta: FireLogDelta = { shots: newShots };
+    if (newRejected.length > 0) {
+        delta.rejectedSeqs = newRejected;
+    }
+    return delta;
 }
 
 export function applyFireLogDelta(
@@ -130,7 +157,35 @@ export function applyFireLogDelta(
     for (const shot of delta.shots) {
         pushShot(currentData.shots, shot);
     }
+    if (delta.rejectedSeqs && delta.rejectedSeqs.length > 0) {
+        currentData.rejectedSeqs ??= [];
+        for (const seq of delta.rejectedSeqs) {
+            if (!currentData.rejectedSeqs.includes(seq)) {
+                currentData.rejectedSeqs.push(seq);
+            }
+        }
+        currentData.rejectedSeqs.sort((a, b) => a - b);
+        while (currentData.rejectedSeqs.length > FIRE_BUFFER_SIZE) {
+            currentData.rejectedSeqs.shift();
+        }
+    }
     return currentData;
+}
+
+export function recordRejectedShot(
+    log: FireLog | undefined,
+    seq: number,
+): FireLog {
+    const next: FireLog = log ?? { shots: [] };
+    next.rejectedSeqs ??= [];
+    if (!next.rejectedSeqs.includes(seq)) {
+        next.rejectedSeqs.push(seq);
+        next.rejectedSeqs.sort((a, b) => a - b);
+        while (next.rejectedSeqs.length > FIRE_BUFFER_SIZE) {
+            next.rejectedSeqs.shift();
+        }
+    }
+    return next;
 }
 
 replicationPolicies.register(FireIntentComponent, {
@@ -264,6 +319,8 @@ export interface FireSyncLocalState {
     nextImpactSeq?: number;
     /** Client: last ShotImpact sequence received for this ship. */
     highestImpactSeq?: number;
+    /** Client: highest rejected shot sequence processed for this ship. */
+    highestRejectedSeq?: number;
     /**
      * Client: received impacts waiting for the local presentation of their
      * shot to reach them. Plain copies, never wire drafts.

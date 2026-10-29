@@ -1,5 +1,5 @@
 import { WeaponData, ammoOutfitIds } from 'novadatainterface/WeaponData';
-import { Emit, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { Emit, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
@@ -44,6 +44,7 @@ import {
     makeFireLogShot,
     newShotsAfter,
     pushShot,
+    recordRejectedShot,
 } from './fire_sync';
 import { GameDataResource } from './game_data_resource';
 import { PlatformResource } from './platform_plugin';
@@ -569,7 +570,10 @@ function validFireIntent(shot: FireIntentShot): boolean {
 /** Non-draftable, non-replicated state survives wire buffer removal and world transfer. */
 export class ServerFireCadenceState {
     now = -Infinity;
-    readonly cadence = new FireCadence<FireIntentShot>(() => this.now);
+    readonly rejectedSeqs: number[] = [];
+    readonly cadence = new FireCadence<FireIntentShot>(() => this.now, {
+        onDiscard: shot => this.rejectedSeqs.push(shot.seq),
+    });
     boundary: string | undefined;
     blocked = false;
     hadIntent = false;
@@ -826,7 +830,10 @@ export const ServerFireIntentSystem = new System({
             // A retained/re-added wire buffer must never resurrect them.
             sync.highestIntentSeq = shot.seq;
             local.highestIntentSeq = shot.seq;
-            if (invalidate || !active.has(shot.weaponId)) continue;
+            if (invalidate || !active.has(shot.weaponId)) {
+                local.rejectedSeqs.push(shot.seq);
+                continue;
+            }
             // Copy (never retain) the wire value: it may be a revocable draft.
             const snapshot: FireIntentShot = {
                 seq: shot.seq, weaponId: shot.weaponId,
@@ -843,14 +850,22 @@ export const ServerFireIntentSystem = new System({
                 snapshot.inaccuracy = shot.inaccuracy;
             }
             if (shot.viewDelayMs !== undefined) snapshot.viewDelayMs = shot.viewDelayMs;
-            local.cadence.enqueue(shot.weaponId, snapshot);
+            if (local.cadence.enqueue(shot.weaponId, snapshot) !== 'queued') {
+                local.rejectedSeqs.push(shot.seq);
+            }
         }
         // Drain every tick, independent of network arrivals and trigger state.
         for (const id of active) {
             const weapon = weaponEntries.getCached(id)!;
             local.cadence.drain(id, (shot, at, context) => {
                 const fired = fireScheduledIntent(entity, weapon, uuid, shot, context, time.time, systemId);
-                if (!fired) return false;
+                if (!fired) {
+                    if (entity.components.has(CombatAuthorityComponent)
+                        && !canPay(entity, weapon.data.ammoType)) {
+                        local!.rejectedSeqs.push(shot.seq);
+                    }
+                    return false;
+                }
                 rememberSpawnedShot(sync, shot.seq);
                 // A pose-fired shot started at the client's muzzle time, so
                 // log that time: observers then fast-forward along the same
@@ -875,6 +890,14 @@ export const ServerFireIntentSystem = new System({
                 return true;
             });
         }
+        if (local.rejectedSeqs.length > 0) {
+            for (const rejectedSeq of local.rejectedSeqs.splice(0)) {
+                log = recordRejectedShot(log, rejectedSeq);
+            }
+            if (log) {
+                entity.components.set(FireLogComponent, log);
+            }
+        }
     },
 });
 
@@ -889,13 +912,26 @@ export const FireLogSpawnSystem = new System({
         TimeResource,
         UUID,
         GetEntity,
+        Entities,
         Optional(FireIntentComponent),
         Optional(ServerClockOffsetResource),
         Optional(NetworkTimingResource),
         Optional(PlatformResource),
     ] as const,
-    step(log, weaponEntries, time, uuid, entity, intent, serverClockOffset, network, platform) {
+    step(log, weaponEntries, time, uuid, entity, entities, intent, serverClockOffset, network, platform) {
         const sync = getFireSyncLocalState(entity, intent, log);
+        if (log.rejectedSeqs && log.rejectedSeqs.length > 0) {
+            const prevRejected = sync.highestRejectedSeq ?? 0;
+            for (const rejectedSeq of log.rejectedSeqs) {
+                if (rejectedSeq <= prevRejected) continue;
+                sync.highestRejectedSeq = Math.max(sync.highestRejectedSeq ?? 0, rejectedSeq);
+                sync.spawnedSeqs.delete(rejectedSeq);
+                if (platform === 'browser') {
+                    entities.delete(loggedShotEntityId(uuid, rejectedSeq));
+                    entities.delete(`beam:${uuid}:${rejectedSeq}`);
+                }
+            }
+        }
         const clock = platform === 'browser' ? network?.clocks.get(network.serverPeer) : undefined;
         const clockOffset = clock?.offset ?? serverClockOffset?.offset ?? 0;
         const presentationDelay = platform === 'browser' ? network?.presentationDelay(time.time) ?? 0 : 0;

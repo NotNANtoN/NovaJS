@@ -246,6 +246,7 @@ export class CompositeHull extends Hull {
 
 class MultiFrameHull extends Hull {
     private activeHull: Hull;
+    private activeFrameIndex = 0;
     public pos = new SAT.Vector(0, 0);
     private wrappedAngle = 0;
     constructor(private hulls: Hull[]) {
@@ -263,6 +264,9 @@ class MultiFrameHull extends Hull {
         this.activeHull.angle = angle;
         this.wrappedAngle = angle;
     }
+    get frame() {
+        return this.activeFrameIndex;
+    }
     set frame(frame: number) {
         const newHull = this.hulls[frame];
         if (newHull === this.activeHull) {
@@ -272,6 +276,7 @@ class MultiFrameHull extends Hull {
             console.warn(`Tried to set hull to ${frame} but only ${this.hulls.length} are available`);
             return;
         }
+        this.activeFrameIndex = frame;
         newHull.angle = this.wrappedAngle;
         newHull.pos = this.pos;
         this.activeHull = newHull;
@@ -630,28 +635,56 @@ export const CollisionSystem = new System({
                     }
                     let shift = { x: 0, y: 0 };
                     let otherDisplacement = other.displacement;
-                    if (entry.viewDelayMs !== undefined && time) {
-                        const target = entities.get(other.uuid);
-                        const rewind = target && rewindOffset(target, other.position,
-                            time.time - entry.viewDelayMs, entities);
-                        if (rewind) {
-                            // Move the shot by the inverse of the target's
-                            // rewind, and treat the rewound target as still.
-                            shift = { x: -rewind.x, y: -rewind.y };
-                            otherDisplacement = { x: 0, y: 0 };
+                    const target = entry.viewDelayMs !== undefined && time
+                        ? entities.get(other.uuid)
+                        : undefined;
+                    const rewind = target && time && entry.viewDelayMs !== undefined
+                        ? rewindOffset(target, other.position, time.time - entry.viewDelayMs, entities)
+                        : undefined;
+                    const prevAngle = other.hull.angle;
+                    const prevFrame = other.hull instanceof MultiFrameHull
+                        ? other.hull.frame
+                        : undefined;
+                    let hullRewound = false;
+                    if (rewind && time) {
+                        // Move the shot by the inverse of the target's
+                        // rewind, and treat the rewound target as still.
+                        shift = { x: -rewind.x, y: -rewind.y };
+                        otherDisplacement = { x: 0, y: 0 };
+                        let rewoundAngle = rewind.angle;
+                        if (other.hull instanceof MultiFrameHull) {
+                            const animation = target?.components.get(AnimationComponent);
+                            let rewoundFrame = 0;
+                            if (animation) {
+                                ({ frame: rewoundFrame, angle: rewoundAngle } =
+                                    getFrameFromMovement(animation, rewind.movement));
+                            }
+                            other.hull.frame = rewoundFrame;
+                        }
+                        other.hull.angle = rewoundAngle;
+                        hullRewound = true;
+                    }
+                    const rewound = rewind !== undefined;
+                    let contactTime: number | undefined;
+                    try {
+                        contactTime = entry.projectile
+                            ? sweptHullTime(entry.hull.shapes, other.hull.shapes,
+                                entry.displacement, otherDisplacement, shift)
+                            : rewound
+                                // Static overlap of a blast/beam with where the
+                                // shooter saw the target.
+                                ? sweptHullTime(entry.hull.shapes, other.hull.shapes,
+                                    { x: 0, y: 0 }, { x: 0, y: 0 }, shift) === undefined
+                                    ? undefined : 1
+                                : entry.hull.collides(other.hull) ? 1 : undefined;
+                    } finally {
+                        if (hullRewound) {
+                            if (prevFrame !== undefined && other.hull instanceof MultiFrameHull) {
+                                other.hull.frame = prevFrame;
+                            }
+                            other.hull.angle = prevAngle;
                         }
                     }
-                    const rewound = shift.x !== 0 || shift.y !== 0;
-                    const contactTime = entry.projectile
-                        ? sweptHullTime(entry.hull.shapes, other.hull.shapes,
-                            entry.displacement, otherDisplacement, shift)
-                        : rewound
-                            // Static overlap of a blast/beam with where the
-                            // shooter saw the target.
-                            ? sweptHullTime(entry.hull.shapes, other.hull.shapes,
-                                { x: 0, y: 0 }, { x: 0, y: 0 }, shift) === undefined
-                                ? undefined : 1
-                            : entry.hull.collides(other.hull) ? 1 : undefined;
                     if (contactTime !== undefined) contacts.push({ entry, other, time: contactTime });
                 }
             }
