@@ -3,7 +3,7 @@ import { NpcSpawnData } from "novadatainterface/SystemData";
 import { GetWorld } from "nova_ecs/arg_types";
 import { AsyncSystem } from "nova_ecs/async_system";
 import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
-import { TimeResource } from "nova_ecs/plugins/time_plugin";
+import { TimeResource, wallClockNow } from "nova_ecs/plugins/time_plugin";
 import { Plugin } from "nova_ecs/plugin";
 import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
@@ -25,7 +25,9 @@ import {
     worldFormationPosition,
 } from "./fleet_plugin";
 import { TargetComponent } from "./target_component";
-import { makePersNpc, PersStateResource } from "./pers_plugin";
+import { makePersNpc, PersComponent, PersStateResource } from "./pers_plugin";
+import { DisabledComponent } from "./death_plugin";
+import { ArmorComponent, ShieldComponent } from "./health_plugin";
 import {
     ArrivalPlacement,
     ArrivalStellarCandidate,
@@ -51,6 +53,16 @@ import {
 } from './jump_plugin';
 import { isConquestMode, isConquestPocketSystem } from './conquest_config';
 import { PlayerStateComponent } from './player_state';
+import {
+    advanceCachedSystemState,
+    captureSystemNpcState,
+    consumeCachedSystemState,
+    deadReckonTransferArrival,
+    drainStorylineNpcTransfers,
+    hasPendingStorylineNpcTransfers,
+    TrackedNpcShip,
+    TransferArrivalPlacement,
+} from './system_state_tracker';
 
 
 export const NPC_RESPAWN_INTERVAL_MS = 3_000;
@@ -265,7 +277,9 @@ async function buildNpc(
         // group, so its members are not given errands of their own.
         if (!fleet) {
             npc.components.set(
-                NpcTrafficComponent, createArrivingTrafficState());
+                NpcTrafficComponent,
+                createArrivingTrafficState(0, placement?.stellarId),
+            );
         }
         // A navy ship or fleet leader guards its own world instead of running
         // errands. Escorts follow their leader via FleetCohesionSystem.
@@ -342,21 +356,14 @@ async function createNpcGroup(
         // a smaller wing is better than refusing to spawn the fleet at all.
         let station: ArrivalPlacement | undefined;
         if (leaderMovement && placement) {
-            if (placement.origin === 'stellar') {
-                station = {
-                    position: [placement.position[0], placement.position[1]],
-                    rotation: placement.rotation,
-                    origin: placement.origin,
-                };
-            } else {
-                const world = worldFormationPosition(
-                    leaderMovement, formationSlot(slot));
-                station = {
-                    position: [world.x, world.y],
-                    rotation: placement.rotation,
-                    origin: placement.origin,
-                };
-            }
+            const world = worldFormationPosition(
+                leaderMovement, formationSlot(slot));
+            station = {
+                position: [world.x, world.y],
+                rotation: placement.rotation,
+                origin: placement.origin,
+                stellarId: placement.stellarId,
+            };
         }
         const escort = await buildNpc(
             gameData, npcType, shipId, budget, station, true, undefined, now);
@@ -400,6 +407,7 @@ function arrivalContext(
             continue;
         }
         liveStellars.set(planet.id, {
+            id: planet.id,
             position: [movement.position.x, movement.position.y],
             inhabited: planet.inhabited,
         });
@@ -415,8 +423,11 @@ function arrivalContext(
         if (planet) {
             // A barren rock has no traffic to launch, so the inhabited flag
             // decides which stellars can be a departure point.
-            stellars.push(
-                { position: planet.position, inhabited: planet.inhabited });
+            stellars.push({
+                id,
+                position: planet.position,
+                inhabited: planet.inhabited,
+            });
         }
     }
     return {
@@ -500,6 +511,7 @@ function nextPlacement(
     gameData: GameDataInterface,
     systemData: SystemData | undefined,
     world: World,
+    launchShare?: number,
 ): ArrivalPlacement | undefined {
     if (!systemData) {
         return undefined;
@@ -510,7 +522,106 @@ function nextPlacement(
         context.neighbours,
         context.stellars,
         Math.random,
+        launchShare,
     );
+}
+
+async function restoreTrackedNpcEntity(
+    gameData: GameDataInterface,
+    budget: import('./entity_budget').EntityBudget,
+    tracked: TrackedNpcShip,
+    now: number,
+    transferPlacement?: TransferArrivalPlacement,
+): Promise<Entity | undefined> {
+    try {
+        const shipData = await gameData.data.Ship.get(tracked.shipId);
+        const npc = makeNpc(shipData);
+        if (!reserveEntity(budget, npc, 'ship')) {
+            return undefined;
+        }
+        if (tracked.name) {
+            npc.name = tracked.name;
+        }
+        npc.components.set(GovtComponent, { id: tracked.government });
+        npc.components.set(NpcCombatRoleComponent, tracked.combatRole);
+        if (tracked.dudeId) {
+            npc.components.set(DudeSourceComponent, { id: tracked.dudeId });
+        }
+        if (tracked.persInstance !== undefined) {
+            npc.components.set(PersComponent, tracked.persInstance);
+        }
+        const shield = npc.components.get(ShieldComponent);
+        if (shield && shield.max > 0) {
+            shield.current = Math.max(
+                0,
+                Math.min(shield.max, Math.round(shield.max * tracked.shieldRatio)),
+            );
+        }
+        const armor = npc.components.get(ArmorComponent);
+        if (armor && armor.max > 0) {
+            armor.current = Math.max(
+                1,
+                Math.min(armor.max, Math.round(armor.max * tracked.armorRatio)),
+            );
+        }
+        if (tracked.disabled) {
+            npc.components.set(DisabledComponent, true);
+        }
+        if (tracked.fleetId && tracked.leaderUuid && tracked.fleetRole) {
+            npc.components.set(FleetMemberComponent, {
+                fleetId: tracked.fleetId,
+                leaderUuid: tracked.leaderUuid,
+                role: tracked.fleetRole,
+                slot: tracked.fleetSlot ?? -1,
+            });
+            npc.components.set(TargetComponent, { target: undefined });
+        }
+        if (tracked.patrolPost && !transferPlacement) {
+            npc.components.set(PatrolComponent, {
+                guardPost: [tracked.patrolPost[0], tracked.patrolPost[1]],
+                radius: tracked.patrolRadius ?? DEFAULT_PATROL_RADIUS,
+            });
+        } else if (!tracked.fleetId && tracked.combatRole !== 'military') {
+            npc.components.set(
+                NpcTrafficComponent,
+                createArrivingTrafficState(0, tracked.launchedFromPlanetId),
+            );
+        }
+
+        const movement = npc.components.get(MovementStateComponent);
+        if (movement) {
+            const pos = transferPlacement
+                ? transferPlacement.position
+                : tracked.position;
+            const vel = transferPlacement
+                ? transferPlacement.velocity
+                : tracked.velocity;
+            const rot = transferPlacement
+                ? transferPlacement.rotation
+                : tracked.rotation;
+            movement.position = new Position(pos[0], pos[1]);
+            movement.velocity = new Vector(vel[0], vel[1]);
+            movement.rotation = new Angle(rot);
+        }
+
+        if (transferPlacement?.arriving) {
+            npc.components.set(JumpStateComponent, {
+                from: transferPlacement.from,
+                to: transferPlacement.to,
+                phase: 'arriving',
+                phaseStartedAt: now,
+                transitionAt: now + JUMP_ARRIVAL_MS,
+                requiresAdjacency: false,
+                arrivalSoundPending: false,
+                createdAt: now,
+            });
+        }
+
+        npc.components.set(MultiplayerData, { owner: "server" });
+        return npc;
+    } catch (_error) {
+        return undefined;
+    }
 }
 
 
@@ -536,6 +647,7 @@ const persByGameData = new WeakMap<GameDataInterface, PersData[]>();
 const spawnDataByWorld = new WeakMap<World, {
     entries: NpcSpawnData[],
     systemData: SystemData,
+    target: number,
 }>();
 const persLoading = new WeakSet<GameDataInterface>();
 
@@ -628,7 +740,7 @@ const NpcSpawnSystem = new AsyncSystem({
         EntityBudgetResource,
     ] as const,
     exclusive: true,
-    canSkipStep(_singleton, _gameData, systemId, time, state, npcs, world) {
+    canSkipStep(_singleton, gameData, systemId, time, state, npcs, world) {
         if (!activeWorlds.has(world) || state.disabled) {
             return true;
         }
@@ -641,6 +753,9 @@ const NpcSpawnSystem = new AsyncSystem({
             }
         }
         if (!state.initialized) {
+            return false;
+        }
+        if (hasPendingStorylineNpcTransfers(gameData, systemId)) {
             return false;
         }
         return time.time < state.nextSpawnAt || npcs.length >= state.target;
@@ -660,6 +775,9 @@ const NpcSpawnSystem = new AsyncSystem({
             }
         }
 
+        const now = time.time;
+        const wallNow = wallClockNow();
+
         if (!state.initialized) {
             let systemData;
             try {
@@ -677,7 +795,7 @@ const NpcSpawnSystem = new AsyncSystem({
             state.entries = getSpawnEntries(systemData);
             state.systemData = systemData;
             startLoadingPers(gameData);
-            if (state.entries.length === 0 || state.target === 0) {
+            if (state.entries.length === 0 && !hasPendingStorylineNpcTransfers(gameData, systemId, wallNow)) {
                 state.disabled = state.entries.length === 0;
                 state.nextSpawnAt = Infinity;
                 console.log(`NPC spawn ${systemId}: ${npcs.length}/${state.target}`);
@@ -688,25 +806,107 @@ const NpcSpawnSystem = new AsyncSystem({
 
             const room = Math.max(0, state.capacity - npcs.length);
             const target = state.target;
-            const initialCount = Math.max(
-                0,
-                Math.min(target - npcs.length, room),
-            );
             // Every draft read and write happens here, before the spawn loop
             // starts awaiting. Loading ship data lets the world step again,
             // which revokes these drafts and makes any later touch throw.
             const entries = getSpawnEntries(systemData);
-            spawnDataByWorld.set(world, { entries, systemData });
+            spawnDataByWorld.set(world, { entries, systemData, target });
             const existing = npcs.length;
-            state.nextSpawnAt = time.time + getNpcRespawnDelay();
+            state.nextSpawnAt = now + getNpcRespawnDelay();
             let spawned = 0;
-            for (let i = 0; i < initialCount; i++) {
+
+            // 1. Materialize any NPCs that hyperjumped into this system from a
+            // neighbouring system (e.g. a ship the player is following).
+            const incomingTransfers = drainStorylineNpcTransfers(gameData, systemId, wallNow);
+            for (const transfer of incomingTransfers) {
+                if (!activeWorlds.has(world) || spawned >= room) {
+                    break;
+                }
+                const sourceSys = gameData.data.System.getCached?.(transfer.from);
+                const sourcePos = sourceSys?.position ?? [0, -100];
+                const destPos = systemData.position ?? [0, 0];
+                const arrivalPlacement = deadReckonTransferArrival(
+                    transfer,
+                    sourcePos,
+                    destPos,
+                    wallNow,
+                );
+                const restored = await restoreTrackedNpcEntity(
+                    gameData,
+                    budget,
+                    transfer.ship,
+                    now,
+                    arrivalPlacement,
+                );
+                if (!activeWorlds.has(world)) {
+                    if (restored) {
+                        budget.release('ship');
+                    }
+                    return;
+                }
+                if (restored) {
+                    world.entities.set(transfer.uuid, restored);
+                    spawned++;
+                }
+            }
+
+            // 2. Restore previously seen system state using dead reckoning if
+            // this system was recently visited, keeping destroyed/departed
+            // ships gone instead of respawning the entire system from scratch.
+            const cachedState = consumeCachedSystemState(gameData, systemId, wallNow);
+            let maxNewSpawns = Math.max(
+                0,
+                Math.min(target - (existing + spawned), room - spawned),
+            );
+            if (cachedState) {
+                const { survivingShips, naturalReplacements } = advanceCachedSystemState(
+                    gameData,
+                    cachedState,
+                    systemData,
+                    wallNow,
+                );
+                for (const trackedShip of survivingShips) {
+                    if (!activeWorlds.has(world) || spawned >= room) {
+                        break;
+                    }
+                    if (world.entities.has(trackedShip.uuid)) {
+                        continue;
+                    }
+                    const restored = await restoreTrackedNpcEntity(
+                        gameData,
+                        budget,
+                        trackedShip,
+                        now,
+                    );
+                    if (!activeWorlds.has(world)) {
+                        if (restored) {
+                            budget.release('ship');
+                        }
+                        return;
+                    }
+                    if (restored) {
+                        world.entities.set(trackedShip.uuid, restored);
+                        spawned++;
+                    }
+                }
+                maxNewSpawns = Math.max(
+                    0,
+                    Math.min(
+                        naturalReplacements,
+                        target - (existing + spawned),
+                        room - spawned,
+                    ),
+                );
+            }
+
+            for (let i = 0; i < maxNewSpawns; i++) {
                 if (!activeWorlds.has(world)) {
                     return;
                 }
                 // A fleet fills several slots at once, so the target is
                 // measured in ships rather than in spawn attempts.
-                if (spawned >= initialCount) {
+                if (spawned >= maxNewSpawns + (cachedState ? spawned : 0)
+                    || existing + spawned >= target) {
                     break;
                 }
                 const placement = nextPlacement(gameData, systemData, world);
@@ -716,13 +916,13 @@ const NpcSpawnSystem = new AsyncSystem({
                 const named = persByGameData.get(gameData)?.length
                     ? await createPersNpc(
                         gameData, world, systemId, budget, placement,
-                        time.time)
+                        now)
                     : undefined;
                 const group: Array<[string, Entity]> = named
                     ? [[uuid(), named]]
                     : await createNpcGroup(
                         gameData, entries, budget, placement, systemData,
-                        time.time);
+                        now);
                 if (!activeWorlds.has(world)) {
                     for (const _member of group) {
                         budget.release('ship');
@@ -739,27 +939,66 @@ const NpcSpawnSystem = new AsyncSystem({
             return;
         }
 
-        if (time.time < state.nextSpawnAt || npcs.length >= state.target) {
-            return;
-        }
-
-        state.nextSpawnAt = time.time + getNpcRespawnDelay();
         const spawnData = spawnDataByWorld.get(world);
         if (!spawnData) {
             return;
         }
+
+        // Materialize any ships that hyperjumped into this already-active system
+        if (hasPendingStorylineNpcTransfers(gameData, systemId, wallNow)) {
+            const incoming = drainStorylineNpcTransfers(gameData, systemId, wallNow);
+            for (const transfer of incoming) {
+                if (!activeWorlds.has(world)) {
+                    return;
+                }
+                const sourceSys = gameData.data.System.getCached?.(transfer.from);
+                const sourcePos = sourceSys?.position ?? [0, -100];
+                const destPos = spawnData.systemData.position ?? [0, 0];
+                const arrivalPlacement = deadReckonTransferArrival(
+                    transfer,
+                    sourcePos,
+                    destPos,
+                    wallNow,
+                );
+                const restored = await restoreTrackedNpcEntity(
+                    gameData,
+                    budget,
+                    transfer.ship,
+                    now,
+                    arrivalPlacement,
+                );
+                if (!activeWorlds.has(world)) {
+                    if (restored) {
+                        budget.release('ship');
+                    }
+                    return;
+                }
+                if (restored) {
+                    world.entities.set(transfer.uuid, restored);
+                }
+            }
+            return;
+        }
+
+        if (now < state.nextSpawnAt || npcs.length >= state.target) {
+            return;
+        }
+
+        state.nextSpawnAt = now + getNpcRespawnDelay();
         const target = state.target;
         const existing = npcs.length;
-        const placement = nextPlacement(gameData, spawnData.systemData, world);
+        // Ongoing replacement ships while a system is active arrive from
+        // hyperspace so ships never pop into open space or pile onto a planet.
+        const placement = nextPlacement(gameData, spawnData.systemData, world, 0);
         const named = persByGameData.get(gameData)?.length
             ? await createPersNpc(
-                gameData, world, systemId, budget, placement, time.time)
+                gameData, world, systemId, budget, placement, now)
             : undefined;
         const group: Array<[string, Entity]> = named
             ? [[uuid(), named]]
             : await createNpcGroup(
                 gameData, spawnData.entries, budget, placement,
-                spawnData.systemData, time.time);
+                spawnData.systemData, now);
         if (group.length === 0 || !activeWorlds.has(world)) {
             if (!activeWorlds.has(world)) {
                 for (const _member of group) {
@@ -793,6 +1032,14 @@ export const NpcSpawnPlugin: Plugin = {
         world.addSystem(NpcSpawnSystem);
     },
     remove(world) {
+        const state = world.resources.get(NpcSpawnStateResource);
+        const spawnData = spawnDataByWorld.get(world);
+        const gameData = world.resources.get(GameDataResource);
+        const systemId = world.resources.get(SystemIdResource);
+        if ((state?.initialized || spawnData) && !state?.disabled && systemId) {
+            const target = state?.target || spawnData?.target || 0;
+            captureSystemNpcState(gameData, world, systemId, target);
+        }
         activeWorlds.delete(world);
         world.removeSystem(NpcSpawnSystem);
         world.resources.delete(NpcSpawnStateResource);

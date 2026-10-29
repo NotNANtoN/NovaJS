@@ -285,9 +285,13 @@ const NpcTrafficFlightSystem = new System({
                 return;
             }
             const candidates = planets.map(planet => destinationFor(planet, movement));
-            const launchedFromUuid = candidates.find(
-                c => c.distanceSquared <= TRAFFIC_LANDING_RANGE_SQUARED,
-            )?.uuid;
+            const launchedFromUuid = (traffic.launchedFromPlanetId
+                ? candidates.find(c => c.id === traffic.launchedFromPlanetId)?.uuid
+                : undefined)
+                ?? candidates.find(
+                    c => c.distanceSquared <= TRAFFIC_LANDING_RANGE_SQUARED,
+                )?.uuid;
+            delete traffic.launchedFromPlanetId;
             const selected = chooseTrafficDestination(
                 candidates,
                 random,

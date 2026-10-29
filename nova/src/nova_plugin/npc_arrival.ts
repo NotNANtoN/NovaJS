@@ -19,11 +19,8 @@ export type ArrivalRandom = () => number;
 /** Ambient traffic uses the same entry scale as a player's jump arrival. */
 export const HYPERSPACE_ENTRY_RADIUS = JUMP_ARRIVAL_RADIUS;
 
-/**
- * Ships lifting off from a stellar appear directly on the planet body rather
- * than hundreds of units out in empty space.
- */
-export const STELLAR_LAUNCH_OFFSET = 0;
+/** How far off a stellar an initial Storyline ship appears. */
+export const STELLAR_LAUNCH_OFFSET = 700;
 
 /**
  * Deliberate presentation policy, not a retail value: most ambient traffic
@@ -37,6 +34,7 @@ export interface ArrivalPlacement {
     /** Nova headings: 0 is up and angles run clockwise. */
     rotation: number;
     origin: 'hyperspace' | 'stellar';
+    stellarId?: string;
 }
 
 export interface ArrivalSystem {
@@ -53,6 +51,7 @@ export interface ArrivalSystem {
 export interface ArrivalStellar {
     position: readonly [number, number];
     inhabited?: boolean;
+    id?: string;
 }
 
 export type ArrivalStellarCandidate =
@@ -81,6 +80,12 @@ function stellarMetadata(
     candidate: ArrivalStellarCandidate,
 ): boolean | undefined {
     return 'position' in candidate ? candidate.inhabited : undefined;
+}
+
+function stellarIdOf(
+    candidate: ArrivalStellarCandidate,
+): string | undefined {
+    return 'position' in candidate ? candidate.id : undefined;
 }
 
 /** Nova measures headings from straight up, turning clockwise. */
@@ -125,10 +130,11 @@ export function stellarLaunch(
     stellarPosition: readonly [number, number],
     random: ArrivalRandom,
     offset = STELLAR_LAUNCH_OFFSET,
+    stellarId?: string,
 ): ArrivalPlacement {
     const bearing = sample(random) * Math.PI * 2;
     const outward = { x: Math.sin(bearing), y: -Math.cos(bearing) };
-    return {
+    const placement: ArrivalPlacement = {
         position: [
             stellarPosition[0] + outward.x * offset,
             stellarPosition[1] + outward.y * offset,
@@ -136,6 +142,10 @@ export function stellarLaunch(
         rotation: bearing,
         origin: 'stellar',
     };
+    if (stellarId !== undefined) {
+        placement.stellarId = stellarId;
+    }
+    return placement;
 }
 
 /**
@@ -153,6 +163,7 @@ export function chooseArrivalPlacement(
     const candidates = stellarPositions.map(candidate => ({
         position: stellarPosition(candidate),
         inhabited: stellarMetadata(candidate),
+        id: stellarIdOf(candidate),
     }));
     const hasMetadata = candidates.some(
         candidate => candidate.inhabited !== undefined);
@@ -163,7 +174,7 @@ export function chooseArrivalPlacement(
     if (launchCandidates.length > 0 && sample(random) < launchShare) {
         const stellar = pick(launchCandidates, random);
         if (stellar) {
-            return stellarLaunch(stellar.position, random);
+            return stellarLaunch(stellar.position, random, STELLAR_LAUNCH_OFFSET, stellar.id);
         }
     }
     return hyperspaceEntry(system, neighbourPositions, random);

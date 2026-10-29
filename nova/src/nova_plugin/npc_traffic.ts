@@ -18,6 +18,7 @@ export type TrafficPhase =
 export interface NpcTrafficState {
     phase: TrafficPhase;
     destination?: string;
+    launchedFromPlanetId?: string;
     readyAt: number;
 }
 
@@ -71,8 +72,13 @@ function isValidDestination(candidate: TrafficDestination): boolean {
 
 export function createArrivingTrafficState(
     readyAt = 0,
+    launchedFromPlanetId?: string,
 ): NpcTrafficState {
-    return { phase: 'arriving', readyAt };
+    const state: NpcTrafficState = { phase: 'arriving', readyAt };
+    if (launchedFromPlanetId !== undefined) {
+        state.launchedFromPlanetId = launchedFromPlanetId;
+    }
+    return state;
 }
 
 /**

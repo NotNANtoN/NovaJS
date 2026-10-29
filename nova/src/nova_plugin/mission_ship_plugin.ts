@@ -575,7 +575,7 @@ function applyMissionShipPlacement(
     const perpY = Math.sin(placement.rotation);
     const lateral = index === 0
         ? 0
-        : (index % 2 === 1 ? 1 : -1) * Math.ceil(index / 2) * (placement.origin === 'hyperspace' ? 55 : 0);
+        : (index % 2 === 1 ? 1 : -1) * Math.ceil(index / 2) * 55;
     mov.position = new Position(
         placement.position[0] + perpX * lateral,
         placement.position[1] + perpY * lateral,

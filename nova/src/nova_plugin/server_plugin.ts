@@ -53,6 +53,7 @@ import {
 
 import { SystemIdResource } from './system_id_resource';
 import { variantIndexForCatalog } from './system_variants';
+import { captureSystemNpcState } from './system_state_tracker';
 
 // Kept exported here for compatibility with code that used the original
 // server-plugin stub. The codec itself is browser-safe and lives with state.
@@ -161,13 +162,27 @@ export const ManageClientsSystem = new System({
     name: 'ManageClients',
     events: [RemovedPeerEvent],
     args: [RemovedPeerEvent, PlayerEntitiesQuery, Entities, SingletonComponent,
-        PlayerStoreResource, SystemIdResource, PlayerStateSnapshots] as const,
+        PlayerStoreResource, SystemIdResource, PlayerStateSnapshots,
+        Optional(GameDataResource), GetWorld] as const,
     step: (removedPeer, multiplayerEntities, entities, _singleton,
-        playerStore, systemId, snapshots) => {
+        playerStore, systemId, snapshots, gameData, world) => {
         // Remove entities of peers who have disconnected
         for (const [multiplayerData, uuid, state, authority, entity] of multiplayerEntities) {
             if (multiplayerData.owner === removedPeer) {
                 authority?.capture(entity);
+                const playerJumpingTo = state?.currentSystem && state.currentSystem !== systemId
+                    ? state.currentSystem
+                    : undefined;
+                if (playerJumpingTo && gameData) {
+                    captureSystemNpcState(
+                        gameData,
+                        world,
+                        systemId,
+                        0,
+                        wallClockNow(),
+                        playerJumpingTo,
+                    );
+                }
                 const token = playerStore.getTokenForPeer(removedPeer);
                 if (token && state && (!playerStore.saveCombatResources || authority && !authority.retired)) {
                     // PlayerStore copies the state before retaining it.

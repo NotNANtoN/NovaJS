@@ -51,6 +51,7 @@ import {
     isConquestPocketSystem,
     oppositeConquestSystem,
 } from './conquest_config';
+import { recordStorylineNpcJumpDeparture } from './system_state_tracker';
 export { areSystemsSameOrVariants, type SystemLookup };
 
 export const JUMP_SPOOL_MS = 1_200;
@@ -978,6 +979,15 @@ export const NpcJumpLifecycleSystem = new System({
                         mode: conquestBot.mode === 'retreat' ? 'retreat' : 'attack',
                     },
                 });
+            } else if (state.from && state.to && state.from !== state.to) {
+                recordStorylineNpcJumpDeparture(
+                    gameData,
+                    entity,
+                    uuid,
+                    state.from,
+                    state.to,
+                    [movement.position.x, movement.position.y],
+                );
             }
             entities.delete(uuid);
         }

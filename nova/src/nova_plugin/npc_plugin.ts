@@ -647,12 +647,41 @@ export const WARSHIP_SEARCH_DURATION_MS = 30_000;
 function departureSystem(
     gameData: GameDataInterface,
     systemId: string,
+    currentHeading?: number,
 ): string | undefined {
-    const destination = gameData.data.System.getCached(systemId)?.links[0];
-    if (!destination || !gameData.data.System.getCached(destination)) {
+    const current = gameData.data.System.getCached(systemId);
+    const links = current?.links ?? [];
+    const available = links.filter(
+        link => gameData.data.System.getCached(link) !== undefined,
+    );
+    if (available.length === 0) {
         return undefined;
     }
-    return destination;
+    if (currentHeading === undefined || !current?.position || available.length === 1) {
+        return available[0];
+    }
+    const headingX = Math.sin(currentHeading);
+    const headingY = -Math.cos(currentHeading);
+    let bestLink = available[0];
+    let bestAlignment = -Infinity;
+    for (const link of available) {
+        const neighbour = gameData.data.System.getCached(link);
+        if (!neighbour?.position) {
+            continue;
+        }
+        const dx = neighbour.position[0] - current.position[0];
+        const dy = neighbour.position[1] - current.position[1];
+        const len = Math.hypot(dx, dy);
+        if (len <= 1e-5) {
+            continue;
+        }
+        const alignment = (dx / len) * headingX + (dy / len) * headingY;
+        if (alignment > bestAlignment) {
+            bestAlignment = alignment;
+            bestLink = link;
+        }
+    }
+    return bestLink;
 }
 
 export const NpcPurposeAI = new System({
@@ -772,7 +801,11 @@ export const NpcPurposeAI = new System({
         if (!shouldLeave || departing || jumpState || !systemId) {
             return;
         }
-        const destination = departureSystem(gameData, systemId);
+        const destination = departureSystem(
+            gameData,
+            systemId,
+            movement.rotation.angle,
+        );
         if (!destination) {
             return;
         }
@@ -1229,10 +1262,11 @@ function hashUuid(uuid: string): number {
     return hash >>> 0;
 }
 
-function getWanderHeading(uuid: string, time: number): number {
-    const slot = Math.floor(time / 5_000);
+function getWanderHeadingDrift(uuid: string, time: number): number {
+    const slot = Math.floor(time / 18_000);
     const mixed = (hashUuid(uuid) + Math.imul(slot, 0x9e3779b9)) >>> 0;
-    return mixed / 0x1_0000_0000 * 2 * Math.PI;
+    const normalized = mixed / 0x1_0000_0000;
+    return (normalized - 0.5) * 0.32;
 }
 
 const WanderAI = new System({
@@ -1259,9 +1293,23 @@ const WanderAI = new System({
         if (wander.enteredAt === undefined) {
             wander.enteredAt = time.time;
         }
-        if (wander.heading === undefined || time.time >= wander.nextTurnAt) {
-            wander.heading = getWanderHeading(uuid, time.time);
-            wander.nextTurnAt = time.time + 5_000;
+        if (wander.heading === undefined) {
+            wander.heading = movementState.rotation.angle;
+            wander.nextTurnAt = time.time + 18_000;
+        } else if (time.time >= wander.nextTurnAt) {
+            const distFromOrigin = Math.hypot(
+                movementState.position.x,
+                movementState.position.y,
+            );
+            if (distFromOrigin > 3_200) {
+                wander.heading = Math.atan2(
+                    -movementState.position.x,
+                    movementState.position.y,
+                ) + getWanderHeadingDrift(uuid, time.time);
+            } else {
+                wander.heading += getWanderHeadingDrift(uuid, time.time);
+            }
+            wander.nextTurnAt = time.time + 18_000;
         }
         movementState.turnTo = new Angle(wander.heading);
         movementState.accelerating = 1;
