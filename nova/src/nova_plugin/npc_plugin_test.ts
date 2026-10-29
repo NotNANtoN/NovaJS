@@ -30,16 +30,29 @@ import {
     shouldWarshipRetreat,
     ShootAllWeaponsAI,
     ShootAllWeaponsComponent,
+    classifyWeaponOrdnanceTier,
+    evaluateTargetThreatForOrdnance,
+    shouldNpcFireWeaponAtTarget,
+    GovtComponent,
 } from './npc_plugin';
 import { getShipAIProfile } from './ship_ai_profile';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 import { DestructionStartedComponent } from './destruction_state';
-import { GovernmentFlags } from './govt_relations';
-import { ShipDataComponent } from './ship_plugin';
+import {
+    GovernmentFlags,
+    GovernmentRelationResource,
+    GovernmentRelationStore,
+} from './govt_relations';
+import { ShipComponent, ShipDataComponent } from './ship_plugin';
+import { ArmorComponent, ShieldComponent } from './health_plugin';
+import { Stat } from './stat';
+import { createInitialPlayerState, PlayerStateComponent } from './player_state';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
 import {
     createProvocationState,
+    ProvocationResource,
+    recordDamage,
     recordProvocation,
 } from './npc_hostility';
 
@@ -639,5 +652,213 @@ describe("NPC combat tactics and analytical lead aiming", () => {
         world.step();
         expect(mov.accelerating).toBe(1);
         expect(mov.turnBack).toBeFalse();
+    });
+});
+
+describe("NPC proportional missile & heavy ordnance threat scaling", () => {
+    const primaryLaser = {
+        type: "BeamWeaponData" as const,
+        fireGroup: "primary" as const,
+        guidance: "beamTurret" as const,
+        damage: { shield: 12, armor: 12, ionization: 0, ionizationColor: 0, passThroughShield: 0, knockback: 0 },
+        shotSpeed: 1000,
+        shotDuration: 500,
+    };
+    const lightMissile = {
+        type: "ProjectileWeaponData" as const,
+        fireGroup: "secondary" as const,
+        guidance: "guided" as const,
+        exitType: "guided" as const,
+        damage: { shield: 25, armor: 20, ionization: 0, ionizationColor: 0, passThroughShield: 0, knockback: 0 },
+        physics: { speed: 400 },
+        shotDuration: 3000,
+    };
+    const heavyTorpedo = {
+        type: "ProjectileWeaponData" as const,
+        fireGroup: "secondary" as const,
+        guidance: "guided" as const,
+        exitType: "guided" as const,
+        damage: { shield: 85, armor: 90, ionization: 0, ionizationColor: 0, passThroughShield: 0, knockback: 0 },
+        physics: { speed: 320 },
+        shotDuration: 4000,
+    };
+
+    it("holds back missiles against a low-tier Shuttle that only lightly grazed an NPC or against bystander ships", () => {
+        // Bystander ship that hasn't even been hit by the Shuttle
+        const bystanderThreat = evaluateTargetThreatForOrdnance({
+            selfTotalHp: 400,
+            selfHealthRatio: 1,
+            targetShipId: "nova:128", // Shuttle (Tier 0)
+            targetTotalHp: 60,
+            targetHasHeavyOrSecondaryWeapons: false,
+            targetFiringSecondaryAtSelf: false,
+            personallyProvoked: false,
+            damageDealtToSelf: 0,
+            totalDamageDealtByTarget: 20,
+            legalRecord: 0,
+            crimeTolerance: 20,
+            isClassifiedTarget: true,
+        });
+        expect(bystanderThreat.allowLightSecondary).toBeFalse();
+        expect(bystanderThreat.allowHeavySecondary).toBeFalse();
+
+        // Even the NPC that took a minor 20-damage graze from the Shuttle only returns primary fire
+        const lightlyGrazedThreat = evaluateTargetThreatForOrdnance({
+            selfTotalHp: 400,
+            selfHealthRatio: 0.95,
+            targetShipId: "nova:128",
+            targetTotalHp: 60,
+            targetHasHeavyOrSecondaryWeapons: false,
+            targetFiringSecondaryAtSelf: false,
+            personallyProvoked: true,
+            damageDealtToSelf: 20,
+            totalDamageDealtByTarget: 20,
+            legalRecord: 0,
+            crimeTolerance: 20,
+            isClassifiedTarget: true,
+        });
+        expect(shouldNpcFireWeaponAtTarget(primaryLaser as never, lightlyGrazedThreat)).toBeTrue();
+        expect(shouldNpcFireWeaponAtTarget(lightMissile as never, lightlyGrazedThreat)).toBeFalse();
+        expect(shouldNpcFireWeaponAtTarget(heavyTorpedo as never, lightlyGrazedThreat)).toBeFalse();
+    });
+
+    it("escalates to missiles when a small ship fires missiles, deals heavy damage, or is a notorious Public Enemy", () => {
+        // 1. Small ship fires secondary missiles at the NPC -> return missile fire!
+        const missileShooterThreat = evaluateTargetThreatForOrdnance({
+            selfTotalHp: 400,
+            selfHealthRatio: 0.9,
+            targetShipId: "nova:128",
+            targetTotalHp: 60,
+            targetHasHeavyOrSecondaryWeapons: true,
+            targetFiringSecondaryAtSelf: true,
+            personallyProvoked: true,
+            damageDealtToSelf: 30,
+            totalDamageDealtByTarget: 30,
+            isClassifiedTarget: true,
+        });
+        expect(missileShooterThreat.allowLightSecondary).toBeTrue();
+        expect(missileShooterThreat.allowHeavySecondary).toBeTrue();
+
+        // 2. Small ship deals heavy sustained damage (>= 40% of NPC's HP)
+        const heavyDamageThreat = evaluateTargetThreatForOrdnance({
+            selfTotalHp: 300,
+            selfHealthRatio: 0.55,
+            targetShipId: "nova:128",
+            targetTotalHp: 60,
+            targetHasHeavyOrSecondaryWeapons: false,
+            targetFiringSecondaryAtSelf: false,
+            personallyProvoked: true,
+            damageDealtToSelf: 135,
+            totalDamageDealtByTarget: 135,
+            isClassifiedTarget: true,
+        });
+        expect(heavyDamageThreat.allowLightSecondary).toBeTrue();
+        expect(heavyDamageThreat.allowHeavySecondary).toBeTrue();
+
+        // 3. Notorious Public Enemy criminal record (record = -180 with tolerance 20 -> rung 9)
+        const publicEnemyThreat = evaluateTargetThreatForOrdnance({
+            selfTotalHp: 400,
+            selfHealthRatio: 1,
+            targetShipId: "nova:128",
+            targetTotalHp: 60,
+            targetHasHeavyOrSecondaryWeapons: false,
+            targetFiringSecondaryAtSelf: false,
+            personallyProvoked: false,
+            damageDealtToSelf: 0,
+            totalDamageDealtByTarget: 0,
+            legalRecord: -180,
+            crimeTolerance: 20,
+            isClassifiedTarget: true,
+        });
+        expect(publicEnemyThreat.allowLightSecondary).toBeTrue();
+        expect(publicEnemyThreat.allowHeavySecondary).toBeTrue();
+
+        // 4. Heavy warship target (e.g. Fed Destroyer nova:141) -> full ordnance authorized immediately
+        const warshipThreat = evaluateTargetThreatForOrdnance({
+            selfTotalHp: 400,
+            selfHealthRatio: 1,
+            targetShipId: "nova:141",
+            targetTotalHp: 900,
+            targetHasHeavyOrSecondaryWeapons: true,
+            targetFiringSecondaryAtSelf: false,
+            personallyProvoked: false,
+            damageDealtToSelf: 0,
+            totalDamageDealtByTarget: 0,
+            isClassifiedTarget: true,
+        });
+        expect(warshipThreat.allowLightSecondary).toBeTrue();
+        expect(warshipThreat.allowHeavySecondary).toBeTrue();
+    });
+
+    it("throttles secondary missiles in ShootAllWeaponsAI against a low-threat Shuttle while keeping primary weapons active", () => {
+        const world = new World("npc-ordnance-throttle-test");
+        const provocations = createProvocationState();
+        world.resources.set(PlatformResource, "node");
+        world.resources.set(ProvocationResource, provocations);
+        world.resources.set(GovernmentRelationResource, {
+            getCached: () => ({
+                id: "nova:128",
+                crimeTolerance: 20,
+                initialRecord: 0,
+            }),
+        } as never);
+        world.resources.set(GameDataResource, {
+            data: {
+                Weapon: {
+                    getCached: (id: string) => ({
+                        laser: primaryLaser,
+                        irMissile: lightMissile,
+                        torpedo: heavyTorpedo,
+                    }[id]),
+                },
+            },
+        } as never);
+        world.addSystem(ShootAllWeaponsAI);
+
+        const shuttlePlayer = new Entity("shuttle-player")
+            .addComponent(MovementStateComponent, movementAt(250, 0))
+            .addComponent(ShipComponent, { id: "nova:128" })
+            .addComponent(ShieldComponent, new Stat({ current: 30, max: 30, recharge: 1 }))
+            .addComponent(ArmorComponent, new Stat({ current: 30, max: 30, recharge: 0 }))
+            .addComponent(PlayerStateComponent, {
+                ...createInitialPlayerState(),
+                shipId: "nova:128",
+                legalRecords: { "nova:128": -5 }, // minor accidental graze, not criminal
+            })
+            .addComponent(MultiplayerData, { owner: "client-1" });
+
+        const npcMov = movementAt(0, 0);
+        npcMov.rotation = new Angle(Math.PI / 2); // Facing shuttle (+x)
+        const weapons = new Map([
+            ["laser", { count: 2, firing: false }],
+            ["irMissile", { count: 1, firing: false }],
+            ["torpedo", { count: 1, firing: false }],
+        ]);
+        const npc = new Entity("fed-patrol")
+            .addComponent(MovementStateComponent, npcMov)
+            .addComponent(WeaponsStateComponent, weapons)
+            .addComponent(TargetComponent, { target: "shuttle-player" })
+            .addComponent(ShootAllWeaponsComponent, undefined)
+            .addComponent(GovtComponent, { id: 128 })
+            .addComponent(ShieldComponent, new Stat({ current: 200, max: 200, recharge: 1 }))
+            .addComponent(ArmorComponent, new Stat({ current: 200, max: 200, recharge: 0 }))
+            .addComponent(MultiplayerData, { owner: "server" });
+
+        world.entities.set("shuttle-player", shuttlePlayer);
+        world.entities.set("fed-patrol", npc);
+
+        // Step 1: Shuttle only dealt 15 damage (minor scratch) -> primary laser fires, missiles held back!
+        recordDamage(provocations, 128, "fed-patrol", "shuttle-player", 15, 400, 100);
+        world.step();
+        expect(weapons.get("laser")!.firing).toBeTrue();
+        expect(weapons.get("irMissile")!.firing).toBeFalse();
+        expect(weapons.get("torpedo")!.firing).toBeFalse();
+
+        // Step 2: Shuttle deals another 160 damage (175 / 400 = 43.75% of NPC's HP) -> NPC escalates to full missiles!
+        recordDamage(provocations, 128, "fed-patrol", "shuttle-player", 160, 400, 200);
+        world.step();
+        expect(weapons.get("laser")!.firing).toBeTrue();
+        expect(weapons.get("irMissile")!.firing).toBeTrue();
+        expect(weapons.get("torpedo")!.firing).toBeTrue();
     });
 });

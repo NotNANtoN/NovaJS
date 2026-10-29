@@ -955,12 +955,21 @@ const ConquestBotLifecycleSystem = new System({
                     continue;
                 }
 
-                // Docked at home planet: restore shields and armor
+                // Docked at home planet: restore shields, armor, and missile/ammo outfits
                 if (selfShield) {
                     selfShield.current = selfShield.max;
                 }
                 if (selfArmor) {
                     selfArmor.current = selfArmor.max;
+                }
+                const currentShipData = botEntity.components.get(ShipDataComponent);
+                if (currentShipData?.outfits) {
+                    botEntity.components.set(
+                        OutfitsStateComponent,
+                        new Map(Object.entries(currentShipData.outfits).map(
+                            ([id, count]) => [id, { count }],
+                        )),
+                    );
                 }
                 const canAffordUpgrade = botState.gatheredCredits >= upgradeCostForTier(botState.tier);
                 if (canAffordUpgrade || tactical.closestEnemyDistSq > 850 * 850 || !retreatRecommended) {

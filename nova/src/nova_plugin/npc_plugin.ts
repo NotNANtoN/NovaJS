@@ -53,7 +53,7 @@ import {
 import type { GovtData } from "./npc_components";
 import { createMinerSystems, MiningShipProvider } from "./miner_ai";
 import { PlayerState, PlayerStateComponent } from "./player_state";
-import { isCriminal, recordFor } from "./legal_record";
+import { isCriminal, legalStatusIndex, recordFor } from "./legal_record";
 import { approachTarget, fleeFromTarget, headingError } from "./flight_controller";
 import { firstOrderWithFallback } from "./guidance";
 import { Position } from "nova_ecs/datatypes/position";
@@ -66,7 +66,7 @@ import {
 } from "./jump_plugin";
 import { SystemIdResource } from "./system_id_resource";
 import { CloakStateComponent } from "./cloaking_plugin";
-import { ConquestBotComponent } from "./conquest_config";
+import { ConquestBotComponent, estimateHullCombatTier } from "./conquest_config";
 export {
     ChooseRandomTargetComponent,
     GovtComponent,
@@ -1119,6 +1119,168 @@ export const FollowAI = new System({
     }
 });
 
+export type OrdnanceTier = 'primary' | 'light-secondary' | 'heavy-secondary' | 'bay';
+
+export function classifyWeaponOrdnanceTier(weaponData: WeaponData): OrdnanceTier {
+    if (weaponData.type === 'BayWeaponData') {
+        return 'bay';
+    }
+    const guidance = 'guidance' in weaponData ? weaponData.guidance : undefined;
+    if (guidance === 'pointDefense' || guidance === 'pointDefenseBeam') {
+        return 'primary';
+    }
+    const isSecondaryOrMissile = weaponData.fireGroup === 'secondary'
+        || guidance === 'guided'
+        || guidance === 'rocket'
+        || guidance === 'freefallBomb';
+    if (!isSecondaryOrMissile) {
+        return 'primary';
+    }
+    const shotDamage = (weaponData.damage?.shield ?? 0) + (weaponData.damage?.armor ?? 0);
+    return shotDamage >= 65 ? 'heavy-secondary' : 'light-secondary';
+}
+
+export interface TargetOrdnanceThreatInput {
+    selfTotalHp: number;
+    selfHealthRatio: number;
+    targetShipId?: string;
+    targetBotTier?: number;
+    targetStrength?: number;
+    targetTotalHp: number;
+    targetHasHeavyOrSecondaryWeapons: boolean;
+    targetFiringSecondaryAtSelf: boolean;
+    personallyProvoked: boolean;
+    damageDealtToSelf: number;
+    totalDamageDealtByTarget: number;
+    legalRecord?: number;
+    crimeTolerance?: number;
+    isClassifiedTarget: boolean;
+}
+
+export interface TargetOrdnanceThreatAssessment {
+    threatScore: number;
+    allowLightSecondary: boolean;
+    allowHeavySecondary: boolean;
+    allowBayLaunch: boolean;
+}
+
+/**
+ * Evaluates whether an NPC is justified in expending limited secondary missiles,
+ * torpedoes, or carrier fighter wings against its current target.
+ *
+ * Scales ordnance authorization across:
+ * 1. Target ship capability (hull tier, total shield+armor HP, strength, installed ordnance)
+ * 2. Incoming ordnance (whether the target is firing missiles/secondary weapons at this NPC)
+ * 3. Aggression & damage dealt (sustained damage dealt to this NPC or across its faction)
+ * 4. Legal standing / criminality (Wanted Criminal / Fugitive / Public Enemy status)
+ * 5. Self-preservation (critical hull/shield state while personally under attack)
+ */
+export function evaluateTargetThreatForOrdnance(
+    input: TargetOrdnanceThreatInput,
+): TargetOrdnanceThreatAssessment {
+    if (!input.isClassifiedTarget) {
+        return {
+            threatScore: 10,
+            allowLightSecondary: true,
+            allowHeavySecondary: true,
+            allowBayLaunch: true,
+        };
+    }
+
+    const hullTier = estimateHullCombatTier(input.targetShipId, input.targetBotTier);
+    let capabilityScore = 0;
+    if (hullTier >= 4 || input.targetTotalHp >= 600 || (input.targetStrength ?? 0) >= 75) {
+        capabilityScore = 3.0;
+    } else if (hullTier >= 2 || input.targetTotalHp >= 260 || (input.targetStrength ?? 0) >= 35) {
+        capabilityScore = 1.65;
+    } else if (hullTier === 1 || input.targetTotalHp >= 195 || (input.targetStrength ?? 0) >= 20) {
+        capabilityScore = 0.75;
+    } else {
+        capabilityScore = 0.0;
+    }
+    if (input.targetHasHeavyOrSecondaryWeapons) {
+        capabilityScore += 0.45;
+    }
+
+    const incomingOrdnanceScore = input.targetFiringSecondaryAtSelf ? 2.6 : 0;
+
+    const damageFractionToSelf = input.selfTotalHp > 0
+        ? input.damageDealtToSelf / input.selfTotalHp
+        : 0;
+    let aggressionScore = 0;
+    if (damageFractionToSelf >= 0.40 || input.damageDealtToSelf >= 120) {
+        aggressionScore = 2.7;
+    } else if (damageFractionToSelf >= 0.20 || input.damageDealtToSelf >= 55) {
+        aggressionScore = 1.6;
+    } else if (input.personallyProvoked && (damageFractionToSelf >= 0.08 || input.damageDealtToSelf >= 25)) {
+        aggressionScore = 0.65;
+    }
+    if (input.totalDamageDealtByTarget >= 300) {
+        aggressionScore = Math.max(aggressionScore, 2.6);
+    } else if (input.totalDamageDealtByTarget >= 150) {
+        aggressionScore = Math.max(aggressionScore, 1.5);
+    }
+
+    let criminalScore = 0;
+    if (input.legalRecord !== undefined && input.legalRecord < 0) {
+        const rung = legalStatusIndex(input.legalRecord, input.crimeTolerance ?? 20);
+        if (rung >= 8) {
+            criminalScore = 2.8;
+        } else if (rung >= 6) {
+            criminalScore = 1.7;
+        } else if (rung >= 5) {
+            criminalScore = 0.75;
+        }
+    }
+
+    const survivalScore = input.personallyProvoked
+        && input.selfHealthRatio < 0.42
+        && input.damageDealtToSelf > 0
+        ? 1.8
+        : 0;
+
+    const threatScore = capabilityScore
+        + incomingOrdnanceScore
+        + aggressionScore
+        + criminalScore
+        + survivalScore;
+
+    // Bystander Overkill Guard: unprovoked allied ships that have not been hit by
+    // a small ship (capability < 1.5) should engage with primary weapons only,
+    // never dumping missiles unless the small ship is a notorious criminal,
+    // firing missiles at them, or on a major rampage.
+    const bystanderSmallShipHoldback = capabilityScore < 1.5
+        && !input.personallyProvoked
+        && input.damageDealtToSelf <= 0
+        && !input.targetFiringSecondaryAtSelf
+        && criminalScore < 1.5
+        && input.totalDamageDealtByTarget < 150;
+
+    return {
+        threatScore,
+        allowLightSecondary: !bystanderSmallShipHoldback && threatScore >= 1.5,
+        allowHeavySecondary: !bystanderSmallShipHoldback && threatScore >= 2.6,
+        allowBayLaunch: !bystanderSmallShipHoldback && threatScore >= 1.5,
+    };
+}
+
+export function shouldNpcFireWeaponAtTarget(
+    weaponData: WeaponData,
+    threat: TargetOrdnanceThreatAssessment,
+): boolean {
+    const tier = classifyWeaponOrdnanceTier(weaponData);
+    switch (tier) {
+        case 'primary':
+            return true;
+        case 'light-secondary':
+            return threat.allowLightSecondary;
+        case 'heavy-secondary':
+            return threat.allowHeavySecondary;
+        case 'bay':
+            return threat.allowBayLaunch;
+    }
+}
+
 export const ShootAllWeaponsComponent = new Component<undefined>('ShootAllWeaponsComponent');
 export const ShootAllWeaponsAI = new System({
     name: 'ShootAllWeaponsAI',
@@ -1127,9 +1289,13 @@ export const ShootAllWeaponsAI = new System({
         Entities, MultiplayerData,
         PlatformResource, Optional(DestructionStartedComponent),
         Optional(ArmorComponent), Optional(NpcFleeComponent),
-        Optional(ConquestBotComponent)] as const,
+        Optional(ConquestBotComponent), UUID, Optional(ShieldComponent),
+        Optional(ShipComponent), Optional(ShipDataComponent),
+        Optional(GovtComponent), Optional(GovernmentRelationResource),
+        Optional(ProvocationResource)] as const,
     step(weapons, gameData, target, movement, _shoot, entities, multiplayer,
-        platform, destructionStarted, armor, _fleeing, conquestBot) {
+        platform, destructionStarted, armor, _fleeing, conquestBot, selfUuid,
+        selfShield, _selfShip, selfShipData, selfGovt, relationStore, provocations) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
@@ -1162,6 +1328,96 @@ export const ShootAllWeaponsAI = new System({
         const targetDistance = movement && targetMovement
             ? targetMovement.position.subtract(movement.position).length
             : undefined;
+
+        let threatAssessment: TargetOrdnanceThreatAssessment = {
+            threatScore: 10,
+            allowLightSecondary: true,
+            allowHeavySecondary: true,
+            allowBayLaunch: true,
+        };
+        if (targetEntity && target.target) {
+            const targetShip = targetEntity.components.get(ShipComponent);
+            const targetShipData = targetEntity.components.get(ShipDataComponent);
+            const targetShield = targetEntity.components.get(ShieldComponent);
+            const targetArmor = targetEntity.components.get(ArmorComponent);
+            const targetPlayerState = targetEntity.components.get(PlayerStateComponent);
+            const targetBot = targetEntity.components.get(ConquestBotComponent);
+            const targetWeapons = targetEntity.components.get(WeaponsStateComponent);
+            const isClassifiedTarget = Boolean(
+                targetShip
+                || targetShipData
+                || targetShield
+                || targetArmor
+                || targetPlayerState
+                || targetBot,
+            );
+            let targetHasHeavyOrSecondaryWeapons = false;
+            let targetFiringSecondaryAtSelf = false;
+            if (targetWeapons) {
+                if (targetWeapons.size >= 3) {
+                    targetHasHeavyOrSecondaryWeapons = true;
+                }
+                for (const [wId, wState] of targetWeapons) {
+                    const wData = gameData.data.Weapon.getCached(wId);
+                    if (!wData) continue;
+                    const ordTier = classifyWeaponOrdnanceTier(wData);
+                    if (ordTier !== 'primary') {
+                        targetHasHeavyOrSecondaryWeapons = true;
+                        if (wState.firing && (!wState.target || wState.target === selfUuid)) {
+                            targetFiringSecondaryAtSelf = true;
+                        }
+                    }
+                }
+            }
+            const selfMaxHp = (selfShield?.max ?? selfShipData?.physics.shield ?? 0)
+                + (armor?.max ?? selfShipData?.physics.armor ?? 0);
+            const selfCurHp = (selfShield?.current ?? selfShipData?.physics.shield ?? 0)
+                + (armor?.current ?? selfShipData?.physics.armor ?? 0);
+            const selfHealthRatio = selfMaxHp > 0 ? selfCurHp / selfMaxHp : 1;
+            const targetTotalHp = (targetShield?.max ?? targetShipData?.physics.shield ?? 0)
+                + (targetArmor?.max ?? targetShipData?.physics.armor ?? 0);
+            const personallyProvoked = provocations
+                ? isPersonallyProvoked(provocations, selfUuid, target.target)
+                : false;
+            const damageDealtToSelf = provocations
+                ? (provocations.damageByVictimAttacker.get(`${selfUuid}:${target.target}`)?.damage ?? 0)
+                : 0;
+            let totalDamageDealtByTarget = 0;
+            if (provocations) {
+                const suffix = `:${target.target}`;
+                for (const [k, acc] of provocations.damageByVictimAttacker) {
+                    if (k.endsWith(suffix)) {
+                        totalDamageDealtByTarget += acc.damage;
+                    }
+                }
+            }
+            let legalRecord: number | undefined;
+            let crimeTolerance: number | undefined;
+            if (targetPlayerState && selfGovt && relationStore) {
+                const govtData = relationStore.getCached(selfGovt.id);
+                if (govtData) {
+                    legalRecord = recordFor(targetPlayerState.legalRecords, govtData.id, govtData);
+                    crimeTolerance = govtData.crimeTolerance ?? 20;
+                }
+            }
+            threatAssessment = evaluateTargetThreatForOrdnance({
+                selfTotalHp: selfMaxHp,
+                selfHealthRatio,
+                targetShipId: targetShip?.id ?? targetShipData?.id ?? targetPlayerState?.shipId,
+                targetBotTier: targetBot?.tier,
+                targetStrength: targetShipData?.strength,
+                targetTotalHp,
+                targetHasHeavyOrSecondaryWeapons,
+                targetFiringSecondaryAtSelf,
+                personallyProvoked,
+                damageDealtToSelf,
+                totalDamageDealtByTarget,
+                legalRecord,
+                crimeTolerance,
+                isClassifiedTarget,
+            });
+        }
+
         for (const [id, weapon] of weapons) {
             const weaponData = gameData.data.Weapon.getCached(id);
             if (weaponData == null) {
@@ -1173,6 +1429,7 @@ export const ShootAllWeaponsAI = new System({
                 }
                 const nextFiring = Boolean(
                     target.target
+                    && threatAssessment.allowBayLaunch
                     && (targetDistance === undefined || targetDistance <= 1_800),
                 );
                 if (weapon.firing !== nextFiring) {
@@ -1203,13 +1460,28 @@ export const ShootAllWeaponsAI = new System({
                 continue;
             }
 
+            if (!shouldNpcFireWeaponAtTarget(weaponData, threatAssessment)) {
+                if (weapon.firing) {
+                    weapon.firing = false;
+                }
+                continue;
+            }
+
             // Check firing arc for directional / fixed weapons
             let canBear = true;
             if (movement && targetMovement) {
                 const guidance = "guidance" in weaponData ? weaponData.guidance : undefined;
 
-                if (guidance === "turret" || guidance === "beamTurret" || guidance === "guided") {
+                if (guidance === "turret" || guidance === "beamTurret") {
                     canBear = true;
+                } else if (guidance === "guided") {
+                    if (weaponData.exitType === "turret") {
+                        canBear = true;
+                    } else {
+                        const angleToTarget = targetMovement.position.subtract(movement.position).angle;
+                        const angleDiff = Math.abs(movement.rotation.distanceTo(angleToTarget).angle);
+                        canBear = angleDiff <= (Math.PI * 0.36);
+                    }
                 } else if (guidance === "frontQuadrant") {
                     // EV Nova frontQuadrant weapons auto-track within ±45 degrees (PI / 4)
                     const angleToTarget = targetMovement.position.subtract(movement.position).angle;

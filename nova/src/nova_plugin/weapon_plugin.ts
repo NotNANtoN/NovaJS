@@ -97,6 +97,17 @@ export function getNpcBayMaxCapacity(entity: Entity, weaponId: string): number {
     return 4;
 }
 
+export function getNpcDefaultAmmoCapacity(weapon: WeaponData): number {
+    const damage = (weapon.damage?.shield ?? 0) + (weapon.damage?.armor ?? 0);
+    if (damage >= 65) {
+        return 6;
+    }
+    if (damage >= 30) {
+        return 10;
+    }
+    return 14;
+}
+
 function fireWithCost(
     entity: Entity,
     weapon: WeaponData,
@@ -180,7 +191,13 @@ function fireWithCost(
         }
         const fired = fire();
         if (fired) {
+            const guidance = 'guidance' in weapon ? weapon.guidance : undefined;
+            const isSecondaryOrMissile = weapon.fireGroup === 'secondary'
+                || guidance === 'guided'
+                || guidance === 'rocket'
+                || guidance === 'freefallBomb';
             const isPersistentCombatNpc = !entity.components.has(PlayerStateComponent)
+                && !isSecondaryOrMissile
                 && (entity.components.has(ConquestBotComponent)
                     || entity.components.has(SourceComponent));
             const nextCount = isPersistentCombatNpc
@@ -207,7 +224,7 @@ function fireWithCost(
         npcAmmo = new Map();
         entity.components.set(NpcWeaponAmmoComponent, npcAmmo);
     }
-    const currentCount = npcAmmo.get(weapon.id) ?? 20;
+    const currentCount = npcAmmo.get(weapon.id) ?? getNpcDefaultAmmoCapacity(weapon);
     if (currentCount <= 0) {
         return undefined;
     }

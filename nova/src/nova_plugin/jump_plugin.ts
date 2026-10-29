@@ -55,9 +55,10 @@ import { recordStorylineNpcJumpDeparture } from './system_state_tracker';
 export { areSystemsSameOrVariants, type SystemLookup };
 
 export const JUMP_SPOOL_MS = 1_200;
+export const JUMP_MIN_SPOOL_AFTER_TURN_MS = 450;
 export const JUMP_BRAKE_MS = 800;
 export const PLAYER_JUMP_BRAKE_TIMEOUT_MS = 25_000;
-export const JUMP_BRAKE_SPEED_THRESHOLD = 0.05;
+export const JUMP_BRAKE_SPEED_THRESHOLD = 0.08;
 export const JUMP_DEPARTURE_MS = 3_200;
 export const JUMP_MIN_DEPARTURE_MS = 2_200;
 export const JUMP_BAM_MS = JUMP_DEPARTURE_MS;
@@ -140,6 +141,8 @@ const JumpStateCodec = t.intersection([
     }),
     t.partial({
         createdAt: t.number,
+        spoolSoundStarted: t.boolean,
+        stoppedAt: t.number,
     }),
 ]);
 export type JumpState = t.TypeOf<typeof JumpStateCodec>;
@@ -421,6 +424,12 @@ export function applyJumpBrakingControls(
         * JUMP_BRAKE_SPEED_THRESHOLD;
     if (movement.velocity.length <= brakeSpeed) {
         movement.accelerating = 0;
+        if (movement.velocity.lengthSquared > 0) {
+            movement.velocity = new Vector(0, 0);
+        }
+        if (movement.targetSpeed !== undefined) {
+            movement.targetSpeed = 0;
+        }
         movement.turning = 0;
         movement.turnBack = false;
         movement.turnTo = targetDirection ? targetDirection.angle : null;
@@ -449,17 +458,29 @@ export function advanceJumpFlight(
         const brakeSpeed = Math.max(0, physics.maxVelocity)
             * JUMP_BRAKE_SPEED_THRESHOLD;
         const stopped = movement.velocity.length <= brakeSpeed;
-        const alignment = movement.rotation.getUnitVector().dot(direction);
-        const aligned = alignment >= 0.985;
+        if (stopped && state.stoppedAt === undefined) {
+            state.stoppedAt = time.time;
+        }
         const timedOut = pendingJumpTransition(state, time.time) === 'begin-spooling';
+        if ((stopped || timedOut) && onBeginSpooling && !state.spoolSoundStarted) {
+            state.spoolSoundStarted = true;
+            onBeginSpooling();
+        }
+        const alignment = movement.rotation.getUnitVector().dot(direction);
+        const aligned = alignment >= 0.975;
         const brakeComplete = (stopped && (aligned || !state.requiresAdjacency)) || timedOut;
         if (!brakeComplete) {
             return 'none';
         }
+        const turnElapsedMs = state.requiresAdjacency && state.stoppedAt !== undefined
+            ? Math.max(0, time.time - state.stoppedAt)
+            : 0;
+        const remainingSpoolMs = turnElapsedMs > 0
+            ? Math.max(JUMP_MIN_SPOOL_AFTER_TURN_MS, JUMP_SPOOL_MS - turnElapsedMs)
+            : JUMP_SPOOL_MS;
         state.phase = 'spooling';
         state.phaseStartedAt = time.time;
-        state.transitionAt = time.time + JUMP_SPOOL_MS;
-        onBeginSpooling?.();
+        state.transitionAt = time.time + remainingSpoolMs;
     }
 
     if (state.phase === 'spooling') {
@@ -560,6 +581,7 @@ const PlayerJumpControl = new System({
                 } else {
                     entity.components.delete(JumpStateComponent);
                 }
+                emit(SoundEvent, { id: 'nova:128', stop: true });
             }
             return;
         }
@@ -752,12 +774,14 @@ export const JumpLifecycleSystem = new System({
             // An explicit route change before departure cancels the old jump
             // without discarding the newly selected route.
             cancelJumpFlight(entity, movement, physics);
+            emit(SoundEvent, { id: 'nova:128', stop: true });
             return;
         }
         if (source && state.requiresAdjacency
             && !isValidNextHop(source, state.to, gameData.data.System, isConquestMode(playerState))) {
             cancelJumpFlight(entity, movement, physics);
             route.route = [];
+            emit(SoundEvent, { id: 'nova:128', stop: true });
             emit(SoundEvent, { id: 'nova:153' });
             return;
         }

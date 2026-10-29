@@ -16,6 +16,7 @@ import {
     SYSTEM_DEPARTURE_RADIUS,
     InitiateJumpEvent,
     JumpPlugin,
+    JumpState,
     JumpStateComponent,
     applyJumpFlightMovement,
     calculateJumpArrival,
@@ -714,6 +715,68 @@ describe('player hyperjump checks and controls', () => {
         expect(transition2).toBe('none');
         expect(state.phase).toBe('spooling');
         expect(spoolingStarted).toBeTrue();
+    });
+
+    it('starts the warp-up sound immediately as soon as speed stops during braking and compensates spool duration for turn time', () => {
+        const state: JumpState = {
+            from: 'nova:source',
+            to: 'nova:dest',
+            phase: 'braking',
+            phaseStartedAt: 0,
+            transitionAt: 25_000,
+            requiresAdjacency: true,
+            arrivalSoundPending: false,
+        };
+        const physics = { maxVelocity: 100 };
+        const direction = new Vector(1, 0); // East
+        let spoolSoundCount = 0;
+        const onBeginSpooling = () => { spoolSoundCount++; };
+
+        // Frame 1 (t=100ms): Still moving fast (speed 50 > brakeSpeed 8) -> sound does not play yet
+        const movingMovement: MovementState = {
+            position: new Position(1200, 0),
+            velocity: new Vector(-50, 0),
+            rotation: new Angle(-Math.PI / 2), // West
+            turning: 0,
+            turnBack: true,
+            accelerating: 1,
+            turnTo: null,
+        };
+        advanceJumpFlight(state, movingMovement, physics, { time: 100, delta_s: 0.016 }, direction, undefined, onBeginSpooling);
+        expect(state.phase).toBe('braking');
+        expect(spoolSoundCount).toBe(0);
+
+        // Frame 2 (t=400ms): Speed has dropped below brake threshold (speed 4 <= 8), still facing West (misaligned)
+        // -> Warp-up sound starts immediately even while still turning in 'braking'!
+        const stoppedMisaligned: MovementState = {
+            position: new Position(1200, 0),
+            velocity: new Vector(-4, 0),
+            rotation: new Angle(-Math.PI / 2), // West
+            turning: 1,
+            turnBack: false,
+            accelerating: 0,
+            turnTo: direction.angle,
+        };
+        advanceJumpFlight(state, stoppedMisaligned, physics, { time: 400, delta_s: 0.016 }, direction, undefined, onBeginSpooling);
+        expect(state.phase).toBe('braking');
+        expect(spoolSoundCount).toBe(1);
+        expect(state.stoppedAt).toBe(400);
+
+        // Frame 3 (t=900ms, 500ms after stopping): Ship finishes turning East -> enters 'spooling' without re-triggering sound,
+        // and deducts the 500ms turn duration from JUMP_SPOOL_MS (1200 - 500 = 700ms remaining).
+        const alignedMovement: MovementState = {
+            position: new Position(1200, 0),
+            velocity: new Vector(0, 0),
+            rotation: direction.angle,
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+            turnTo: direction.angle,
+        };
+        advanceJumpFlight(state, alignedMovement, physics, { time: 900, delta_s: 0.016 }, direction, undefined, onBeginSpooling);
+        expect(state.phase).toBe('spooling');
+        expect(spoolSoundCount).toBe(1);
+        expect(state.transitionAt).toBe(900 + (JUMP_SPOOL_MS - 500));
     });
 });
 
