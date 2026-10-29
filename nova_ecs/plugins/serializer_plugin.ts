@@ -1,4 +1,5 @@
 import { Either, isLeft, right } from 'nova_ecs/either';
+import { current, isDraft } from 'immer';
 import * as t from 'io-ts';
 import { Errors } from 'io-ts';
 import { Component, ComponentData, UnknownComponent } from '../component';
@@ -77,7 +78,8 @@ export class Serializer {
             for (const [component, data] of entity.components) {
                 const componentType = this.componentTypes.get(component);
                 if (componentType) {
-                    const encodedData = componentType.encode(data);
+                    const plainData = isDraft(data) ? current(data) : data;
+                    const encodedData = componentType.encode(plainData);
                     entityState.components.set(component.name, encodedData)
                 }
             }
