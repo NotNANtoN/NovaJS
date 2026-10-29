@@ -266,7 +266,7 @@ describe('NPC spawning', () => {
             return Math.abs(Math.hypot(
                 movement.position.x - planetPosition[0],
                 movement.position.y - planetPosition[1],
-            ) - 700) < 1e-6;
+            )) < 1e-6;
         });
 
         expect(localLaunches.length).toBeGreaterThan(0);

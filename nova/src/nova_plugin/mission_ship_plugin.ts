@@ -56,7 +56,24 @@ import { SystemIdResource } from './system_id_resource';
 import { MissionRuntime, MissionRuntimeResource } from './mission_plugin';
 import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { PlanetComponent } from './planet_plugin';
-import { areSystemsSameOrVariants, FinishJumpEvent, SystemLookup } from './jump_plugin';
+import {
+    areSystemsSameOrVariants,
+    FinishJumpEvent,
+    JUMP_ARRIVAL_MS,
+    JumpStateComponent,
+    SystemLookup,
+} from './jump_plugin';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
+import {
+    ArrivalPlacement,
+    ArrivalStellarCandidate,
+    chooseArrivalPlacement,
+    hyperspaceEntry,
+} from './npc_arrival';
+import type { GameDataInterface } from 'novadatainterface/GameDataInterface';
+import type { SystemData } from 'novadatainterface/SystemData';
 
 export interface MissionShipData {
     missionUuid: string;
@@ -494,6 +511,91 @@ export function adoptPersSpecialShip(
     return false;
 }
 
+function resolveMissionArrivalPlacement(
+    gameData: GameDataInterface,
+    systemData: SystemData | undefined,
+    entities: ReadonlyMap<string, Entity>,
+    forceHyperspace: boolean,
+): ArrivalPlacement {
+    const neighbours = new Map<string, readonly [number, number]>();
+    for (const link of systemData?.links ?? []) {
+        const linked = gameData.data.System.getCached?.(link);
+        if (linked) {
+            neighbours.set(link, linked.position);
+        }
+    }
+    const stellars: ArrivalStellarCandidate[] = [];
+    for (const entity of entities.values()) {
+        const planet = entity.components.get(PlanetComponent);
+        const mov = entity.components.get(MovementStateComponent);
+        if (planet && mov) {
+            stellars.push({
+                position: [mov.position.x, mov.position.y],
+                inhabited: planet.inhabited,
+            });
+        }
+    }
+    if (stellars.length === 0) {
+        for (const id of systemData?.planets ?? []) {
+            const planet = gameData.data.Planet.getCached?.(id);
+            if (planet) {
+                stellars.push({
+                    position: planet.position,
+                    inhabited: planet.inhabited,
+                });
+            }
+        }
+    }
+    const arrivalSys = {
+        position: systemData?.position ?? ([0, 0] as const),
+        links: systemData?.links ?? [],
+        planets: systemData?.planets ?? [],
+    };
+    const placement = forceHyperspace
+        ? hyperspaceEntry(arrivalSys, neighbours, Math.random)
+        : chooseArrivalPlacement(arrivalSys, neighbours, stellars, Math.random);
+    return placement ?? {
+        position: [0, -1400],
+        rotation: Math.PI,
+        origin: 'hyperspace',
+    };
+}
+
+function applyMissionShipPlacement(
+    ship: Entity,
+    placement: ArrivalPlacement,
+    now: number,
+    index = 0,
+): void {
+    const mov = ship.components.get(MovementStateComponent);
+    if (!mov) {
+        return;
+    }
+    const perpX = Math.cos(placement.rotation);
+    const perpY = Math.sin(placement.rotation);
+    const lateral = index === 0
+        ? 0
+        : (index % 2 === 1 ? 1 : -1) * Math.ceil(index / 2) * (placement.origin === 'hyperspace' ? 55 : 0);
+    mov.position = new Position(
+        placement.position[0] + perpX * lateral,
+        placement.position[1] + perpY * lateral,
+    );
+    mov.rotation = new Angle(placement.rotation);
+    mov.velocity = new Vector(0, 0);
+    if (placement.origin === 'hyperspace') {
+        ship.components.set(JumpStateComponent, {
+            from: '',
+            to: '',
+            phase: 'arriving',
+            phaseStartedAt: now,
+            transitionAt: now + JUMP_ARRIVAL_MS,
+            requiresAdjacency: false,
+            arrivalSoundPending: false,
+            createdAt: now,
+        });
+    }
+}
+
 const MissionShipSpawnSystem = new AsyncSystem({
     name: 'MissionShipSpawn',
     args: [
@@ -556,6 +658,13 @@ const MissionShipSpawnSystem = new AsyncSystem({
                         + `${mission.shipDude} has no ship types`);
                     continue;
                 }
+                const systemData = await gameData.data.System.get(systemId).catch(() => undefined);
+                const primaryPlacement = resolveMissionArrivalPlacement(
+                    gameData,
+                    systemData,
+                    entities,
+                    mission.shipStart === 1,
+                );
 
                 for (let index = 0; index < mission.shipCount; index++) {
                     const selected = index === 0
@@ -572,6 +681,12 @@ const MissionShipSpawnSystem = new AsyncSystem({
                         if (!reserveEntity(budget, ship, 'ship', true)) {
                             break;
                         }
+                        applyMissionShipPlacement(
+                            ship,
+                            primaryPlacement,
+                            time.time,
+                            index,
+                        );
                         const outlawGovt = mission.shipGoal === 1 ? 137 : dude.government;
                         const outlawBehav = mission.shipBehav >= 0
                             ? mission.shipBehav
@@ -616,6 +731,12 @@ const MissionShipSpawnSystem = new AsyncSystem({
                         const auxDude = await loadDude(gameData, mission.auxShipDude, systemId);
                         const auxShipType = auxDude && weighted(auxDude.ships);
                         if (auxDude && auxShipType) {
+                            const auxPlacement = resolveMissionArrivalPlacement(
+                                gameData,
+                                systemData,
+                                entities,
+                                mission.shipGoal === 3 || mission.shipStart === 1,
+                            );
                             for (let aIdx = 0; aIdx < mission.auxShipCount; aIdx++) {
                                 const sel = aIdx === 0 ? auxShipType : weighted(auxDude.ships);
                                 if (!sel) continue;
@@ -625,6 +746,12 @@ const MissionShipSpawnSystem = new AsyncSystem({
                                     if (!reserveEntity(budget, aShip, 'ship', true)) {
                                         break;
                                     }
+                                    applyMissionShipPlacement(
+                                        aShip,
+                                        auxPlacement,
+                                        time.time,
+                                        aIdx,
+                                    );
                                     aShip.components
                                         .set(MissionShipComponent, {
                                             missionUuid,

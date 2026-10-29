@@ -15,7 +15,7 @@ import {
     ASTEROID_SPAWN_MIN_RADIUS,
     offscreenAsteroidSpawn,
 } from './asteroid_spawn_plugin';
-import { EntityBudgetPlugin } from './entity_budget';
+import { EntityBudgetPlugin, EntityBudgetResource, createEntityBudget } from './entity_budget';
 import {
     applyConquestPocketSystems,
     AURORAN_GOVT,
@@ -68,6 +68,7 @@ import { createProvocationState, NpcHostilitySystems, ProvocationResource, recor
 import { GovtComponent, NpcAIComponent } from './npc_components';
 import { TargetComponent } from './target_component';
 import { OutfitsStateComponent } from './outfit_plugin';
+import { PlanetComponent } from './planet_plugin';
 import { BASIC_ESCAPE_POD_SHIP_ID } from './escape_pod';
 
 describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
@@ -787,5 +788,114 @@ describe('Galactic Conquest Two-System Pocket & Lateral Jump Arrival', () => {
         expect(entities.has('ore-0')).toBeFalse();
         expect(entities.has('ore-1')).toBeFalse();
         expect(entities.has('ore-2')).toBeFalse();
+    });
+
+    it('spawns home garrison and miner bots at a planet and requires flying back to a planet to upgrade hulls', () => {
+        const world = new World('conquest-planet-spawn-test');
+        const gameData = new MockGameData();
+        for (const id of ['nova:187', 'nova:144', 'nova:143', 'nova:141', 'nova:172', 'nova:142']) {
+            gameData.data.Ship.map.set(id, {
+                ...getDefaultShipData(),
+                id,
+                name: `Hull ${id}`,
+                outfits: {},
+            });
+        }
+        world.resources.set(GameDataResource, gameData);
+        world.resources.set(SystemIdResource, CONQUEST_SOL_SYSTEM);
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(EntityBudgetResource, createEntityBudget('modern'));
+        world.addPlugin(DeltaPlugin);
+        world.addPlugin(TimePlugin);
+        world.addPlugin(MovementPlugin);
+        world.addPlugin(ConquestModePlugin);
+
+        const earthPos = new Position(-120, 180);
+        world.entities.set(
+            'planet-earth',
+            new Entity('Earth')
+                .addComponent(PlanetComponent, {
+                    id: 'nova:128',
+                    name: 'Earth',
+                    inhabited: true,
+                    canLand: true,
+                })
+                .addComponent(MovementStateComponent, {
+                    position: earthPos,
+                    velocity: new Vector(0, 0),
+                    rotation: new Angle(0),
+                    turning: 0,
+                    turnBack: false,
+                    accelerating: 0,
+                }),
+        );
+
+        const playerState = createInitialPlayerState();
+        playerState.gameMode = 'conquest';
+        playerState.currentSystem = CONQUEST_SOL_SYSTEM;
+        world.entities.set(
+            'player-1',
+            new Entity('Player')
+                .addComponent(PlayerStateComponent, playerState)
+                .addComponent(MultiplayerData, { owner: 'client-1' })
+                .addComponent(MovementStateComponent, {
+                    position: new Position(0, 0),
+                    velocity: new Vector(0, 0),
+                    rotation: new Angle(0),
+                    turning: 0,
+                    turnBack: false,
+                    accelerating: 0,
+                }),
+        );
+
+        world.step();
+
+        const spawnedBots = [...world.entities.values()].filter(e =>
+            e.components.has(ConquestBotComponent));
+        expect(spawnedBots.length).toBeGreaterThan(0);
+        for (const bot of spawnedBots) {
+            const mov = bot.components.get(MovementStateComponent)!;
+            const distFromEarth = mov.position.subtract(earthPos).length;
+            expect(distFromEarth).toBeLessThan(1e-3);
+        }
+
+        // Now place a miner bot far out in open space with enough credits to upgrade:
+        // it must fly back toward Earth (upgradePending = true) instead of morphing in open space!
+        const minerBot = new Entity('Miner')
+            .addComponent(ShipComponent, { id: 'nova:187' })
+            .addComponent(TargetComponent, { target: undefined })
+            .addComponent(MultiplayerData, { owner: 'server' })
+            .addComponent(ConquestBotComponent, {
+                callsign: 'Lt. Mercer',
+                mode: 'gather',
+                factionGovt: FEDERATION_GOVT,
+                homeSystem: CONQUEST_SOL_SYSTEM,
+                tier: 0,
+                gatheredCredits: 25_000,
+                lastModeSwitchAt: 0,
+                upgradePending: false,
+            })
+            .addComponent(MovementStateComponent, {
+                position: new Position(900, -900),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            });
+        world.entities.set('miner-1', minerBot);
+
+        world.step();
+        const minerState = minerBot.components.get(ConquestBotComponent)!;
+        expect(minerState.upgradePending).toBeTrue();
+        expect(minerState.tier).toBe(0);
+        expect(minerBot.components.get(ShipComponent)?.id).toBe('nova:187');
+
+        // Move the miner to Earth so it docks and completes the upgrade at the planet!
+        minerBot.components.get(MovementStateComponent)!.position = new Position(earthPos.x, earthPos.y);
+        world.step();
+        expect(minerState.upgradePending).toBeFalse();
+        expect(minerState.tier).toBe(1);
+        expect(minerBot.components.get(ShipComponent)?.id).toBe('nova:144');
     });
 });

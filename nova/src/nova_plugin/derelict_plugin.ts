@@ -22,6 +22,9 @@ import { PlatformResource } from './platform_plugin';
 import { ShipDataComponent } from './ship_plugin';
 import { Stat } from './stat';
 import { SystemIdResource } from './system_id_resource';
+import { isConquestPocketSystem } from './conquest_config';
+import { PlayerStateComponent } from './player_state';
+import { isConquestMode } from './conquest_config';
 
 import { DerelictComponent, DerelictData } from './derelict_component';
 export { DerelictComponent, DerelictData };
@@ -102,6 +105,15 @@ export const DerelictSpawnSystem = new AsyncSystem({
     async step(_singleton, gameData, systemId, state, platform, world) {
         if (platform !== 'node' || state.spawned) {
             return;
+        }
+        if (isConquestPocketSystem(systemId)) {
+            for (const entity of world.entities.values()) {
+                const playerState = entity.components.get(PlayerStateComponent);
+                if (playerState && isConquestMode(playerState)) {
+                    state.spawned = true;
+                    return;
+                }
+            }
         }
         state.spawned = true;
 

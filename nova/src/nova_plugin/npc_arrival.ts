@@ -19,8 +19,11 @@ export type ArrivalRandom = () => number;
 /** Ambient traffic uses the same entry scale as a player's jump arrival. */
 export const HYPERSPACE_ENTRY_RADIUS = JUMP_ARRIVAL_RADIUS;
 
-/** How far off a stellar a launching ship appears. */
-export const STELLAR_LAUNCH_OFFSET = 700;
+/**
+ * Ships lifting off from a stellar appear directly on the planet body rather
+ * than hundreds of units out in empty space.
+ */
+export const STELLAR_LAUNCH_OFFSET = 0;
 
 /**
  * Deliberate presentation policy, not a retail value: most ambient traffic

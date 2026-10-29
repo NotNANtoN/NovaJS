@@ -267,9 +267,9 @@ async function buildNpc(
             npc.components.set(
                 NpcTrafficComponent, createArrivingTrafficState());
         }
-        // A navy ship guards its own world instead of running errands. A fleet
-        // is already flying as a group and keeps its formation.
-        if (post && !fleet && npcType.combatRole === 'military') {
+        // A navy ship or fleet leader guards its own world instead of running
+        // errands. Escorts follow their leader via FleetCohesionSystem.
+        if (post && npcType.combatRole === 'military') {
             npc.components.delete(NpcTrafficComponent);
             npc.components.set(PatrolComponent,
                 { guardPost: post, radius: DEFAULT_PATROL_RADIUS });
@@ -324,7 +324,7 @@ async function createNpcGroup(
     });
     const leader = await buildNpc(
         gameData, npcType, roster.leaderShipId, budget, placement, true,
-        undefined, now);
+        post, now);
     if (!leader) {
         return [];
     }
@@ -342,13 +342,21 @@ async function createNpcGroup(
         // a smaller wing is better than refusing to spawn the fleet at all.
         let station: ArrivalPlacement | undefined;
         if (leaderMovement && placement) {
-            const world = worldFormationPosition(
-                leaderMovement, formationSlot(slot));
-            station = {
-                position: [world.x, world.y],
-                rotation: placement.rotation,
-                origin: placement.origin,
-            };
+            if (placement.origin === 'stellar') {
+                station = {
+                    position: [placement.position[0], placement.position[1]],
+                    rotation: placement.rotation,
+                    origin: placement.origin,
+                };
+            } else {
+                const world = worldFormationPosition(
+                    leaderMovement, formationSlot(slot));
+                station = {
+                    position: [world.x, world.y],
+                    rotation: placement.rotation,
+                    origin: placement.origin,
+                };
+            }
         }
         const escort = await buildNpc(
             gameData, npcType, shipId, budget, station, true, undefined, now);
@@ -426,8 +434,12 @@ async function warmPlanetData(
     gameData: GameDataInterface,
     systemData: SystemData,
 ): Promise<void> {
-    await Promise.all((systemData.planets ?? []).map(id =>
-        gameData.data.Planet.get(id).catch(() => undefined)));
+    await Promise.all([
+        ...(systemData.planets ?? []).map(id =>
+            gameData.data.Planet.get(id).catch(() => undefined)),
+        ...(systemData.links ?? []).map(id =>
+            gameData.data.System.get(id).catch(() => undefined)),
+    ]);
 }
 
 /**

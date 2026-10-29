@@ -82,8 +82,8 @@ describe('arriving from hyperspace', () => {
 });
 
 describe('lifting off from a stellar', () => {
-    it('appears just off the stellar, heading away from it', () => {
-        expect(STELLAR_LAUNCH_OFFSET).toBe(700);
+    it('appears directly on the stellar, heading away from it', () => {
+        expect(STELLAR_LAUNCH_OFFSET).toBe(0);
 
         const placement = stellarLaunch([500, 500], rolls(0));
         expect(placement.position[0]).toBeCloseTo(500, 6);

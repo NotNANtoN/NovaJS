@@ -56,9 +56,15 @@ import {
     recordProvocation,
 } from './npc_hostility';
 import { OutfitsStateComponent } from './outfit_plugin';
+import { PlanetComponent } from './planet_plugin';
 import { PlatformResource } from './platform_plugin';
 import { PlayerStateComponent } from './player_state';
-import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin';
+import {
+    getShipMovementPhysics,
+    ShipComponent,
+    ShipDataComponent,
+    ShipPhysicsComponent,
+} from './ship_plugin';
 import { CombatAuthorityComponent } from './combat_resources';
 import { SystemIdResource } from './system_id_resource';
 import { TargetComponent } from './target_component';
@@ -125,6 +131,12 @@ const ConquestOresQuery = new Query([
     MovementStateComponent,
 ] as const, 'ConquestOres');
 
+const ConquestPlanetsQuery = new Query([
+    UUID,
+    MovementStateComponent,
+    PlanetComponent,
+] as const, 'ConquestPlanets');
+
 const ConquestShipsQuery = new Query([
     UUID,
     MovementStateComponent,
@@ -167,7 +179,24 @@ const warmedGameDataSets = new WeakSet<object>();
 
 function warmConquestHulls(
     gameData: import('novadatainterface/GameDataInterface').GameDataInterface,
+    systemId?: string,
 ): void {
+    if (systemId) {
+        const sys = gameData.data.System.getCached?.(systemId);
+        if (!sys) {
+            void gameData.data.System.get?.(systemId)?.then(loaded => {
+                for (const pid of loaded?.planets ?? []) {
+                    void gameData.data.Planet.get?.(pid)?.catch(() => {});
+                }
+            })?.catch(() => {});
+        } else {
+            for (const pid of sys.planets ?? []) {
+                if (!gameData.data.Planet.getCached?.(pid)) {
+                    void gameData.data.Planet.get?.(pid)?.catch(() => {});
+                }
+            }
+        }
+    }
     if (warmedGameDataSets.has(gameData)) {
         return;
     }
@@ -175,6 +204,41 @@ function warmConquestHulls(
     for (const id of [...FEDERATION_UPGRADE_TIERS, ...AURORAN_UPGRADE_TIERS]) {
         void gameData.data.Ship.get(id).catch(() => {});
     }
+}
+
+function resolveConquestSystemPlanets(
+    gameData: import('novadatainterface/GameDataInterface').GameDataInterface,
+    systemId: string,
+    livePlanets: ReadonlyArray<readonly [string, import('nova_ecs/plugins/movement_plugin').MovementState, import('./planet_plugin').PlanetType]>,
+): Position[] {
+    const inhabitedLive: Position[] = [];
+    const allLive: Position[] = [];
+    for (const [, mov, planet] of livePlanets) {
+        const pos = new Position(mov.position.x, mov.position.y);
+        allLive.push(pos);
+        if (planet.inhabited !== false && planet.canLand !== false) {
+            inhabitedLive.push(pos);
+        }
+    }
+    if (inhabitedLive.length > 0) {
+        return inhabitedLive;
+    }
+    if (allLive.length > 0) {
+        return allLive;
+    }
+    const sys = gameData.data.System.getCached?.(systemId);
+    const cachedPositions: Position[] = [];
+    for (const pid of sys?.planets ?? []) {
+        const planet = gameData.data.Planet.getCached?.(pid);
+        if (planet?.position) {
+            cachedPositions.push(new Position(planet.position[0], planet.position[1]));
+        }
+    }
+    if (cachedPositions.length > 0) {
+        return cachedPositions;
+    }
+    // Fallback to homeworld center (Sol / Earth at [0, 0])
+    return [new Position(0, 0)];
 }
 
 function spawnConquestBotEntity(
@@ -213,6 +277,8 @@ function spawnConquestBotEntity(
     }
     bot.components
         .set(ShipDataComponent, shipData)
+        .set(ShipPhysicsComponent, { ...shipData.physics })
+        .set(MovementPhysicsComponent, getShipMovementPhysics(shipData.physics, false))
         .set(
             OutfitsStateComponent,
             new Map(Object.entries(shipData.outfits ?? {}).map(
@@ -255,6 +321,7 @@ const ConquestBotLifecycleSystem = new System({
         ConquestAsteroidsQuery,
         ConquestOresQuery,
         ConquestShipsQuery,
+        ConquestPlanetsQuery,
         Optional(ProvocationResource),
     ] as const,
     step(
@@ -270,6 +337,7 @@ const ConquestBotLifecycleSystem = new System({
         asteroids,
         ores,
         ships,
+        planets,
         provocations,
     ) {
         if (platform !== 'node' || !isConquestPocketSystem(systemId)) {
@@ -280,7 +348,8 @@ const ConquestBotLifecycleSystem = new System({
         if (!hasConquestPlayer) {
             return;
         }
-        warmConquestHulls(gameData);
+        warmConquestHulls(gameData, systemId);
+        const systemPlanets = resolveConquestSystemPlanets(gameData, systemId, planets);
 
         // 0. Purge any retail ambient NPCs (traders, shuttles, cargo drones)
         // that spawned before the Conquest player's state arrived.
@@ -392,11 +461,18 @@ const ConquestBotLifecycleSystem = new System({
             const isGarrison = missingGarrisonTier !== undefined;
             const callsign = pickUniqueConquestCallsign(homeGovt, usedCallsigns);
             usedCallsigns.add(callsign);
-            const angle = Math.random() * 2 * Math.PI;
-            const dist = isGarrison
-                ? 240 + Math.random() * 320
-                : 480 + Math.random() * 750;
-            const pos = new Position(Math.cos(angle) * dist, Math.sin(angle) * dist);
+            // Always launch home garrison and home faction ships directly from Sol
+            // or another planet in the system — never pop into empty space!
+            const launchPlanet = systemPlanets[
+                Math.floor(Math.random() * systemPlanets.length)
+            ] ?? new Position(0, 0);
+            const launchBearing = Math.random() * 2 * Math.PI;
+            const pos = new Position(launchPlanet.x, launchPlanet.y);
+            const launchRotation = new Angle(launchBearing);
+            const launchVelocity = new Vector(
+                Math.sin(launchBearing) * 45,
+                -Math.cos(launchBearing) * 45,
+            );
             const initialTier = isGarrison ? missingGarrisonTier! : 0;
             try {
                 const bot = spawnConquestBotEntity(
@@ -414,6 +490,8 @@ const ConquestBotLifecycleSystem = new System({
                         ...(isGarrison ? { garrison: true } : {}),
                     },
                     pos,
+                    launchRotation,
+                    launchVelocity,
                 );
                 if (bot) {
                     entities.set(uuid(), bot);
@@ -748,10 +826,60 @@ const ConquestBotLifecycleSystem = new System({
                     }
                 }
 
-                // Check if ready to upgrade hull
+                // Check if ready to upgrade hull: return to Sol / nearest planet
+                // first so ships refit at a planet rather than morphing in open space!
                 const cost = upgradeCostForTier(botState.tier);
                 if (botState.gatheredCredits >= cost) {
+                    botState.upgradePending = true;
+                    let closestPlanet = systemPlanets[0] ?? new Position(0, 0);
+                    let closestPlanetDistSq = closestPlanet.subtract(movement.position).lengthSquared;
+                    for (let pIdx = 1; pIdx < systemPlanets.length; pIdx++) {
+                        const candidatePlanet = systemPlanets[pIdx]!;
+                        const dSq = candidatePlanet.subtract(movement.position).lengthSquared;
+                        if (dSq < closestPlanetDistSq) {
+                            closestPlanetDistSq = dSq;
+                            closestPlanet = candidatePlanet;
+                        }
+                    }
+
+                    if (closestPlanetDistSq > 150 * 150) {
+                        if (targetComp.target !== undefined) {
+                            targetComp.target = undefined;
+                        }
+                        if (weapons) {
+                            for (const [, w] of weapons) {
+                                if (w.firing) {
+                                    w.firing = false;
+                                }
+                            }
+                        }
+                        if (physics) {
+                            const cmd = approachTarget(
+                                movement,
+                                { position: closestPlanet, velocity: new Vector(0, 0) },
+                                physics,
+                                { standoff: 0 },
+                            );
+                            movement.turnTo = cmd.turnTo ?? closestPlanet.subtract(movement.position).angle;
+                            movement.accelerating = 1;
+                            movement.turnBack = false;
+                        } else {
+                            movement.turnTo = closestPlanet.subtract(movement.position).angle;
+                            movement.accelerating = 1;
+                            movement.turnBack = false;
+                        }
+                        continue;
+                    }
+
+                    botState.upgradePending = false;
                     botState.gatheredCredits -= cost;
+                    movement.position = new Position(closestPlanet.x, closestPlanet.y);
+                    const launchBearing = Math.random() * 2 * Math.PI;
+                    movement.rotation = new Angle(launchBearing);
+                    movement.velocity = new Vector(
+                        Math.sin(launchBearing) * 45,
+                        -Math.cos(launchBearing) * 45,
+                    );
                     if (botState.tier + 1 < tiers.length) {
                         botState.tier += 1;
                         const nextHullId = tiers[botState.tier];
@@ -761,6 +889,11 @@ const ConquestBotLifecycleSystem = new System({
                             botEntity.name = `${botState.callsign} (${nextShipData.name})`;
                             botEntity.components.set(ShipComponent, { id: nextShipData.id });
                             botEntity.components.set(ShipDataComponent, nextShipData);
+                            botEntity.components.set(ShipPhysicsComponent, { ...nextShipData.physics });
+                            botEntity.components.set(
+                                MovementPhysicsComponent,
+                                getShipMovementPhysics(nextShipData.physics, false),
+                            );
                             botEntity.components.set(
                                 OutfitsStateComponent,
                                 new Map(Object.entries(nextShipData.outfits).map(

@@ -53,6 +53,7 @@ import {
     shouldTrafficDepart,
     trafficDwellDuration,
     TRAFFIC_APPROACH_STANDOFF,
+    TRAFFIC_LANDING_RANGE_SQUARED,
 } from './npc_traffic';
 import type {
     NpcTrafficState,
@@ -283,9 +284,14 @@ const NpcTrafficFlightSystem = new System({
                 movement.accelerating = 0;
                 return;
             }
+            const candidates = planets.map(planet => destinationFor(planet, movement));
+            const launchedFromUuid = candidates.find(
+                c => c.distanceSquared <= TRAFFIC_LANDING_RANGE_SQUARED,
+            )?.uuid;
             const selected = chooseTrafficDestination(
-                planets.map(planet => destinationFor(planet, movement)),
+                candidates,
                 random,
+                launchedFromUuid,
             );
             if (!selected) {
                 startDeparture(
