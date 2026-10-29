@@ -186,12 +186,14 @@ function fireWithCost(
             const nextCount = isPersistentCombatNpc
                 ? Math.max(1, ammo.count - 1)
                 : ammo.count - 1;
-            outfits.set(ammoId, { ...ammo, count: nextCount });
-            // Only notify OutfitsStateComponent change listeners on player ships;
-            // mutating the map in-place on NPCs avoids re-running ProvideAsync
-            // (OutfitWeaponProvider & ShipPhysicsProvider) on every chaingun/missile round.
-            if (entity.components.has(PlayerStateComponent)) {
-                entity.components.set(OutfitsStateComponent, outfits);
+            if (nextCount !== ammo.count) {
+                outfits.set(ammoId, { ...ammo, count: nextCount });
+                // Only notify OutfitsStateComponent change listeners on player ships;
+                // mutating the map in-place on NPCs avoids re-running ProvideAsync
+                // (OutfitWeaponProvider & ShipPhysicsProvider) on every chaingun/missile round.
+                if (entity.components.has(PlayerStateComponent)) {
+                    entity.components.set(OutfitsStateComponent, outfits);
+                }
             }
             paidCopies?.add(copy);
         }
@@ -282,16 +284,18 @@ function recordOwnedShot(
             entity.components.set(FireIntentComponent, intent);
         }
     } else {
+        const logSeq = sync.nextLogSeq++;
         const logged = makeFireLogShot(
             event, time.time, fired.position, fired.rotation, {
-                logSeq: sync.nextLogSeq++,
+                logSeq,
                 sourceVelocity: fired.sourceVelocity,
                 target: fired.target,
                 inaccuracy: fired.inaccuracy,
             });
+        sync.highestLogSeq = Math.max(sync.highestLogSeq, logSeq);
+        sync.spawnedSeqs.delete(seq);
         if (log) {
             pushShot(log.shots, logged);
-            entity.components.set(FireLogComponent, log);
         } else {
             log = { shots: [logged] };
             entity.components.set(FireLogComponent, log);

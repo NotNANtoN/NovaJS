@@ -927,12 +927,16 @@ export const FollowAI = new System({
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent),
         Optional(JumpStateComponent),
+        Optional(ConquestBotComponent),
         UUID] as const,
     step(movementState, physics, target, _follow, entities, multiplayer,
         platform, weapons, gameData, shipData, fleeing, destructionStarted,
-        armor, jumpState, selfUuid) {
+        armor, jumpState, conquestBot, selfUuid) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
+            return;
+        }
+        if (conquestBot && conquestBot.mode !== 'attack') {
             return;
         }
         if (destructionStarted || armor && armor.current <= 0) {
@@ -1089,17 +1093,21 @@ export const ShootAllWeaponsAI = new System({
         Optional(MovementStateComponent), ShootAllWeaponsComponent,
         Entities, MultiplayerData,
         PlatformResource, Optional(DestructionStartedComponent),
-        Optional(ArmorComponent), Optional(NpcFleeComponent)] as const,
+        Optional(ArmorComponent), Optional(NpcFleeComponent),
+        Optional(ConquestBotComponent)] as const,
     step(weapons, gameData, target, movement, _shoot, entities, multiplayer,
-        platform, destructionStarted, armor, _fleeing) {
+        platform, destructionStarted, armor, _fleeing, conquestBot) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
         }
+        if (conquestBot && conquestBot.mode !== 'attack') {
+            return;
+        }
         if (destructionStarted || armor && armor.current <= 0) {
             for (const weapon of weapons.values()) {
-                weapon.firing = false;
-                weapon.target = undefined;
+                if (weapon.firing) weapon.firing = false;
+                if (weapon.target !== undefined) weapon.target = undefined;
             }
             return;
         }
@@ -1127,14 +1135,21 @@ export const ShootAllWeaponsAI = new System({
                 continue;
             }
             if (weaponData.type === 'BayWeaponData') {
-                weapon.target = target.target;
-                weapon.firing = Boolean(
+                if (weapon.target !== target.target) {
+                    weapon.target = target.target;
+                }
+                const nextFiring = Boolean(
                     target.target
                     && (targetDistance === undefined || targetDistance <= 1_800),
                 );
+                if (weapon.firing !== nextFiring) {
+                    weapon.firing = nextFiring;
+                }
                 continue;
             }
-            weapon.target = target.target;
+            if (weapon.target !== target.target) {
+                weapon.target = target.target;
+            }
             const pointDefense = weaponData.guidance === 'pointDefense'
                 || weaponData.guidance === 'pointDefenseBeam';
             const range = weaponRange(weaponData);
@@ -1142,12 +1157,16 @@ export const ShootAllWeaponsAI = new System({
                 || targetDistance === undefined || targetDistance <= range;
 
             if (!target.target || !inRange) {
-                weapon.firing = false;
+                if (weapon.firing) {
+                    weapon.firing = false;
+                }
                 continue;
             }
 
             if (pointDefense) {
-                weapon.firing = true;
+                if (!weapon.firing) {
+                    weapon.firing = true;
+                }
                 continue;
             }
 
@@ -1194,7 +1213,9 @@ export const ShootAllWeaponsAI = new System({
                 }
             }
 
-            weapon.firing = canBear;
+            if (weapon.firing !== canBear) {
+                weapon.firing = canBear;
+            }
         }
     }
 });

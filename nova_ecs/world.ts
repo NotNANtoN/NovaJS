@@ -460,13 +460,31 @@ export class World {
             return left(undefined);
         } else if (arg instanceof ArgModifier) {
             const modifier = arg as UnknownArgModifier;
-            const query = this.queries.get(modifier.query);
-            const modifierQueryResults =
-                query.getResultForEntity(entity, event);
-            if (isLeft(modifierQueryResults)) {
-                return left(undefined);
+            if (modifier.optionalValue !== undefined) {
+                const inner = modifier.optionalValue;
+                if (inner instanceof Component && !(inner instanceof Resource)) {
+                    return right(entity.components.get(inner) as ArgData<T>);
+                }
+                try {
+                    const result = this.getArg(inner, entity, event);
+                    if (!isLeft(result)) {
+                        return result as Right<ArgData<T>>;
+                    }
+                } catch {
+                    return right(undefined as ArgData<T>);
+                }
+                return right(undefined as ArgData<T>);
             }
-            return modifier.transform(...modifierQueryResults.right) as
+            const subArgs = modifier.query.args;
+            const rightResults: unknown[] = new Array(subArgs.length);
+            for (let i = 0; i < subArgs.length; i++) {
+                const subResult = this.getArg(subArgs[i], entity, event);
+                if (isLeft(subResult)) {
+                    return left(undefined);
+                }
+                rightResults[i] = subResult.right;
+            }
+            return modifier.transform(...rightResults) as
                 Either<undefined, ArgData<T>>;
         } else {
             throw new Error(`Internal error: unrecognized arg ${String(arg)}`);

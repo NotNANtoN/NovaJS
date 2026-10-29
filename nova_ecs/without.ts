@@ -6,8 +6,10 @@ import { Query } from "./query";
 
 
 export function Without<V extends ArgTypes>(value: V) {
+    const opt = Optional(value);
     return new ArgModifier({
-        query: new Query([Optional(value)]),
+        query: new Query([opt]),
+        modifierComponents: opt.modifierComponents,
         transform: (val) => {
             if (val !== undefined) {
                 // Fail since the value was found

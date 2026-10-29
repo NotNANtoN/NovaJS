@@ -1,5 +1,6 @@
 import { Either } from 'nova_ecs/either';
 import { ArgData, ArgsToData, ArgTypes } from "./arg_types";
+import { UnknownComponent } from "./component";
 import { Query } from "./query";
 
 
@@ -12,10 +13,18 @@ export type AnyArgModifier = ArgModifier<any, any>;
 export class ArgModifier<Args extends readonly ArgTypes[], Result> {
     query: Query<Args>;
     transform: Transform<Args, Result>;
-    constructor({ query, transform }:
-        { query: Query<Args>, transform: Transform<Args, Result> }) {
+    readonly optionalValue?: ArgTypes;
+    readonly modifierComponents?: ReadonlySet<UnknownComponent> | null;
+    constructor({ query, transform, optionalValue, modifierComponents }: {
+        query: Query<Args>,
+        transform: Transform<Args, Result>,
+        optionalValue?: ArgTypes,
+        modifierComponents?: ReadonlySet<UnknownComponent> | null,
+    }) {
         this.query = query;
-        this.transform = transform
+        this.transform = transform;
+        this.optionalValue = optionalValue;
+        this.modifierComponents = modifierComponents;
     }
 }
 

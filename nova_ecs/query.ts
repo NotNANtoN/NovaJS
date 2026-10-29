@@ -1,5 +1,5 @@
 import { ArgModifier, UnknownArgModifier } from "./arg_modifier";
-import { ArgTypes } from "./arg_types";
+import { ArgTypes, Components, GetArg } from "./arg_types";
 import { BinSet, BinSetC } from "./bin_set";
 import { Component, UnknownComponent } from "./component";
 import { Entity } from "./entity";
@@ -62,6 +62,7 @@ export class Query<QueryArgs extends readonly ArgTypes[]
     // Prevent query from being a subtype of EcsEvent
     private readonly _querySymbol = querySymbol;
     readonly components: ReadonlySet<UnknownComponent>;
+    readonly allComponents: ReadonlySet<UnknownComponent> | null;
     readonly resources: ReadonlySet<UnknownResource>;
     readonly queries: Query[];
     readonly componentsBinSet: BinSet<UnknownComponent>;
@@ -81,6 +82,30 @@ export class Query<QueryArgs extends readonly ArgTypes[]
             a => (a instanceof Component)
                 && !(a instanceof Resource)) as UnknownComponent[]),
         ...modifierComponents]);
+
+        let allComponents: Set<UnknownComponent> | null = new Set(this.components);
+        for (const arg of this.args) {
+            if (arg === Components || arg === GetArg) {
+                allComponents = null;
+                break;
+            }
+            if (arg instanceof ArgModifier) {
+                const modComps = arg.modifierComponents !== undefined
+                    ? arg.modifierComponents
+                    : arg.query.allComponents;
+                if (modComps === null) {
+                    allComponents = null;
+                    break;
+                }
+                for (const c of modComps) {
+                    allComponents.add(c);
+                }
+                for (const c of arg.query.components) {
+                    allComponents.add(c);
+                }
+            }
+        }
+        this.allComponents = allComponents;
 
         this.resources = new Set([...(this.args.filter(
             a => (a instanceof Resource)) as UnknownResource[]),

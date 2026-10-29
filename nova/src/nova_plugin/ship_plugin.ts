@@ -187,7 +187,7 @@ const ShipIonizationProvider = Provide({
 const ShipIonizationColorProvider = Provide({
     name: "ShipIonizationColorProvider",
     provided: IonizationColorComponent,
-    args: [] as const,
+    args: [ShipComponent] as const,
     factory() {
         return { color: 0x888888 };
     }

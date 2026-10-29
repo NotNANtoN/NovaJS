@@ -663,10 +663,14 @@ const ConquestBotLifecycleSystem = new System({
                 }
 
                 if (nearestOreUuid && nearestOreMov && physics) {
-                    targetComp.target = undefined;
+                    if (targetComp.target !== undefined) {
+                        targetComp.target = undefined;
+                    }
                     if (weapons) {
                         for (const [, w] of weapons) {
-                            w.firing = false;
+                            if (w.firing) {
+                                w.firing = false;
+                            }
                         }
                     }
                     const cmd = approachTarget(movement, nearestOreMov, physics, {
@@ -690,7 +694,9 @@ const ConquestBotLifecycleSystem = new System({
                     }
 
                     if (closestRockUuid && closestRockMov) {
-                        targetComp.target = closestRockUuid;
+                        if (targetComp.target !== closestRockUuid) {
+                            targetComp.target = closestRockUuid;
+                        }
                         const toRock = closestRockMov.position.subtract(movement.position);
                         const dist = toRock.length;
                         const effRange = getEffectiveWeaponRange(weapons, gameData) ?? 200;
@@ -727,11 +733,16 @@ const ConquestBotLifecycleSystem = new System({
                                     && wData.ammoType !== 'unlimited'
                                     && wData.ammoType[0] !== 'energy',
                                 );
-                                w.target = closestRockUuid;
-                                w.firing = !usesAmmo && (
+                                if (w.target !== closestRockUuid) {
+                                    w.target = closestRockUuid;
+                                }
+                                const nextFiring = !usesAmmo && (
                                     canMine
                                     || Boolean(isTurret && dist <= Math.max(240, effRange * 1.1))
                                 );
+                                if (w.firing !== nextFiring) {
+                                    w.firing = nextFiring;
+                                }
                             }
                         }
                     }
@@ -950,15 +961,21 @@ const ConquestBotLifecycleSystem = new System({
                 }
 
                 if (chosenEnemy) {
-                    targetComp.target = chosenEnemy;
+                    if (targetComp.target !== chosenEnemy) {
+                        targetComp.target = chosenEnemy;
+                    }
                     lastEnemySeenByBot.set(botUuid, time.time);
                 } else {
                     // Clear any disabled or dead target immediately so bots
                     // never hover motionless around a disabled hulk.
-                    targetComp.target = undefined;
+                    if (targetComp.target !== undefined) {
+                        targetComp.target = undefined;
+                    }
                     if (weapons) {
                         for (const [, w] of weapons) {
-                            w.firing = false;
+                            if (w.firing) {
+                                w.firing = false;
+                            }
                         }
                     }
                     const idleElapsed = time.time - (lastEnemySeenByBot.get(botUuid) ?? botState.lastModeSwitchAt);

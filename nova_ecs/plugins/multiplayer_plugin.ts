@@ -1,5 +1,5 @@
 import { isLeft } from 'nova_ecs/either';
-import { current, isDraft, produce } from 'immer';
+import { current, isDraft, original, produce } from 'immer';
 import * as t from 'io-ts';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { Emit, Entities, GetEntity, UUID } from '../arg_types';
@@ -1160,6 +1160,8 @@ export function multiplayer(communicator: Communicator,
         };
     }
 
+    const encodedDraftComponentHashCache = new WeakMap<object, Map<Component<unknown>, string>>();
+
     /**
      * Hash of the server-authored replicated state of `entity`, computed the
      * same way on the server and on a non-owning client. Components that the
@@ -1188,8 +1190,27 @@ export function multiplayer(communicator: Communicator,
                 continue;
             }
             try {
-                parts.push(`${name}=${stableStringify(componentType.encode(
-                    isDraft(data) ? current(data) : data))}`);
+                if (isDraft(data)) {
+                    const cur = current(data);
+                    const orig = original(data);
+                    if (cur === orig && orig && typeof orig === 'object') {
+                        let byComp = encodedDraftComponentHashCache.get(orig);
+                        let cached = byComp?.get(component);
+                        if (cached === undefined) {
+                            cached = `${name}=${stableStringify(componentType.encode(cur))}`;
+                            if (!byComp) {
+                                byComp = new Map();
+                                encodedDraftComponentHashCache.set(orig, byComp);
+                            }
+                            byComp.set(component, cached);
+                        }
+                        parts.push(cached);
+                        continue;
+                    }
+                    parts.push(`${name}=${stableStringify(componentType.encode(cur))}`);
+                } else {
+                    parts.push(`${name}=${stableStringify(componentType.encode(data))}`);
+                }
             } catch {
                 return undefined;
             }
@@ -2246,9 +2267,7 @@ export function multiplayer(communicator: Communicator,
                 }
                 deltaMaker.track(entity);
                 ownedEntities.add(entity);
-                const currentDelta = deltaMaker.isDirty(entity)
-                    ? deltaMaker.getDelta(entity)
-                    : undefined;
+                const currentDelta = deltaMaker.getDelta(entity);
                 let entityDelta = currentDelta
                     ? filterOutboundDelta(
                         currentDelta,

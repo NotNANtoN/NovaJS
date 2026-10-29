@@ -1,3 +1,4 @@
+import { isDraft, original } from 'immer';
 import * as t from 'io-ts';
 import { Emit, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
@@ -58,8 +59,9 @@ export const CloakDeviceProvider = new System({
     name: 'CloakDeviceProvider',
     args: [OutfitsStateComponent, GameDataResource, GetEntity] as const,
     step(outfits, gameData, entity) {
+        const rawOutfits = isDraft(outfits) ? (original(outfits) ?? outfits) : outfits;
         let canCloak = false;
-        for (const [id, { count }] of outfits) {
+        for (const [id, { count }] of rawOutfits) {
             if (count <= 0) continue;
             const outfitData = gameData.data.Outfit?.getCached(id);
             if (outfitData?.cloak) {
@@ -71,7 +73,7 @@ export const CloakDeviceProvider = new System({
             if (!entity.components.has(CloakDeviceComponent)) {
                 entity.components.set(CloakDeviceComponent, { canCloak: true });
             }
-        } else {
+        } else if (entity.components.has(CloakDeviceComponent)) {
             entity.components.delete(CloakDeviceComponent);
         }
     },

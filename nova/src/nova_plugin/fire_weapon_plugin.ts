@@ -317,6 +317,12 @@ export abstract class WeaponEntry {
     fireFromEntityDetailed(source: string, seed: number,
         inaccuracy = true, exitIndex?: number,
         extras?: { entityId?: string, target?: string }): FiredShot | undefined {
+        if ('guidance' in this.data
+            && (this.data.guidance === 'pointDefense'
+                || this.data.guidance === 'pointDefenseBeam')
+            && this.runQuery(PointDefenseQuery).length === 0) {
+            return undefined;
+        }
         // TODO: This is expensive. Cache queries for different sources in nova_ecs or
         // add a 'number of shots' argument.
         const results = this.runQuery(FireFromEntityQuery, source);

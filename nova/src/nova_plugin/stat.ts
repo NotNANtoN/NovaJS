@@ -1,12 +1,10 @@
 import * as t from 'io-ts';
 import { isLeft, right } from 'nova_ecs/either';
-import { immerable } from 'immer';
 
 
 const SEND_INTERVAL = 1000;
 
 class Box<T> {
-    [immerable] = true;
     changed = false;
     constructor(public wrappedVal: T) { }
 
@@ -28,7 +26,6 @@ class Box<T> {
 const SHARP_CHANGE_FRACTION = 0.01;
 
 export class Stat {
-    [immerable] = true;
     lastSent = 0;
     private lastSentCurrent: number;
     private wrappedCurrent: Box<number>;
@@ -81,6 +78,27 @@ export class Stat {
 
     get percent() {
         return Math.ceil(this.current / this.max * 100);
+    }
+
+    hasChangedFields(): boolean {
+        return this.wrappedCurrent.changed
+            || this.wrappedMax.changed
+            || this.wrappedMin.changed
+            || this.wrappedRecharge.changed;
+    }
+
+    hasPendingDelta(now = Date.now()): boolean {
+        return this.hasChangedFields()
+            && (this.lastSent + SEND_INTERVAL < now || this.changedSharply);
+    }
+
+    markSent(now = Date.now()): void {
+        this.lastSent = now;
+        this.lastSentCurrent = this.current;
+        this.wrappedCurrent.changed = false;
+        this.wrappedMax.changed = false;
+        this.wrappedMin.changed = false;
+        this.wrappedRecharge.changed = false;
     }
 
     getDelta(): PartialStat | undefined {

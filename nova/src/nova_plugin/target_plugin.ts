@@ -22,7 +22,7 @@ const TargetIndexComponent = new Component<{ index: number }>('TargetIndexCompon
 const TargetIndexProvider = Provide({
     name: "TargetIndexProvider",
     provided: TargetIndexComponent,
-    args: [] as const,
+    args: [TargetComponent] as const,
     factory: () => ({ index: -1 }),
 });
 

@@ -87,8 +87,11 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
                     this.entityResults.delete(entity);
                 }
             }),
-            entities.events.addComponent.subscribe(([uuid, entity]) => {
+            entities.events.addComponent.subscribe(([uuid, entity, component]) => {
                 const wasPresent = this.entities.has(uuid);
+                if (wasPresent && this.query.allComponents !== null && !this.query.allComponents.has(component)) {
+                    return;
+                }
                 const isSupported = supported(query, entity);
                 if (!wasPresent && !isSupported) {
                     return;
@@ -99,14 +102,20 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
                 this.entityResults.delete(entity); // for `Optional` etc.
                 this.resultValid = false;
             }),
-            entities.events.changeComponentAlways.subscribe(([uuid, entity]) => {
+            entities.events.changeComponentAlways.subscribe(([uuid, entity, component]) => {
                 if (!this.entities.has(uuid)) {
+                    return;
+                }
+                if (this.query.allComponents !== null && !this.query.allComponents.has(component)) {
                     return;
                 }
                 this.entityResults.delete(entity);
                 this.resultValid = false;
             }),
             entities.events.deleteComponent.subscribe(([uuid, entity, component]) => {
+                if (this.query.allComponents !== null && !this.query.allComponents.has(component)) {
+                    return;
+                }
                 const wasPresent = this.entities.has(uuid);
                 if (!wasPresent && !supported(query, entity)) {
                     return;
@@ -155,13 +164,14 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
         } else {
             // Create cache entry / result for entity.
             try {
-                const results = this.query.args.map(arg => this.getArg(arg, entity, event));
-                const rightResults: unknown[] = [];
-                for (const result of results) {
+                const args = this.query.args;
+                const rightResults: unknown[] = new Array(args.length);
+                for (let i = 0; i < args.length; i++) {
+                    const result = this.getArg(args[i], entity, event);
                     if (isLeft(result)) {
                         return left(undefined);
                     }
-                    rightResults.push(result.right);
+                    rightResults[i] = result.right;
                 }
 
                 const result = rightResults as unknown as ArgsToData<Args>;

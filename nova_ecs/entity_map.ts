@@ -32,9 +32,11 @@ export class EntityMapWithEvents extends EventMap<string, Entity> implements Ent
         (entity as { uuid: string }).uuid = uuid;
 
         const current = this.get(uuid);
-        if (current && current !== entity) {
+        if (current) {
             this.entityChangeUnsubscribe.get(uuid)?.unsubscribe();
-            this.events.delete.next(new Set([[uuid, current]]));
+            if (current !== entity) {
+                this.events.delete.next(new Set([[uuid, current]]));
+            }
         }
 
         const componentEvents = entity.components.events;
@@ -49,7 +51,6 @@ export class EntityMapWithEvents extends EventMap<string, Entity> implements Ent
         });
         const s3 = componentEvents.set.subscribe(([component]) => {
             this.events.changeComponent.next([uuid, entity, component]);
-            this.events.changeComponentAlways.next([uuid, entity, component]);
         });
 
         const s4 = componentEvents.setAlways.subscribe(([component]) => {

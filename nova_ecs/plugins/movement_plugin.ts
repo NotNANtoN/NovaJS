@@ -304,7 +304,6 @@ function turnToSignificantlyChanged(
         previous.turnTo instanceof Angle
         && current.turnTo instanceof Angle
         && previous.turning === current.turning
-        && current.turning !== 0
     ) {
         return Math.abs(previous.turnTo.distanceTo(current.turnTo).angle) >= 0.08;
     }
@@ -336,7 +335,19 @@ function movementControlChanged(
     }
     const dx = shortestWrappedDelta(previous.position.x, current.position.x);
     const dy = shortestWrappedDelta(previous.position.y, current.position.y);
-    return dx * dx + dy * dy > 120 * 120;
+    if (dx * dx + dy * dy > 120 * 120) {
+        return true;
+    }
+    // Advance the baseline position/velocity in-place for normal per-frame
+    // integration so single-step position deltas don't accumulate across frames
+    // without allocating a new MovementState snapshot every step.
+    previous.position.x = current.position.x;
+    previous.position.y = current.position.y;
+    if (current.accelerating !== 0) {
+        previous.velocity.x = current.velocity.x;
+        previous.velocity.y = current.velocity.y;
+    }
+    return false;
 }
 
 export function applyMovementStateDelta(

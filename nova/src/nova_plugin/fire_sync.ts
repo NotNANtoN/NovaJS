@@ -373,10 +373,22 @@ export function pushShot<T extends { seq: number }>(
     return shots;
 }
 
+const EMPTY_SHOTS: never[] = [];
+
 export function newShotsAfter<T extends { seq: number }>(
     shots: readonly T[],
     highestSeq: number,
 ): T[] {
+    let hasNew = false;
+    for (let i = 0; i < shots.length; i++) {
+        if (shots[i].seq > highestSeq) {
+            hasNew = true;
+            break;
+        }
+    }
+    if (!hasNew) {
+        return EMPTY_SHOTS;
+    }
     const bySequence = new Map<number, T>();
     for (const shot of shots) {
         if (shot.seq > highestSeq) {
@@ -393,6 +405,16 @@ export function fireLogSequence(shot: FireLogShot): number {
 }
 
 export function newFireLogsAfter(shots: readonly FireLogShot[], highest: number): FireLogShot[] {
+    let hasNew = false;
+    for (let i = 0; i < shots.length; i++) {
+        if (fireLogSequence(shots[i]) > highest) {
+            hasNew = true;
+            break;
+        }
+    }
+    if (!hasNew) {
+        return EMPTY_SHOTS;
+    }
     return shots.filter(shot => fireLogSequence(shot) > highest)
         .sort((a, b) => fireLogSequence(a) - fireLogSequence(b));
 }
@@ -544,18 +566,27 @@ export const FireSyncPlugin: Plugin = {
         deltaMaker.addComponent(ShotImpactLogComponent, {
             componentType: ShotImpactLog,
             deltaType: ShotImpactLog,
+            snapshotValue: log => ({ impacts: [...(log.impacts ?? [])] }),
+            isSnapshotDirty: (prev, curr) => getShotImpactDelta(prev, curr) !== undefined,
             getDelta: getShotImpactDelta,
             applyDelta: applyShotImpactDelta,
         });
         deltaMaker.addComponent(FireIntentComponent, {
             componentType: FireIntent,
             deltaType: FireIntentDelta,
+            snapshotValue: intent => ({ shots: [...(intent.shots ?? [])] }),
+            isSnapshotDirty: (prev, curr) => getFireIntentDelta(prev, curr) !== undefined,
             getDelta: getFireIntentDelta,
             applyDelta: applyFireIntentDelta,
         });
         deltaMaker.addComponent(FireLogComponent, {
             componentType: FireLog,
             deltaType: FireLogDelta,
+            snapshotValue: log => ({
+                shots: [...(log.shots ?? [])],
+                ...(log.rejectedSeqs ? { rejectedSeqs: [...log.rejectedSeqs] } : {}),
+            }),
+            isSnapshotDirty: (prev, curr) => getFireLogDelta(prev, curr) !== undefined,
             getDelta: getFireLogDelta,
             applyDelta: applyFireLogDelta,
         });

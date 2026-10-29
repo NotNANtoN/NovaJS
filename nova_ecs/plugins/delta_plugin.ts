@@ -100,7 +100,7 @@ export class DeltaMaker {
             subscriptions: [] as Array<{ unsubscribe: () => void }>,
         };
         const markDirty = (component?: UnknownComponent) => {
-            if (component !== DeltaComponent && !this.internalUpdates.has(entity)) {
+            if (component && this.componentDeltas.has(component) && !this.internalUpdates.has(entity)) {
                 tracking.dirty = true;
             }
         };
@@ -109,8 +109,11 @@ export class DeltaMaker {
             entity.components.events.setAlways.subscribe(([component]) =>
                 markDirty(component)),
             entity.components.events.delete.subscribe((components) => {
-                if ([...components].some(([component]) => component !== DeltaComponent)) {
-                    markDirty();
+                for (const [component] of components) {
+                    if (this.componentDeltas.has(component)) {
+                        markDirty(component);
+                        break;
+                    }
                 }
             }),
         );
@@ -151,12 +154,6 @@ export class DeltaMaker {
                     tracking.dirty = true;
                     return true;
                 }
-                // Advance the baseline snapshot for normal per-frame integration
-                // so single-step position deltas don't accumulate across frames.
-                deltaComponent.snapshots!.set(
-                    component,
-                    deltaFuncs.snapshotValue(data),
-                );
                 continue;
             }
             if (isDraft(data) && current(data) !== original(data)) {
@@ -334,9 +331,9 @@ export class DeltaMaker {
                     const baseline = snapshots.has(component)
                         ? snapshots.get(component)
                         : plainData;
-                    snapshots.set(component, snapshotValue(plainData));
                     const delta = getDelta(baseline, plainData, []);
                     if (delta !== undefined) {
+                        snapshots.set(component, snapshotValue(plainData));
                         componentDeltas.set(
                             component.name,
                             deltaType.encode(delta),
@@ -402,18 +399,21 @@ export class DeltaMaker {
             }
         }
 
-        const entityComponents = new Set([...entity.components.keys()]
-            .filter(component => this.componentDeltas.has(component)));
-
         // Only replicated components belong in the baseline. A server-only
         // marker such as NpcTrafficComponent would otherwise appear in
         // removeComponents, and clients warn "Missing component".
-        const deltaComponentSet = new Set([...deltaComponent.components.keys()])
-        const removedComponents = new Set(
-            [...setDifference(deltaComponentSet, entityComponents)]
-                .map(component => component.name));
-        deltaComponent.components = new Map([...entity.components]
-            .filter(([component]) => this.componentDeltas.has(component)));
+        const removedComponents = new Set<string>();
+        for (const component of deltaComponent.components.keys()) {
+            if (!entity.components.has(component)) {
+                removedComponents.add(component.name);
+            }
+        }
+        deltaComponent.components.clear();
+        for (const [component, data] of entity.components) {
+            if (this.componentDeltas.has(component)) {
+                deltaComponent.components.set(component, data);
+            }
+        }
 
         const entityDelta: EntityDelta = {};
         if (componentStates.size > 0) {

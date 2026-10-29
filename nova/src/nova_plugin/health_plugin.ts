@@ -73,6 +73,11 @@ export const HealthPlugin: Plugin = {
             deltaMaker.addComponent(healthComponent, {
                 componentType: stat,
                 deltaType: PartialStat,
+                snapshotValue: s => {
+                    s.markSent();
+                    return s;
+                },
+                isSnapshotDirty: (_a, b) => b.hasPendingDelta(),
                 getDelta: getStatDelta,
                 applyDelta: applyStatDelta,
             });

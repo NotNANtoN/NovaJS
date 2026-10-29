@@ -57,7 +57,9 @@ export const ProvidePlugin: Plugin = {
         if (!world.resources.has(ChangeEventsSubscription)) {
             const unsubscribe = world.entities.events.changeComponent.subscribe(
                 ([uuid, _entity, component]) => {
-                    world.emit(ChangeEvents.get(component), true, [uuid]);
+                    if (ChangeEvents.has(component)) {
+                        world.emit(ChangeEvents.get(component), true, [uuid]);
+                    }
                 });
             world.resources.set(ChangeEventsSubscription, unsubscribe);
         }
