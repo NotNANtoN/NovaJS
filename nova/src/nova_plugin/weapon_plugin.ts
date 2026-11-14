@@ -98,7 +98,10 @@ export function getNpcBayMaxCapacity(entity: Entity, weaponId: string): number {
 }
 
 export function getNpcDefaultAmmoCapacity(weapon: WeaponData): number {
-    const damage = (weapon.damage?.shield ?? 0) + (weapon.damage?.armor ?? 0);
+    if (!('damage' in weapon) || !weapon.damage) {
+        return 14;
+    }
+    const damage = (weapon.damage.shield ?? 0) + (weapon.damage.armor ?? 0);
     if (damage >= 65) {
         return 6;
     }

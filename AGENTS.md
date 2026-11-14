@@ -28,9 +28,9 @@ This document contains persistent instructions, architecture context, and deploy
 
 Always follow this exact 3-step deployment sequence after making changes:
 
-### Step 1: Verify Build & Tests Locally
+### Step 1: Verify Typecheck, Build & Tests Locally
 ```bash
-cd /Users/anton.wiehe/Code/NovaJS
+npm run typecheck
 npm run build
 npm test
 ```
@@ -50,7 +50,7 @@ Direct push from the local machine may be forbidden (403), but the `abakus` host
 ```bash
 ssh abakus 'cd ~/NovaJS && git push --no-verify notnanton feat-performance-and-modernization'
 ```
-This triggers the **Deploy NovaJS** GitHub Actions workflow (`.github/workflows/deploy.yml`), which builds and publishes the production container image and updates the public server at `https://172.104.203.136`.
+This triggers the **Deploy NovaJS** GitHub Actions workflow (`.github/workflows/deploy.yml`), which runs `bun audit`, `bun run typecheck`, deployment script tests, and `bun run test`, then builds and publishes the production container image and updates the public server at `https://172.104.203.136`. You can verify completion via `ssh abakus 'gh run list -R NotNANtoN/NovaJS -L 3'`.
 
 ---
 
