@@ -1654,6 +1654,7 @@ export const NpcPlugin: Plugin = {
         world.addSystem(MiningShipProvider);
         world.addSystem(MinerSystems.target);
         world.addSystem(MinerSystems.approach);
+        world.addSystem(MinerSystems.scoop);
         world.addSystem(WanderAI);
         world.addSystem(ParkInterceptorAI);
         world.addSystem(FollowAI);
@@ -1670,6 +1671,7 @@ export const NpcPlugin: Plugin = {
         world.removeSystem(MiningShipProvider);
         world.removeSystem(MinerSystems.target);
         world.removeSystem(MinerSystems.approach);
+        world.removeSystem(MinerSystems.scoop);
         world.removeSystem(WanderAI);
         world.removeSystem(ParkInterceptorAI);
         world.removeSystem(FollowAI);

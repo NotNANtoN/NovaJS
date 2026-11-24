@@ -49,6 +49,7 @@ export class CombatFxState {
     sparks: Spark[] = [];
     smokePuffs: SmokePuff[] = [];
     lastSmokeAt = new Map<string, number>();
+    wasDrawn = false;
 }
 
 export const CombatFxResource = new Resource<CombatFxState>('CombatFxResource');
@@ -56,9 +57,12 @@ export const CombatFxGraphics = new Resource<ManagedGraphic>('CombatFxGraphics')
 
 export const ClearCombatFx = new System({
     name: 'ClearCombatFx',
-    args: [CombatFxGraphics, SingletonComponent] as const,
-    step(graphicsHandle) {
-        (graphicsHandle.root as PIXI.Graphics).clear();
+    args: [CombatFxGraphics, CombatFxResource, SingletonComponent] as const,
+    step(graphicsHandle, state) {
+        if (state.wasDrawn) {
+            (graphicsHandle.root as PIXI.Graphics).clear();
+            state.wasDrawn = false;
+        }
     },
 });
 
@@ -205,6 +209,7 @@ export const DrawCombatFxSystem = new System({
         const g = graphicsHandle.root as PIXI.Graphics;
         const now = time.time;
         const dt = time.delta_s;
+        let drewAnything = false;
 
         // 1. Render Shield Flares
         let flareWrite = 0;
@@ -223,6 +228,7 @@ export const DrawCombatFxSystem = new System({
                 .stroke({ width: 2.5 * (1 - progress), color: 0x88eeff, alpha });
             g.circle(flare.x, flare.y, currentRadius * 0.94)
                 .fill({ color: 0x2277dd, alpha: alpha * 0.22 });
+            drewAnything = true;
 
             state.shieldFlares[flareWrite++] = flare;
         }
@@ -243,6 +249,7 @@ export const DrawCombatFxSystem = new System({
 
             g.circle(spark.x, spark.y, 1.8 * (1 - progress * 0.5))
                 .fill({ color: spark.color, alpha });
+            drewAnything = true;
 
             state.sparks[sparkWrite++] = spark;
         }
@@ -264,6 +271,7 @@ export const DrawCombatFxSystem = new System({
 
             g.circle(smoke.x, smoke.y, currentRadius)
                 .fill({ color: 0x3a3a3a, alpha });
+            drewAnything = true;
 
             state.smokePuffs[smokeWrite++] = smoke;
         }
@@ -296,6 +304,10 @@ export const DrawCombatFxSystem = new System({
                 .stroke({ width: 1, color: 0x444444, alpha: 0.9 });
             g.roundRect(bx, by, Math.max(2, barWidth * ratio), barHeight, 1)
                 .fill({ color: fillColor, alpha: 0.95 });
+            drewAnything = true;
+        }
+        if (drewAnything) {
+            state.wasDrawn = true;
         }
     },
 });

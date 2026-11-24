@@ -27,6 +27,7 @@ import {
     landingResultMessage,
 } from "../nova_plugin/planet_plugin";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
+import { AsteroidComponent, AsteroidDataComponent } from "../nova_plugin/asteroid_plugin";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin";
 import {
     PlayerState,
@@ -451,20 +452,34 @@ class StatusBar {
         this.statsGraphics.stroke({ width: size[1], color });
     }
 
+    private lastStatsKey?: string;
+
+    private setTextIfChanged(target: PIXI.Text, value: string) {
+        if (target.text !== value) {
+            target.text = value;
+        }
+    }
+
     drawStats(shield: Stat, armor: Stat, fuel?: FuelGauge,
         playerState?: PlayerState) {
-        this.statsGraphics.clear();
+        const shieldFullness = shield.max > 0 ? Math.max(0, shield.current / shield.max) : 0;
+        const armorFullness = armor.max > 0 ? Math.max(0, armor.current / armor.max) : 0;
+        const statsKey = Math.round(shieldFullness * 1000) + ":"
+            + Math.round(armorFullness * 1000) + ":"
+            + (fuel ? Math.round(fuel.fuel * 10) + "/" + fuel.capacity : "none");
+        if (statsKey !== this.lastStatsKey) {
+            this.lastStatsKey = statsKey;
+            this.statsGraphics.clear();
 
-        const shieldFullness = Math.max(0, shield.current / shield.max);
-        this.drawLine(this.statusBarData.dataAreas.shield,
-            this.statusBarData.colors.shield, shieldFullness);
+            this.drawLine(this.statusBarData.dataAreas.shield,
+                this.statusBarData.colors.shield, shieldFullness);
 
-        const armorFullness = Math.max(0, armor.current / armor.max);
-        this.drawLine(this.statusBarData.dataAreas.armor,
-            this.statusBarData.colors.armor, armorFullness);
+            this.drawLine(this.statusBarData.dataAreas.armor,
+                this.statusBarData.colors.armor, armorFullness);
 
-        if (fuel) {
-            this.drawFuel(fuel);
+            if (fuel) {
+                this.drawFuel(fuel);
+            }
         }
         this.drawCargo(playerState);
     }
@@ -506,11 +521,11 @@ class StatusBar {
             return;
         }
         const cargo = statusBarCargoText(playerState, this.cargoNames);
-        this.text.cargoFree.text = cargo.free;
-        this.text.cargoSpecial.text = cargo.special ?? '';
+        this.setTextIfChanged(this.text.cargoFree, cargo.free);
+        this.setTextIfChanged(this.text.cargoSpecial, cargo.special ?? '');
         this.text.cargoSpecial.visible = cargo.special !== undefined;
         this.text.cargoSpecialLabel.visible = cargo.special !== undefined;
-        this.text.cargoCredits.text = cargo.credits;
+        this.setTextIfChanged(this.text.cargoCredits, cargo.credits);
         this.cargoContainer.visible = true;
     }
 
@@ -546,11 +561,11 @@ class StatusBar {
             }
 
             if (finalSystem?.name && finalSystem.name !== nextSystem.name) {
-                this.text.navigationHeading.text = `Route: ${route.length} hops`;
-                this.text.navigationDestination.text = `${finalSystem.name} (via ${nextSystem.name})`;
+                this.setTextIfChanged(this.text.navigationHeading, `Route: ${route.length} hops`);
+                this.setTextIfChanged(this.text.navigationDestination, `${finalSystem.name} (via ${nextSystem.name})`);
             } else {
-                this.text.navigationHeading.text = 'Hyperspace';
-                this.text.navigationDestination.text = nextSystem.name;
+                this.setTextIfChanged(this.text.navigationHeading, 'Hyperspace');
+                this.setTextIfChanged(this.text.navigationDestination, nextSystem.name);
             }
             this.navigationContainer.visible = true;
         }).catch(() => {
@@ -565,7 +580,7 @@ class StatusBar {
             return;
         }
         if (name) {
-            this.text.weapon.text = name;
+            this.setTextIfChanged(this.text.weapon, name);
             this.text.weapon.visible = true;
             this.text.noWeapon.visible = false;
         } else {
@@ -579,24 +594,23 @@ class StatusBar {
         disabled = false) {
         this.targetContainer.visible = true;
         this.noTargetContainer.visible = false;
-        this.text.targetName.text = label.name;
-        this.text.targetSubtitle.text = label.subtitle ?? '';
+        this.setTextIfChanged(this.text.targetName, label.name);
+        this.setTextIfChanged(this.text.targetSubtitle, label.subtitle ?? '');
         this.text.targetSubtitle.visible = label.subtitle !== undefined;
-        if (label.isPlayer) {
-            this.text.targetSubtitle.style.fill = 0x00f0ff;
-        } else {
-            this.text.targetSubtitle.style.fill = 0xffffff;
+        const desiredFill = label.isPlayer ? 0x00f0ff : 0xffffff;
+        if (this.text.targetSubtitle.style.fill !== desiredFill) {
+            this.text.targetSubtitle.style.fill = desiredFill;
         }
-        this.text.targetGovernment.text = label.government ?? '';
+        this.setTextIfChanged(this.text.targetGovernment, label.government ?? '');
         this.text.targetGovernment.visible = label.government !== undefined;
 
         const health = statusBarTargetHealth(disabled, shield, armor);
         this.text.disabled.visible = health.status !== undefined;
-        this.text.disabled.text = health.status ?? '';
+        this.setTextIfChanged(this.text.disabled, health.status ?? '');
         this.text.shield.visible = health.label === 'Shield:';
         this.text.armor.visible = health.label === 'Armor:';
         this.text.percent.visible = health.percent !== undefined;
-        this.text.percent.text = health.percent ?? '';
+        this.setTextIfChanged(this.text.percent, health.percent ?? '');
 
         this.drawTargetImage(
             targetPict, shipGraphic, label.subtitle !== undefined);
@@ -713,7 +727,7 @@ class StatusBar {
         );
     }
     showLandingMessage(message: string, now: number, durationMs = 3_500) {
-        this.landingMessage.text = message;
+        this.setTextIfChanged(this.landingMessage, message);
         this.landingMessageContainer.visible = Boolean(message);
         this.landingMessageClearAt = message ? now + durationMs : 0;
     }
@@ -854,6 +868,13 @@ const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
     Optional(GovtComponent), Optional(DisabledComponent),
     Optional(PlayerStateComponent), Optional(ConquestBotComponent)] as const);
 
+const AsteroidTargetInfoQuery = new Query([
+    AsteroidComponent,
+    Optional(AsteroidDataComponent),
+    Optional(ArmorComponent),
+    Optional(AnimationGraphicComponent),
+] as const);
+
 const PlanetTargetInfoQuery = new Query([
     PlanetComponent,
     Optional(PlanetDataComponent),
@@ -892,6 +913,25 @@ const DrawStatusBarTarget = new System({
                     shipData.targetPict,
                     shipGraphic,
                     disabled,
+                );
+                return;
+            }
+            const asteroidResult = runQuery(AsteroidTargetInfoQuery, target)[0];
+            if (asteroidResult) {
+                const [, asteroidData, armor, asteroidGraphic] = asteroidResult;
+                const name = asteroidData?.name || 'Asteroid';
+                const commodity = asteroidData?.yield.commodity;
+                const yieldQty = asteroidData?.yield.quantity ?? 0;
+                const subtitle = commodity && yieldQty > 0
+                    ? `Yield: ${commodity}`
+                    : 'Barren Asteroid';
+                statusBar.drawTarget(
+                    { name, subtitle },
+                    undefined,
+                    armor?.percent,
+                    undefined,
+                    asteroidGraphic,
+                    false,
                 );
                 return;
             }

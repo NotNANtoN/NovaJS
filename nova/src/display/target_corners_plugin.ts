@@ -11,6 +11,7 @@ import { GameData } from "../client/gamedata/GameData";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
+import { AsteroidComponent } from "../nova_plugin/asteroid_plugin";
 import { DisabledComponent } from "../nova_plugin/disabled_plugin";
 import { GovtComponent } from "../nova_plugin/npc_components";
 import { ConquestBotComponent, isConquestMode, playerConquestFaction } from "../nova_plugin/conquest_config";
@@ -303,6 +304,7 @@ const TargetEntityQuery = new Query([
     Optional(PlayerStateComponent),
     Optional(HiredEscortComponent),
     Optional(ConquestBotComponent),
+    Optional(AsteroidComponent),
 ] as const);
 
 const DrawTargetCornersSystem = new System({
@@ -339,8 +341,12 @@ const DrawTargetCornersSystem = new System({
         let callsign: string | undefined;
         const targetComponents = runQuery(TargetEntityQuery, target)[0];
         if (targetComponents) {
-            const [disabled, targetGovt, targetLock, targetPlayer, targetEscort, conquestBot] = targetComponents;
+            const [disabled, targetGovt, targetLock, targetPlayer, targetEscort, conquestBot, asteroid] = targetComponents;
             const isWingmate = areWingmates(playerState, targetPlayer);
+            if (asteroid) {
+                targetCorners.setStyle("neutral");
+                callsign = undefined;
+            } else {
             if (conquestBot) {
                 const roleTag = conquestBot.garrison
                     ? 'FLEET'
@@ -391,6 +397,7 @@ const DrawTargetCornersSystem = new System({
                 }
             } else {
                 targetCorners.setStyle("neutral");
+            }
             }
         } else {
             targetCorners.setStyle("neutral");

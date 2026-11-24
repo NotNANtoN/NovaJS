@@ -6,9 +6,14 @@ import {
     getEvenlySpacedAngles,
     getRandomInCone,
     inheritedAttackTarget,
+    isAngleInTurretBlindSpot,
     sampleInaccuracy,
     setAttackIntent,
+    WeaponsComponent,
+    WeaponsComponentProvider,
 } from './fire_weapon_plugin';
+import { World } from 'nova_ecs/world';
+import { WeaponsStateComponent } from './weapons_state';
 import { createShotRng } from './shot_rng';
 
 describe('getEvenlySpacedAngles', () => {
@@ -77,4 +82,46 @@ describe('weapon spawn lockout', () => {
             expect(attackOriginLocked(undefined, 100)).toBeFalse();
         });
     }
+});
+
+describe('turret blind spots', () => {
+    it('blocks firing into configured front, side, and rear blind spots', () => {
+        const heading = new Angle(0);
+        expect(isAngleInTurretBlindSpot(heading, new Angle(0), { front: true, side: false, back: false })).toBeTrue();
+        expect(isAngleInTurretBlindSpot(heading, new Angle(Math.PI), { front: true, side: false, back: false })).toBeFalse();
+        expect(isAngleInTurretBlindSpot(heading, new Angle(Math.PI / 2), { front: false, side: true, back: false })).toBeTrue();
+        expect(isAngleInTurretBlindSpot(heading, new Angle(-Math.PI / 2), { front: false, side: true, back: false })).toBeTrue();
+        expect(isAngleInTurretBlindSpot(heading, new Angle(Math.PI), { front: false, side: false, back: true })).toBeTrue();
+        expect(isAngleInTurretBlindSpot(heading, new Angle(0), { front: false, side: false, back: true })).toBeFalse();
+    });
+});
+
+describe('WeaponsComponentProvider', () => {
+    it('preserves kept weapon state while pruning removed weapons and seeding new ones', () => {
+        const world = new World('weapons-provider-test');
+        world.addSystem(WeaponsComponentProvider);
+        const ship = new Entity('ship');
+        ship.components.set(WeaponsStateComponent, new Map([
+            ['blaster', { count: 2, firing: false }],
+            ['laser', { count: 1, firing: false }],
+        ]));
+        world.entities.set('ship', ship);
+        world.step();
+
+        const local = ship.components.get(WeaponsComponent)!;
+        local.get('blaster').burstCount = 3;
+        local.get('laser').burstCount = 2;
+
+        // Swap laser for missile; blaster state persists, laser is pruned, missile is seeded.
+        ship.components.set(WeaponsStateComponent, new Map([
+            ['blaster', { count: 2, firing: false }],
+            ['missile', { count: 1, firing: false }],
+        ]));
+        world.step();
+
+        const updated = ship.components.get(WeaponsComponent)!;
+        expect(updated.get('blaster').burstCount).toBe(3);
+        expect(updated.has('laser')).toBeFalse();
+        expect(updated.has('missile')).toBeTrue();
+    });
 });

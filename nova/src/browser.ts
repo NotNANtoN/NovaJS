@@ -283,6 +283,38 @@ type SystemTransitionCause = 'initial' | 'hyperjump' | 'respawn';
 type TransitionEntity = Entity | ((newSystem: World) => Entity);
 
 const warmedNeighborSystems = new Set<string>();
+const inFlightSystemWarmups = new Map<string, Promise<void>>();
+
+function warmSystemInBackground(
+    systemId: string,
+    gameData: GameData,
+    app: PIXI.Application,
+): Promise<void> {
+    if (warmedNeighborSystems.has(systemId)) {
+        return Promise.resolve();
+    }
+    const existing = inFlightSystemWarmups.get(systemId);
+    if (existing) {
+        return existing;
+    }
+    const promise = warmFlightAssets({
+        gameData,
+        systemId,
+        loadSound: id => gameData.data.Sound.get(id),
+        loadFrames: async frames => {
+            const textures = await texturesFromFrames(frames);
+            await app.renderer.prepare.upload(textures);
+        },
+    }).then(() => {
+        warmedNeighborSystems.add(systemId);
+    }).catch(e => {
+        console.warn("Background warmup for system " + systemId + " deferred", e);
+    }).finally(() => {
+        inFlightSystemWarmups.delete(systemId);
+    });
+    inFlightSystemWarmups.set(systemId, promise);
+    return promise;
+}
 
 async function preloadNeighboringSystems(
     currentSystemId: string,
@@ -297,19 +329,7 @@ async function preloadNeighboringSystems(
             ...(conquestNeighbor ? [conquestNeighbor] : []),
         ]);
         for (const neighborId of neighborIds) {
-            if (warmedNeighborSystems.has(neighborId)) continue;
-            warmedNeighborSystems.add(neighborId);
-            void warmFlightAssets({
-                gameData,
-                systemId: neighborId,
-                loadSound: id => gameData.data.Sound.get(id),
-                loadFrames: async frames => {
-                    const textures = await texturesFromFrames(frames);
-                    await app.renderer.prepare.upload(textures);
-                },
-            }).catch(e => {
-                console.warn(`Background warmup for neighbor ${neighborId} deferred`, e);
-            });
+            void warmSystemInBackground(neighborId, gameData, app);
         }
     } catch (e) {
         console.warn('Failed to scan neighboring systems for preloading', e);
@@ -372,6 +392,12 @@ async function transitionTo(
             showEnteringOverlay(systemTitle, 5, 'Preloading assets...');
         }
 
+        // Reuse any background warmup already started during hyperjump/neighbor preload
+        // instead of duplicating fetches and GPU texture uploads.
+        const pendingWarmup = inFlightSystemWarmups.get(to);
+        if (pendingWarmup) {
+            await pendingWarmup;
+        }
         // Do not publish the player into combat while its hull or weapon art is
         // still downloading. Later room entries reuse the loaded atlas cache.
         await firstValueFrom(from(warmFlightAssets({
@@ -410,15 +436,7 @@ async function transitionTo(
         newSystem.events.get(FinishJumpEvent).subscribe(transition =>
             void transitionTo(transition, 'hyperjump').catch(failedTransition));
         newSystem.events.get(InitiateJumpEvent).subscribe(({ to: targetSystem }) => {
-            void warmFlightAssets({
-                gameData,
-                systemId: targetSystem,
-                loadSound: id => gameData.data.Sound.get(id),
-                loadFrames: async frames => {
-                    const textures = await texturesFromFrames(frames);
-                    await app.renderer.prepare.upload(textures);
-                },
-            }).catch(() => undefined);
+            void warmSystemInBackground(targetSystem, gameData as GameData, app);
         });
         newSystem.events.get(RespawnRelocationEvent).subscribe(transition =>
             void transitionTo(transition, 'respawn').catch(failedTransition));
@@ -683,14 +701,19 @@ async function startGame(
     window.onresize = resize;
 
     if (!tickerInstalled) {
-        const stats = new Stats();
-        document.body.appendChild(stats.dom);
+        const params = new URLSearchParams(window.location.search);
+        const stats = params.get('stats') === '1' || params.has('debug')
+            ? new Stats()
+            : undefined;
+        if (stats) {
+            document.body.appendChild(stats.dom);
+        }
         app.ticker.add(() => {
-            stats.begin();
+            stats?.begin();
             if (!gamePaused) {
                 world?.step();
             }
-            stats.end();
+            stats?.end();
         });
         tickerInstalled = true;
     }
@@ -955,7 +978,7 @@ async function bootstrap() {
         resolution: pixelRatio,
         autoDensity: true,
         antialias: true,
-        preserveDrawingBuffer: true,
+        preserveDrawingBuffer: new URLSearchParams(window.location.search).get('preserveDrawingBuffer') === '1',
         preference: 'webgpu',
         gpu: gpuConfig,
     });

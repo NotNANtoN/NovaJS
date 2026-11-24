@@ -111,6 +111,12 @@ export interface WeaponDamage {
 
 export type FireGroup = "primary" | "secondary" | "pointDefense";
 
+export interface TurretBlindSpots {
+    front: boolean;
+    side: boolean;
+    back: boolean;
+}
+
 export interface BaseWeaponData extends BaseData {
     reload: number;
     shotSpeed: number;
@@ -131,6 +137,7 @@ export interface BaseWeaponData extends BaseData {
      * plug-ins use it to destroy stellars.
      */
     planetType?: boolean;
+    turretBlindSpots?: TurretBlindSpots;
 }
 
 export function getDefaultBaseWeaponData(): BaseWeaponData {

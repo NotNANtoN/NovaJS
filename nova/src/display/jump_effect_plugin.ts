@@ -26,12 +26,17 @@ import { Space } from './space_resource';
 import { attachGraphic, ManagedGraphic } from './managed_graphic';
 
 const JumpWakeGraphics = new Resource<ManagedGraphic>('JumpWakeGraphics');
+const dirtyJumpWakeGraphics = new WeakSet<PIXI.Graphics>();
 
 const ClearJumpWakes = new System({
     name: 'ClearJumpWakes',
     args: [JumpWakeGraphics, SingletonComponent] as const,
     step(wakeHandle) {
-        (wakeHandle.root as PIXI.Graphics).clear();
+        const wakeGraphics = wakeHandle.root as PIXI.Graphics;
+        if (dirtyJumpWakeGraphics.has(wakeGraphics)) {
+            wakeGraphics.clear();
+            dirtyJumpWakeGraphics.delete(wakeGraphics);
+        }
     }
 });
 
@@ -166,6 +171,7 @@ export const JumpEffectSystem = new System({
 
         if (wakeHandle && isArriving && progress < 0.92) {
             const wakeGraphics = wakeHandle.root as PIXI.Graphics;
+            dirtyJumpWakeGraphics.add(wakeGraphics);
             const alpha = (1 - progress) * 0.75;
             const radius = 20 + progress * 70;
             wakeGraphics.ellipse(movement.position.x, movement.position.y, radius * 0.75, radius)
@@ -174,6 +180,7 @@ export const JumpEffectSystem = new System({
                 .stroke({ width: 1, color: 0xffffff, alpha: alpha * 0.9 });
         } else if (wakeHandle && !isArriving && progress > 0.65) {
             const wakeGraphics = wakeHandle.root as PIXI.Graphics;
+            dirtyJumpWakeGraphics.add(wakeGraphics);
             // Radiant departure flash near transition boundary
             const flashNorm = (progress - 0.65) / 0.35;
             const flashRadius = 15 + flashNorm * 45;

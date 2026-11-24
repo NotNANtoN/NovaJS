@@ -39,7 +39,7 @@ import {
     RemoteMovementPresentationComponent,
 } from './movement_plugin';
 import { TimeResource, wallClockNow } from './time_plugin';
-import { NetworkReceivePhase, NetworkTiming, NetworkTimingResource, MOVEMENT_SNAPSHOT_INTERVAL_MS } from './network_timing';
+import { NetworkReceivePhase, NetworkTiming, NetworkTimingResource, MOVEMENT_SNAPSHOT_INTERVAL_MS, NEARBY_MOVEMENT_SNAPSHOT_INTERVAL_MS } from './network_timing';
 import {
     ClientPrediction, controlsDiffer, InputAck, inputPredictionSuspended,
     MovementCommand, ServerCommandQueue,
@@ -217,6 +217,7 @@ export function excludeFromStateHash(componentName: string): void {
 
 export const MultiplayerData = new Component<{ owner: string }>('MultiplayerData');
 export const MULTIPLAYER_INTEREST_RADIUS = 6_000;
+export const NEARBY_SNAPSHOT_RADIUS = 1_600;
 /**
  * An entity already replicated to a peer stays relevant until it is this far
  * away. Without the margin, ships near the boundary are removed and re-sent
@@ -231,20 +232,30 @@ function wrappedAxisDistance(a: number, b: number): number {
     return Math.min(direct, BOUNDARY * 2 - direct);
 }
 
+function coordsWithinRadius(
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    radius: number,
+): boolean {
+    const x = wrappedAxisDistance(ax, bx);
+    if (x > radius) {
+        return false;
+    }
+    const y = wrappedAxisDistance(ay, by);
+    if (y > radius) {
+        return false;
+    }
+    return x * x + y * y <= radius * radius;
+}
+
 function positionsWithinInterest(
     a: MovementState,
     b: MovementState,
     radius = MULTIPLAYER_INTEREST_RADIUS,
 ): boolean {
-    const x = wrappedAxisDistance(a.position.x, b.position.x);
-    if (x > radius) {
-        return false;
-    }
-    const y = wrappedAxisDistance(a.position.y, b.position.y);
-    if (y > radius) {
-        return false;
-    }
-    return x * x + y * y <= radius * radius;
+    return coordsWithinRadius(a.position.x, a.position.y, b.position.x, b.position.y, radius);
 }
 
 interface ReplicatedEntry {
@@ -2245,6 +2256,15 @@ export function multiplayer(communicator: Communicator,
             // Get deltas and create drafts 
             const ownedEntities = new Set<Entity>();
             const inputs = new Map<string, MovementCommand[]>();
+            const playerCentres: Array<{ x: number; y: number }> = [];
+            if (isAdmin) {
+                for (const { entity, data: multiplayerData } of entityMap.values()) {
+                    if (multiplayerData.owner !== comms.uuid) {
+                        const m = entity.components.get(MovementStateComponent);
+                        if (m) playerCentres.push({ x: m.position.x, y: m.position.y });
+                    }
+                }
+            }
             for (const [uuid, { entity, data: multiplayerData }] of entityMap) {
                 if (entityMap.get(uuid)?.entity !== entity) {
                     // A full-state replacement may have untracked and
@@ -2339,6 +2359,14 @@ export function multiplayer(communicator: Communicator,
                     && lastWire !== undefined && controlsDiffer(lastWire, movement);
                 // A final stop/teleport also needs a snapshot. Testing only the
                 // new velocity would leave observers extrapolating the old one.
+                const entitySnapshotIntervalMs = (isAdmin && (inputDriven
+                    || (movement !== undefined && playerCentres.some(
+                        centre => coordsWithinRadius(
+                            centre.x, centre.y, movement.position.x, movement.position.y, NEARBY_SNAPSHOT_RADIUS,
+                        ),
+                    ))))
+                    ? NEARBY_MOVEMENT_SNAPSHOT_INTERVAL_MS
+                    : movementSnapshotIntervalMs;
                 const periodicSnapshotDue = movement !== undefined
                     && !predicted
                     && (inputDriven || canSendOutbound(
@@ -2348,7 +2376,7 @@ export function multiplayer(communicator: Communicator,
                         owner,
                     ))
                     && (lastSnapshot === undefined || controlEdge
-                        || localTime - lastSnapshot >= movementSnapshotIntervalMs - 0.001);
+                        || localTime - lastSnapshot >= entitySnapshotIntervalMs - 0.001);
                 if (periodicSnapshotDue && movement) {
                     const snapshot = quantizeMovementState(movement);
                     const previous = lastMovementWireState.get(uuid);

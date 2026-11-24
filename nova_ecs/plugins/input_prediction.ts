@@ -44,8 +44,12 @@ const COMMAND_DT_EPSILON_MS = 1e-4;
 export const MAX_COMMAND_DT_MS = 100;
 /** Corrections above this distance snap (respawn, teleport, jump arrival). */
 export const SNAP_DISTANCE = 256;
-/** Fraction of a correction applied per acknowledgement (about 30 Hz). */
-export const CORRECTION_BLEND = 0.35;
+/** Fraction of a correction applied immediately on acknowledgement; the remainder decays at render rate. */
+export const CORRECTION_BLEND = 0.25;
+/** Exponential decay time constant (ms) for render-rate visual error smoothing. */
+export const VISUAL_ERROR_TAU_MS = 50;
+const VISUAL_OFFSET_EPSILON = 0.05;
+const VISUAL_ANGLE_EPSILON = 0.0005;
 /** Below this, a correction is adopted outright. */
 const ADOPT_DISTANCE = 0.5;
 const ADOPT_ANGLE = 0.002;
@@ -160,15 +164,55 @@ export class ClientPrediction {
     lastError = 0;
     /** Sub-tick time accumulated toward the next 60 Hz command step. */
     accumulatorMs = 0;
+    /** Render-rate visual offset decayed exponentially toward the exact sim state. */
+    visualOffsetX = 0;
+    visualOffsetY = 0;
+    visualOffsetAngle = 0;
     private simState?: MovementState;
     private lastPresentedState?: MovementState;
 
     constructor(private nextSeq: () => number) { }
 
+    private clearVisualOffset(): void {
+        this.visualOffsetX = 0;
+        this.visualOffsetY = 0;
+        this.visualOffsetAngle = 0;
+    }
+
+    private decayVisualOffset(dtMs: number): void {
+        if (this.visualOffsetX === 0 && this.visualOffsetY === 0 && this.visualOffsetAngle === 0) {
+            return;
+        }
+        const factor = Math.exp(-dtMs / VISUAL_ERROR_TAU_MS);
+        this.visualOffsetX *= factor;
+        this.visualOffsetY *= factor;
+        this.visualOffsetAngle *= factor;
+        if (Math.hypot(this.visualOffsetX, this.visualOffsetY) < VISUAL_OFFSET_EPSILON) {
+            this.visualOffsetX = 0;
+            this.visualOffsetY = 0;
+        }
+        if (Math.abs(this.visualOffsetAngle) < VISUAL_ANGLE_EPSILON) {
+            this.visualOffsetAngle = 0;
+        }
+    }
+
+    private present(into: MovementState, base: MovementState): void {
+        assignMovement(into, base);
+        if (this.visualOffsetX !== 0 || this.visualOffsetY !== 0) {
+            into.position = into.position.add(
+                new Vector(this.visualOffsetX, this.visualOffsetY),
+            ) as typeof into.position;
+        }
+        if (this.visualOffsetAngle !== 0) {
+            into.rotation = into.rotation.add(this.visualOffsetAngle);
+        }
+    }
+
     private syncExternalMutation(state: MovementState): void {
         if (!this.simState || !this.lastPresentedState) {
             this.simState = copyMovementState(state);
             this.accumulatorMs = 0;
+            this.clearVisualOffset();
             return;
         }
         const last = this.lastPresentedState;
@@ -181,6 +225,9 @@ export class ClientPrediction {
             const dx = wrappedDelta(last.position.x, state.position.x);
             const dy = wrappedDelta(last.position.y, state.position.y);
             const dAngle = last.rotation.distanceTo(state.rotation).angle;
+            if (Math.hypot(dx, dy) > SNAP_DISTANCE) {
+                this.clearVisualOffset();
+            }
             this.simState.position = this.simState.position.add(
                 new Vector(dx, dy)) as typeof state.position;
             this.simState.velocity = this.simState.velocity.add(
@@ -202,6 +249,7 @@ export class ClientPrediction {
             return;
         }
         this.syncExternalMutation(state);
+        this.decayVisualOffset(dt);
         const sim = this.simState!;
         sim.accelerating = state.accelerating;
         sim.turning = state.turning;
@@ -217,15 +265,10 @@ export class ClientPrediction {
             this.outbox.push(command);
             this.accumulatorMs = Math.max(0, this.accumulatorMs - FIXED_COMMAND_DT_MS);
         }
-        if (this.accumulatorMs > COMMAND_DT_EPSILON_MS) {
-            const subCommand = commandFromState(state, 0, this.accumulatorMs);
-            assignMovement(
-                state,
-                applyCommand(sim, physics, subCommand, entities, this.accumulatorMs),
-            );
-        } else {
-            assignMovement(state, sim);
-        }
+        const base = this.accumulatorMs > COMMAND_DT_EPSILON_MS
+            ? applyCommand(sim, physics, commandFromState(state, 0, this.accumulatorMs), entities, this.accumulatorMs)
+            : sim;
+        this.present(state, base);
         this.lastPresentedState = copyMovementState(state);
     }
 
@@ -240,8 +283,9 @@ export class ClientPrediction {
     }
 
     /**
-     * Rebase on an authoritative state. Mutates `current` (the entity's
-     * movement) toward the server state plus replayed unacknowledged input.
+     * Rebase on an authoritative state. Keeps `simState` exact and absorbs
+     * small corrections into a render-rate visual offset that decays smoothly
+     * every frame instead of stepping only on acknowledgements.
      */
     reconcile(ack: InputAck, current: MovementState, physics: MovementPhysics,
         entities: EntityMap): ReconcileResult {
@@ -250,6 +294,7 @@ export class ClientPrediction {
             return 'stale';
         }
         this.syncExternalMutation(current);
+        const prevPresented = copyMovementState(current);
         this.lastAckSeq = ack.seq;
         while (this.pending.length > 0 && this.pending[0].seq <= ack.seq) {
             this.pending.shift();
@@ -272,41 +317,35 @@ export class ClientPrediction {
             turnBack: current.turnBack,
             turnTo: current.turnTo,
         };
+
+        // Keep authoritative simState exact; handle smoothing purely via visualOffset.
+        assignMovement(sim, corrected);
+        Object.assign(sim, controls);
+        this.simState = sim;
+
+        const base = this.accumulatorMs > COMMAND_DT_EPSILON_MS
+            ? applyCommand(sim, physics, commandFromState(current, 0, this.accumulatorMs), entities, this.accumulatorMs)
+            : sim;
+
         let result: ReconcileResult;
         if (distance > SNAP_DISTANCE) {
-            assignMovement(sim, corrected);
-            Object.assign(sim, controls);
+            this.clearVisualOffset();
             result = 'snapped';
         } else if (distance <= ADOPT_DISTANCE && Math.abs(angle) <= ADOPT_ANGLE) {
-            assignMovement(sim, corrected);
-            Object.assign(sim, controls);
             result = 'adopted';
         } else {
-            // The next acknowledgement recomputes `corrected` from the server,
-            // so a partial step converges geometrically without drifting.
-            sim.position = sim.position.add(
-                new Vector(dx * CORRECTION_BLEND, dy * CORRECTION_BLEND)) as typeof sim.position;
-            sim.rotation = sim.rotation.add(angle * CORRECTION_BLEND);
-            sim.velocity = corrected.velocity;
-            if (corrected.targetSpeed === undefined) {
-                delete sim.targetSpeed;
-            } else {
-                sim.targetSpeed = corrected.targetSpeed;
-            }
-            Object.assign(sim, controls);
+            const errX = wrappedDelta(base.position.x, prevPresented.position.x);
+            const errY = wrappedDelta(base.position.y, prevPresented.position.y);
+            const errAngle = base.rotation.distanceTo(prevPresented.rotation).angle;
+            const remain = 1 - CORRECTION_BLEND;
+            this.visualOffsetX = errX * remain;
+            this.visualOffsetY = errY * remain;
+            this.visualOffsetAngle = errAngle * remain;
             result = 'blended';
         }
-        this.simState = sim;
-        if (this.accumulatorMs > COMMAND_DT_EPSILON_MS) {
-            const subCommand = commandFromState(current, 0, this.accumulatorMs);
-            assignMovement(
-                current,
-                applyCommand(sim, physics, subCommand, entities, this.accumulatorMs),
-            );
-            Object.assign(current, controls);
-        } else {
-            assignMovement(current, sim);
-        }
+
+        this.present(current, base);
+        Object.assign(current, controls);
         this.lastPresentedState = copyMovementState(current);
         return result;
     }

@@ -17,12 +17,17 @@ import { Space } from './space_resource';
 import { attachGraphic, ManagedGraphic } from './managed_graphic';
 
 export const CloakWakeGraphics = new Resource<ManagedGraphic>('CloakWakeGraphics');
+const dirtyCloakWakeGraphics = new WeakSet<PIXI.Graphics>();
 
 export const ClearCloakWakes = new System({
     name: 'ClearCloakWakes',
     args: [CloakWakeGraphics, SingletonComponent] as const,
     step(wakeHandle) {
-        (wakeHandle.root as PIXI.Graphics).clear();
+        const wakeGraphics = wakeHandle.root as PIXI.Graphics;
+        if (dirtyCloakWakeGraphics.has(wakeGraphics)) {
+            wakeGraphics.clear();
+            dirtyCloakWakeGraphics.delete(wakeGraphics);
+        }
     },
 });
 
@@ -48,6 +53,7 @@ export const CloakVisualSystem = new System({
 
         if (wakeHandle && inTransition) {
             const wakeGraphics = wakeHandle.root as PIXI.Graphics;
+            dirtyCloakWakeGraphics.add(wakeGraphics);
             if (cloakState.cloaked) {
                 // Engaging cloak: expanding holographic refraction ripples
                 const rippleRadius = 12 + progress * 55;
@@ -92,6 +98,7 @@ export const CloakVisualSystem = new System({
                 // Faint tactical sensor outline for player navigation in deep space
                 if (wakeHandle && !inTransition) {
                     const wakeGraphics = wakeHandle.root as PIXI.Graphics;
+                    dirtyCloakWakeGraphics.add(wakeGraphics);
                     const haloAlpha = 0.10 + 0.04 * Math.sin(time.time * 0.005);
                     wakeGraphics.circle(movement.position.x, movement.position.y, 22)
                         .stroke({ width: 1, color: 0x3399cc, alpha: haloAlpha });

@@ -387,6 +387,7 @@ export interface RemoteMovementPresentation {
     generation?: number;
     positionCorrection?: Vector;
     rotationCorrection?: number;
+    wasExtrapolating?: boolean;
 }
 
 /**
@@ -723,6 +724,7 @@ export const RemoteMovementPresentationSystem = new System({
             presentation.lastRenderTime = presentation.lastSourceRenderTime = undefined;
             presentation.positionCorrection = undefined;
             presentation.rotationCorrection = 0;
+            presentation.wasExtrapolating = false;
         }
         const renderTime = network?.renderTime ?? time.time - REMOTE_INTERPOLATION_DELAY_MS;
         const offset = presentation.clock?.offset ?? 0;
@@ -737,6 +739,9 @@ export const RemoteMovementPresentationSystem = new System({
         if (!sampled) {
             return;
         }
+        const latest = presentation.snapshots.at(-1);
+        const isExtrapolating = Boolean(latest && sourceRenderTime > latest.serverTime);
+        const exitedExtrapolation = Boolean(presentation.wasExtrapolating && !isExtrapolating);
         const elapsed = Math.max(0, sourceRenderTime - (presentation.lastSourceRenderTime ?? sourceRenderTime));
         const decay = Math.pow(0.5, elapsed / MOVEMENT_CORRECTION_HALF_LIFE_MS);
         const prevCorrection = presentation.positionCorrection ?? new Vector(0, 0);
@@ -745,18 +750,30 @@ export const RemoteMovementPresentationSystem = new System({
         let rotationCorrection = prevRotCorrection * decay;
         if (presentation.lastSample && elapsed > 0 && elapsed < 250
             && (presentation.presentedRevision !== presentation.revision
-                || presentation.lastClockOffset !== presentation.clock?.offset)) {
+                || presentation.lastClockOffset !== presentation.clock?.offset
+                || exitedExtrapolation)) {
             const lastRendered = copyMovementState(presentation.lastSample);
             lastRendered.position = lastRendered.position.add(prevCorrection) as Position;
             lastRendered.rotation = lastRendered.rotation.add(prevRotCorrection);
             const expected = advanceMovementState(lastRendered, physics, elapsed / 1000, entities);
-            const error = expected.position.subtract(sampled.position);
+            const error = new Vector(
+                shortestWrappedDelta(sampled.position.x, expected.position.x),
+                shortestWrappedDelta(sampled.position.y, expected.position.y),
+            );
             if (error.lengthSquared < 256 * 256) {
                 correction = error.scale(decay);
                 rotationCorrection = sampled.rotation.distanceTo(expected.rotation).angle * decay;
             } else {
                 // Teleports/room placement must not animate a long sweep.
                 correction = new Vector(0, 0);
+                rotationCorrection = 0;
+            }
+        }
+        if (elapsed > 0) {
+            if (correction.lengthSquared < 0.05 * 0.05) {
+                correction = new Vector(0, 0);
+            }
+            if (Math.abs(rotationCorrection) < 0.0005) {
                 rotationCorrection = 0;
             }
         }
@@ -767,13 +784,13 @@ export const RemoteMovementPresentationSystem = new System({
         presentation.presentedRevision = presentation.revision;
         presentation.positionCorrection = correction;
         presentation.rotationCorrection = rotationCorrection;
+        presentation.wasExtrapolating = isExtrapolating;
         state.position = sampled.position.add(correction) as Position;
         state.velocity = sampled.velocity;
         state.rotation = sampled.rotation.add(rotationCorrection);
         if (network) {
             network.sampledEntities++;
-            const latest = presentation.snapshots.at(-1);
-            if (latest && sourceRenderTime > latest.serverTime) {
+            if (isExtrapolating) {
                 network.extrapolatedEntities++;
             }
         }

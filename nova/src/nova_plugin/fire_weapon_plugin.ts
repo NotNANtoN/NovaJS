@@ -1,7 +1,7 @@
 import * as t from 'io-ts';
 import { Animation } from 'novadatainterface/Animation';
 import { Gettable } from 'novadatainterface/Gettable';
-import { WeaponData } from 'novadatainterface/WeaponData';
+import { TurretBlindSpots, WeaponData } from 'novadatainterface/WeaponData';
 import { Emit, EmitFunction, Entities, GetEntity, RunQuery, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -84,23 +84,26 @@ export function getDefaultWeaponLocalState(): WeaponLocalState {
     };
 }
 
-// TODO: This doesn't update if the set or count of weapons changes.
 export const WeaponsComponentProvider = Provide({
     name: "WeaponsComponentProvider",
     provided: WeaponsComponent,
     update: [WeaponsStateComponent],
     args: [WeaponsStateComponent, Optional(WeaponsComponent)] as const,
-    factory(_weaponsState, previous) {
-        // Reload accumulators, burst counters, and exit-point rotation are
-        // per-weapon firing progress. A refreshed WeaponsState (a purchased
-        // outfit, or a replicated update) must not silently reload every
-        // weapon, which would let a held trigger fire far faster than the
-        // weapon's reload allows.
+    factory(weaponsState, previous) {
+        // Preserve per-weapon reload/burst progress for retained weapons while
+        // pruning weapons removed from WeaponsState and seeding newly added ones.
         const localState: WeaponsLocalState =
             new DefaultMap<string, WeaponLocalState>(
                 getDefaultWeaponLocalState);
         for (const [id, state] of previous ?? []) {
-            localState.set(id, state);
+            if (weaponsState.has(id)) {
+                localState.set(id, state);
+            }
+        }
+        for (const id of weaponsState.keys()) {
+            if (!localState.has(id)) {
+                localState.set(id, getDefaultWeaponLocalState());
+            }
         }
         return localState;
     }
@@ -140,9 +143,8 @@ function getNextExitpoint(sourceMovement: MovementState, sourceAnimation: Animat
 }
 
 type Quadrant = 'frontQuadrant' | 'sidesQuadrant' | 'rearQuadrant';
-function getQuadrant(source: Position, angle: Angle, target: Position): Quadrant {
-    const angleToOther = target.subtract(source).angle;
-    const relativeAngle = angle.subtract(angleToOther);
+function getQuadrantForAngle(shipAngle: Angle, fireAngle: Angle): Quadrant {
+    const relativeAngle = shipAngle.subtract(fireAngle);
     const absAngle = Math.abs(relativeAngle.angle);
     if (absAngle < Math.PI / 4) {
         return 'frontQuadrant';
@@ -150,6 +152,29 @@ function getQuadrant(source: Position, angle: Angle, target: Position): Quadrant
         return 'rearQuadrant';
     }
     return 'sidesQuadrant';
+}
+
+function getQuadrant(source: Position, angle: Angle, target: Position): Quadrant {
+    const angleToOther = target.subtract(source).angle;
+    return getQuadrantForAngle(angle, angleToOther);
+}
+
+/**
+ * Returns true if firing a turret along `fireAngle` from a ship facing
+ * `shipAngle` falls inside one of the weapon's configured blind spots.
+ */
+export function isAngleInTurretBlindSpot(
+    shipAngle: Angle,
+    fireAngle: Angle,
+    blindSpots?: TurretBlindSpots,
+): boolean {
+    if (!blindSpots || (!blindSpots.front && !blindSpots.side && !blindSpots.back)) {
+        return false;
+    }
+    const quadrant = getQuadrantForAngle(shipAngle, fireAngle);
+    return (quadrant === 'frontQuadrant' && blindSpots.front)
+        || (quadrant === 'sidesQuadrant' && blindSpots.side)
+        || (quadrant === 'rearQuadrant' && blindSpots.back);
 }
 
 export function sampleInaccuracy(accuracy: number, rng: ShotRng) {
@@ -413,7 +438,7 @@ export abstract class WeaponEntry {
                 let closest: MovementState | undefined = undefined
                 let closestUuid: string | undefined = undefined;
                 let distance2 = Infinity;
-                for (let [movement, targetOwner, uuid, otherTarget] of targets) {
+                for (let [pdMovement, targetOwner, uuid, otherTarget] of targets) {
                     if (!targetOwner) {
                         targetOwner = {owner: uuid};
                     }
@@ -424,9 +449,13 @@ export abstract class WeaponEntry {
                         || otherTarget?.target === source)) {
                         continue;
                     }
-                    const newDistance2 = movement.position.subtract(exitPoint).lengthSquared;
+                    const newDistance2 = pdMovement.position.subtract(exitPoint).lengthSquared;
                     if (newDistance2 < distance2) {
-                        closest = movement;
+                        const aimAngle = this.guidance(exitPoint, movement, pdMovement);
+                        if (isAngleInTurretBlindSpot(movement.rotation, aimAngle, this.data.turretBlindSpots)) {
+                            continue;
+                        }
+                        closest = pdMovement;
                         closestUuid = uuid;
                         distance2 = newDistance2;
                     }
@@ -439,7 +468,16 @@ export abstract class WeaponEntry {
                     return undefined;
                 }
             }
-            // TODO: Blindspots
+
+            if ((this.data.guidance === 'turret'
+                || this.data.guidance === 'beamTurret'
+                || this.data.guidance === 'pointDefense'
+                || this.data.guidance === 'pointDefenseBeam')
+                && isAngleInTurretBlindSpot(
+                    movement.rotation, angle, this.data.turretBlindSpots,
+                )) {
+                return undefined;
+            }
         }
 
         const inaccuracyOffset = inaccuracy

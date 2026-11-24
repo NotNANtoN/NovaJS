@@ -108,6 +108,24 @@ export function isSystemActive(
     return isSystemVisible(system, missionBits);
 }
 
+/**
+ * Filters territory points down to currently live system variants so changing
+ * mission bits immediately swaps political borders on the galaxy map.
+ */
+export function filterLiveTerritoryPoints(
+    points: readonly TerritoryPoint[],
+    systems: ReadonlyMap<string, SystemData>,
+    missionBits?: ReadonlySet<number> | readonly boolean[],
+): TerritoryPoint[] {
+    if (points.length === 0) {
+        return [];
+    }
+    const index = variantIndexFor(systems);
+    return points.filter(point =>
+        !point.systemId || index.isLive(point.systemId, missionBits),
+    );
+}
+
 export function resolveActiveSystem(
     systemIdOrSystem: string | SystemData | undefined,
     systems: readonly SystemData[] | ReadonlyMap<string, SystemData>,
@@ -562,6 +580,9 @@ export class SystemGraph {
             this.missionMarkers = getMissionDestinationMarkers(
                 this.activeMissions, [...this.systems.values()], this.missionBits);
         }
+        if (this.territoryPoints.length > 0) {
+            this.rebuildTerritory(false);
+        }
         if (redraw) {
             this.draw();
         }
@@ -782,8 +803,13 @@ export class SystemGraph {
         this.rebuildTerritory();
     }
 
-    private rebuildTerritory() {
-        this.territoryField = computeTerritoryField(this.territoryPoints);
+    private rebuildTerritory(redraw = true) {
+        const livePoints = filterLiveTerritoryPoints(
+            this.territoryPoints,
+            this.systems,
+            this.missionBits,
+        );
+        this.territoryField = computeTerritoryField(livePoints);
         if (this.territorySprite) {
             this.territoryContainer.removeChild(this.territorySprite);
             this.territorySprite.destroy({ texture: true });
@@ -807,7 +833,9 @@ export class SystemGraph {
         }
         // The map is cached as a bitmap, so it has to be redrawn once the
         // asynchronously loaded colours arrive.
-        this.draw();
+        if (redraw) {
+            this.draw();
+        }
     }
 
     private placeTerritory() {

@@ -15,15 +15,18 @@ import {
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
-import { AsteroidComponent } from './asteroid_plugin';
+import { AsteroidComponent, OreComponent } from './asteroid_plugin';
 import { GameDataResource } from './game_data_resource';
 import {
     createMinerSystems,
     isMiningShip,
+    MINER_DOCK_DISTANCE,
     MINING_SEEK_RANGE,
     MINING_STANDOFF,
     MiningShipComponent,
+    NpcCargoHoldComponent,
 } from './miner_ai';
+import { PlanetComponent } from './planet_plugin';
 import { NpcAIComponent } from './npc_components';
 import { ChooseRandomTargetAI, FollowAI } from './npc_plugin';
 import { PlatformResource } from './platform_plugin';
@@ -76,12 +79,15 @@ async function makeWorld() {
     await world.addPlugin(DeltaPlugin);
     world.addComponent(MiningShipComponent);
     world.addComponent(AsteroidComponent);
+    world.addComponent(OreComponent);
+    world.addComponent(PlanetComponent);
     const miners = createMinerSystems({
         chooseTarget: ChooseRandomTargetAI,
         follow: FollowAI,
     });
     world.addSystem(miners.target);
     world.addSystem(miners.approach);
+    world.addSystem(miners.scoop);
     return world;
 }
 
@@ -229,5 +235,41 @@ describe('mining ships', () => {
             .toBe(0);
         expect(miner.components.get(MovementStateComponent)!.turnTo)
             .toEqual(new Angle(Math.PI / 2));
+    });
+
+    it('scoops nearby floating ore into its cargo hold', async () => {
+        const world = await makeWorld();
+        const miner = makeMiner(true);
+        world.entities.set('miner', miner);
+        world.entities.set('ore', new Entity()
+            .addComponent(OreComponent, { asteroidId: 'nova:130', commodity: 'metal', tons: 5, spin: 0 })
+            .addComponent(MultiplayerData, { owner: 'server' })
+            .addComponent(MovementStateComponent, movementAt(20, 0)));
+
+        world.step();
+
+        expect(world.entities.has('ore')).toBeFalse();
+        const hold = miner.components.get(NpcCargoHoldComponent);
+        expect(hold).toBeDefined();
+        expect(hold!.tons).toBe(5);
+        expect(hold!.commodity).toBe('metal');
+    });
+
+    it('flies to a planet and offloads ore once its cargo hold is full', async () => {
+        const world = await makeWorld();
+        const miner = makeMiner(true);
+        miner.components.set(NpcCargoHoldComponent, { tons: 20, capacity: 20, commodity: 'metal' });
+        world.entities.set('miner', miner);
+        world.entities.set('rock', makeRock(200, 0));
+        world.entities.set('planet', new Entity()
+            .addComponent(PlanetComponent, { id: 'nova:128', name: 'Earth', inhabited: true } as never)
+            .addComponent(MultiplayerData, { owner: 'server' })
+            .addComponent(MovementStateComponent, movementAt(0, MINER_DOCK_DISTANCE - 10)));
+
+        world.step();
+
+        // Full miner ignores asteroids and offloads at the planet
+        expect(miner.components.get(TargetComponent)!.target).toBeUndefined();
+        expect(miner.components.get(NpcCargoHoldComponent)!.tons).toBe(0);
     });
 });

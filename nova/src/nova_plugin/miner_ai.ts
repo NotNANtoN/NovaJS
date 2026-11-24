@@ -1,6 +1,6 @@
 import { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { ShipData } from 'novadatainterface/ShipData';
-import { UUID } from 'nova_ecs/arg_types';
+import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Optional } from 'nova_ecs/optional';
 import {
@@ -11,7 +11,8 @@ import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { ProvideAsync } from 'nova_ecs/provide_async';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
-import { AsteroidComponent } from './asteroid_plugin';
+import { AsteroidComponent, OreComponent } from './asteroid_plugin';
+import { PlanetComponent } from './planet_plugin';
 import { DestructionStartedComponent } from './destruction_state';
 import { approachTarget } from './flight_controller';
 import { GameDataResource } from './game_data_resource';
@@ -26,6 +27,26 @@ import { TargetComponent } from './target_component';
 export const MINING_SEEK_RANGE = 3_000;
 /** Miners stop closing once they are comfortably in weapons range. */
 export const MINING_STANDOFF = 400;
+/** How far a miner will detour to scoop floating ore chunks. */
+export const MINING_ORE_SEEK_RANGE = 1_500;
+/** Pickup radius for NPC miners scooping ore chunks. */
+export const MINER_ORE_PICKUP_RADIUS = 65;
+/** Tractor pull radius for NPC miners scooping ore chunks. */
+export const MINER_ORE_MAGNET_RADIUS = 160;
+/** Fallback cargo capacity if a miner lacks ShipDataComponent. */
+export const DEFAULT_MINER_CARGO_CAPACITY = 20;
+/** Distance to a planet at which a full miner docks and sells its ore. */
+export const MINER_DOCK_DISTANCE = 140;
+
+export interface NpcCargoHold {
+    tons: number;
+    capacity: number;
+    commodity?: string;
+}
+
+/** Local server-side cargo hold for NPC miners collecting and selling ore. */
+export const NpcCargoHoldComponent =
+    new Component<NpcCargoHold>('NpcCargoHoldComponent');
 
 /**
  * Whether an NPC prospects asteroids when it has no one to fight. Combat
@@ -93,6 +114,23 @@ export const MiningShipProvider = ProvideAsync({
 const AsteroidTargetsQuery = new Query(
     [UUID, MovementStateComponent, AsteroidComponent] as const,
     'AsteroidTargets');
+const OreTargetsQuery = new Query(
+    [UUID, MovementStateComponent, OreComponent] as const,
+    'MinerOreTargets');
+const MinerPlanetsQuery = new Query(
+    [MovementStateComponent, PlanetComponent] as const,
+    'MinerPlanets');
+const NpcOreCollectorsQuery = new Query([
+    MovementStateComponent,
+    MiningShipComponent,
+    Optional(NpcCargoHoldComponent),
+    Optional(ShipDataComponent),
+    GetEntity,
+] as const, 'NpcOreCollectors');
+
+function isHoldFull(hold: NpcCargoHold | undefined): boolean {
+    return Boolean(hold && hold.capacity > 0 && hold.tons >= hold.capacity);
+}
 
 /**
  * The ordering dependencies are injected because the combat AI systems live
@@ -105,6 +143,7 @@ export function createMinerSystems(
     return {
         target: makeMinerTargetAI(chooseTarget),
         approach: makeMinerApproachAI(follow),
+        scoop: makeMinerOreScoopSystem(),
     };
 }
 
@@ -112,12 +151,13 @@ function makeMinerTargetAI(chooseTarget: System) {
     return new System({
         name: 'MinerTargetAI',
         args: [MiningShipComponent, TargetComponent, MovementStateComponent,
-            AsteroidTargetsQuery, MultiplayerData, PlatformResource,
+            AsteroidTargetsQuery, OreTargetsQuery, MultiplayerData, PlatformResource,
             NpcAIComponent, Optional(DestructionStartedComponent),
-            Optional(ArmorComponent), Optional(CommandedEscortComponent)] as const,
+            Optional(ArmorComponent), Optional(CommandedEscortComponent),
+            Optional(NpcCargoHoldComponent)] as const,
         after: [chooseTarget],
-        step(miner, target, movement, asteroids, multiplayer, platform, _npcAI,
-            destructionStarted, armor, commandedEscort) {
+        step(miner, target, movement, asteroids, ores, multiplayer, platform, _npcAI,
+            destructionStarted, armor, commandedEscort, cargoHold) {
             if (!miner.mining || platform !== 'node'
                 || multiplayer.owner !== 'server' || commandedEscort !== undefined) {
                 return;
@@ -125,7 +165,31 @@ function makeMinerTargetAI(chooseTarget: System) {
             if (destructionStarted || armor && armor.current <= 0) {
                 return;
             }
-            // A hostile target was already chosen, so stay in the fight.
+            const currentTargetIsAsteroid = target.target !== undefined
+                && asteroids.some(([asteroidUuid]) => asteroidUuid === target.target);
+
+            // When the hold is full, stop targeting rocks so the miner returns to a planet to sell.
+            if (isHoldFull(cargoHold)) {
+                if (currentTargetIsAsteroid) {
+                    target.target = undefined;
+                }
+                return;
+            }
+
+            // If a hostile (non-asteroid) target was already chosen, stay in the fight.
+            if (target.target && !currentTargetIsAsteroid) {
+                return;
+            }
+
+            // If floating ore is nearby, clear any rock target so we pause shooting and scoop it.
+            const oreSeekSq = MINING_ORE_SEEK_RANGE * MINING_ORE_SEEK_RANGE;
+            for (const [, oreMovement] of ores) {
+                if (oreMovement.position.subtract(movement.position).lengthSquared <= oreSeekSq) {
+                    target.target = undefined;
+                    return;
+                }
+            }
+
             if (target.target) {
                 return;
             }
@@ -149,12 +213,13 @@ function makeMinerApproachAI(follow: System) {
     return new System({
         name: 'MinerApproachAI',
         args: [MiningShipComponent, TargetComponent, MovementStateComponent,
-            MovementPhysicsComponent, AsteroidTargetsQuery, MultiplayerData,
-            PlatformResource, NpcAIComponent,
-            Optional(JumpStateComponent), Optional(CommandedEscortComponent)] as const,
+            MovementPhysicsComponent, AsteroidTargetsQuery, OreTargetsQuery,
+            MinerPlanetsQuery, MultiplayerData, PlatformResource, NpcAIComponent,
+            Optional(JumpStateComponent), Optional(CommandedEscortComponent),
+            Optional(NpcCargoHoldComponent)] as const,
         after: [follow],
-        step(miner, target, movement, physics, asteroids, multiplayer,
-            platform, _npcAI, jumpState, commandedEscort) {
+        step(miner, target, movement, physics, asteroids, ores, planets, multiplayer,
+            platform, _npcAI, jumpState, commandedEscort, cargoHold) {
             if (!miner.mining || platform !== 'node'
                 || multiplayer.owner !== 'server' || commandedEscort !== undefined) {
                 return;
@@ -162,10 +227,66 @@ function makeMinerApproachAI(follow: System) {
             if (jumpState) {
                 return;
             }
+
             const targetUuid = target.target;
-            if (!targetUuid) {
+            // Full cargo hold and not in combat: fly to nearest planet, dock, and offload/sell.
+            if (!targetUuid && isHoldFull(cargoHold) && cargoHold) {
+                let bestPlanet: typeof planets[number][0] | undefined;
+                let bestDistSq = Infinity;
+                for (const [planetMovement, planet] of planets) {
+                    if (planet.inhabited === false) {
+                        continue;
+                    }
+                    const distSq = planetMovement.position
+                        .subtract(movement.position).lengthSquared;
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        bestPlanet = planetMovement;
+                    }
+                }
+                if (!bestPlanet && planets.length > 0) {
+                    bestPlanet = planets[0][0];
+                    bestDistSq = bestPlanet.position.subtract(movement.position).lengthSquared;
+                }
+                if (!bestPlanet) {
+                    return;
+                }
+                if (bestDistSq <= MINER_DOCK_DISTANCE * MINER_DOCK_DISTANCE) {
+                    cargoHold.tons = 0;
+                    cargoHold.commodity = undefined;
+                    movement.accelerating = 0;
+                    movement.turnTo = null;
+                    movement.turnBack = true;
+                    return;
+                }
+                const command = approachTarget(movement, bestPlanet, physics, { standoff: 0 });
+                movement.turnTo = command.turnTo;
+                movement.accelerating = command.accelerating;
+                movement.turnBack = command.turnBack;
                 return;
             }
+
+            // No target and space in hold: fly directly to nearest floating ore chunk to scoop it.
+            if (!targetUuid) {
+                let closestOre: typeof ores[number][1] | undefined;
+                let closestDistSq = MINING_ORE_SEEK_RANGE * MINING_ORE_SEEK_RANGE;
+                for (const [, oreMovement] of ores) {
+                    const distSq = oreMovement.position
+                        .subtract(movement.position).lengthSquared;
+                    if (distSq < closestDistSq) {
+                        closestDistSq = distSq;
+                        closestOre = oreMovement;
+                    }
+                }
+                if (closestOre) {
+                    const command = approachTarget(movement, closestOre, physics, { standoff: 0 });
+                    movement.turnTo = command.turnTo;
+                    movement.accelerating = command.accelerating;
+                    movement.turnBack = command.turnBack;
+                }
+                return;
+            }
+
             const asteroid = asteroids.find(([uuid]) => uuid === targetUuid);
             if (!asteroid) {
                 return;
@@ -180,6 +301,61 @@ function makeMinerApproachAI(follow: System) {
                 ?? asteroid[1].position.subtract(movement.position).angle;
             movement.accelerating = command.accelerating;
             movement.turnBack = command.turnBack;
+        },
+    });
+}
+
+function makeMinerOreScoopSystem() {
+    return new System({
+        name: 'MinerOreScoopSystem',
+        args: [OreComponent, MovementStateComponent, UUID, Entities,
+            NpcOreCollectorsQuery, MultiplayerData, PlatformResource] as const,
+        step(ore, movement, selfUuid, entities, collectors, multiplayer, platform) {
+            if (platform !== 'node' || multiplayer.owner !== 'server' || !entities.has(selfUuid)) {
+                return;
+            }
+            for (const [minerMovement, miner, existingHold, shipData, minerEntity] of collectors) {
+                if (!miner.mining) {
+                    continue;
+                }
+                const capacity = existingHold?.capacity
+                    ?? Math.max(1, shipData?.cargoCapacity || DEFAULT_MINER_CARGO_CAPACITY);
+                const currentTons = existingHold?.tons ?? 0;
+                const freeSpace = capacity - currentTons;
+                if (freeSpace <= 0) {
+                    continue;
+                }
+                const delta = minerMovement.position.subtract(movement.position);
+                const distance = delta.length;
+                if (distance > MINER_ORE_MAGNET_RADIUS) {
+                    continue;
+                }
+                if (distance > MINER_ORE_PICKUP_RADIUS) {
+                    const pull = delta.normalize().scale(140 * 0.016);
+                    movement.velocity = movement.velocity.add(pull);
+                    const speed = movement.velocity.length;
+                    if (speed > 120) {
+                        movement.velocity = movement.velocity.normalize().scale(120);
+                    }
+                    continue;
+                }
+                const taken = Math.min(ore.tons, freeSpace);
+                if (taken <= 0) {
+                    continue;
+                }
+                const hold: NpcCargoHold = existingHold ?? { tons: 0, capacity };
+                hold.tons += taken;
+                hold.commodity = ore.commodity;
+                if (!existingHold) {
+                    minerEntity.components.set(NpcCargoHoldComponent, hold);
+                }
+                if (taken >= ore.tons) {
+                    entities.delete(selfUuid);
+                } else {
+                    ore.tons -= taken;
+                }
+                return;
+            }
         },
     });
 }

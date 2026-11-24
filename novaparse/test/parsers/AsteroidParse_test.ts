@@ -20,6 +20,15 @@ describe('asteroidYieldCommodity', () => {
         expect(asteroidYieldCommodity(1018, 'Crystal Medium')).toBe('crystal');
     });
 
+    it('resolves jünk resource names when junk table is provided', () => {
+        const junks = {
+            134: { lcName: 'water', name: 'Water' },
+            146: { lcName: 'opals', name: 'Opals' },
+        };
+        expect(asteroidYieldCommodity(1006, 'Ice Huge', junks)).toBe('water');
+        expect(asteroidYieldCommodity(1018, 'Crystal Medium', junks)).toBe('opals');
+    });
+
     it('ignores yield types between the tables', () => {
         expect(asteroidYieldCommodity(500, 'Metal Small')).toBeUndefined();
     });

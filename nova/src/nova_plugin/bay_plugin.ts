@@ -130,8 +130,10 @@ class BayWeaponEntry extends WeaponEntry {
         if (sourceVelocity) {
             velocity = velocity.add(sourceVelocity);
         }
-        // TODO: Add exit velocity to bay weapons.
-        velocity = velocity.add(angle.getUnitVector().scale(10));
+        const launchSpeed = this.data.shotSpeed > 0
+            ? Math.min(this.data.shotSpeed, 400)
+            : 10;
+        velocity = velocity.add(angle.getUnitVector().scale(launchSpeed));
 
         const ship = this.makeShip();
         if (!reserveEntity(this.budget, ship, 'ship')) {

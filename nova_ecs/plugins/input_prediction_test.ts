@@ -176,6 +176,32 @@ describe('input prediction', () => {
             expect(cmd.dtMs).toBeCloseTo(FRAME, 6);
         }
     });
+
+    it('decays reconciled visual offsets smoothly at render rate without corrupting sim state', () => {
+        let seq = 0;
+        const prediction = new ClientPrediction(() => ++seq);
+        const local = state();
+        prediction.predict(local, physics, FRAME, entities);
+        // Server reports a small lateral impulse (30 px offset, within SNAP_DISTANCE).
+        expect(prediction.reconcile({ seq: 1, state: state(30, 0) }, local, physics, entities))
+            .toBe('blended');
+        const initialOffset = Math.abs(prediction.visualOffsetX);
+        expect(initialOffset).toBeGreaterThan(15);
+        expect(local.position.x).toBeGreaterThan(0);
+        expect(local.position.x).toBeLessThan(30);
+
+        // High-refresh frames decay the visual offset monotonically toward exact server state (30, 0).
+        let prevAbsOffset = initialOffset;
+        const dt144 = 1000 / 144;
+        for (let i = 0; i < 60; i++) {
+            prediction.predict(local, physics, dt144, entities);
+            const absOffset = Math.abs(prediction.visualOffsetX);
+            expect(absOffset).toBeLessThanOrEqual(prevAbsOffset);
+            prevAbsOffset = absOffset;
+        }
+        expect(prediction.visualOffsetX).toBe(0);
+        expect(local.position.x).toBeCloseTo(30, 4);
+    });
 });
 
 describe('input prediction over the network', () => {

@@ -23,12 +23,13 @@ const ASTEROID_FRAMES = 36;
 
 /**
  * Names the cargo an asteroid drops. Standard commodities are named by the
- * shared table. jünk resources are not parsed, so a junk yield is named after
- * the asteroid's material, which is how retail's asteroid families read
- * ("Ice Small" drops ice).
+ * shared table; yield types >= 1000 select jünk resource ID (yieldType - 1000 + 128).
+ * Falls back to the asteroid's material name if no jünk table is supplied.
  */
 export function asteroidYieldCommodity(
-    yieldType: number, asteroidName: string,
+    yieldType: number,
+    asteroidName: string,
+    junkById?: Readonly<Record<number, { lcName?: string; name?: string }>>,
 ): string | undefined {
     if (yieldType < 0) {
         return undefined;
@@ -37,6 +38,12 @@ export function asteroidYieldCommodity(
         return standardCargoNames[yieldType];
     }
     if (yieldType >= JUNK_YIELD_BASE) {
+        const junkId = yieldType - JUNK_YIELD_BASE + 128;
+        const junk = junkById?.[junkId];
+        const junkName = (junk?.lcName || junk?.name || '').trim();
+        if (junkName) {
+            return junkName;
+        }
         const material = asteroidName.trim().split(/\s+/)[0];
         return material ? material.toLowerCase() : undefined;
     }
@@ -84,7 +91,7 @@ export async function AsteroidParse(
     });
 
     const quantity = Math.max(0, roid.yieldQuantity);
-    const commodity = asteroidYieldCommodity(roid.yieldType, base.name);
+    const commodity = asteroidYieldCommodity(roid.yieldType, base.name, roid.idSpace.jünk);
     const asteroidYield: AsteroidYield = commodity && quantity > 0
         ? { commodity, quantity }
         : { quantity: 0 };
