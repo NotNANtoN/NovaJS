@@ -3,7 +3,9 @@ name: Quality
 on:
   push:
     branches-ignore:
+      - main
       - feat-performance-and-modernization
+      - feat-webgpu-smooth-campaign
     paths-ignore:
       - '**.md'
       - 'docs/**'

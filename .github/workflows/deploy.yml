@@ -3,7 +3,9 @@ name: Deploy NovaJS
 on:
   push:
     branches:
+      - main
       - feat-performance-and-modernization
+      - feat-webgpu-smooth-campaign
     paths-ignore:
       - '**.md'
       - 'docs/**'
