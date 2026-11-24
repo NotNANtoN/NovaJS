@@ -1,8 +1,7 @@
 import { OutfitData } from "novadatainterface/OutfitData";
 import { PlanetData } from "novadatainterface/PlanetData";
-import { DefaultMap } from "nova_ecs/utils";
 import * as PIXI from 'pixi.js';
-import { Observable } from "rxjs";
+import { Observable, Subscription } from "rxjs";
 import { GameData } from "../client/gamedata/GameData";
 import { ControlEvent } from "../nova_plugin/controls_plugin";
 import { OutfitsState } from "../nova_plugin/outfit_plugin";
@@ -33,6 +32,10 @@ export const FONT = {
         fontFamily: "Geneva", fontSize: 10, fill: 0xffffff,
         align: 'right', wordWrap: false, wordWrapWidth: descWidth
     } as const,
+    feedback: {
+        fontFamily: "Geneva", fontSize: 11, fill: 0xffb366,
+        align: 'left', wordWrap: true, wordWrapWidth: 380
+    } as const,
 };
 
 export class Outfitter extends Menu<OutfitsState> {
@@ -44,12 +47,14 @@ export class Outfitter extends Menu<OutfitsState> {
     }
 
     private itemGrid?: ItemGrid<OutfitData>;
+    private activeTileSub?: Subscription;
     private pictContainer = new PIXI.Container();
-    private outfits: DefaultMap<string, number>;
+    private outfits = new Map<string, number>();
     private playerState?: PlayerState;
     private planetData?: PlanetData;
     private shipData?: ShipData;
     private refreshPromise?: Promise<void>;
+    private refreshSeq = 0;
     private combatBusy = false;
     private ncbEntity?: Entity;
     private selectedCategory: OutfitCategory = 'all';
@@ -65,13 +70,39 @@ export class Outfitter extends Menu<OutfitsState> {
         mass: new PIXI.Text({ text: "3", style: FONT.normal }),
         availableMass: new PIXI.Text({ text: "Available:", style: FONT.normal }),
         freeMass: new PIXI.Text({ text: "", style: FONT.normal }),
+        feedback: new PIXI.Text({ text: "", style: FONT.feedback }),
+    }
+
+    private getOutfitCount(id: string): number {
+        return this.outfits.get(id) ?? 0;
+    }
+
+    private setOutfitCount(id: string, count: number): void {
+        if (count > 0) {
+            this.outfits.set(id, count);
+        } else {
+            this.outfits.delete(id);
+        }
+    }
+
+    private loadOutfitsMap(input: OutfitsState): void {
+        this.outfits = new Map<string, number>();
+        for (const [k, v] of input) {
+            if (v.count > 0) {
+                this.outfits.set(k, v.count);
+            }
+        }
+    }
+
+    private setFeedback(message: string): void {
+        this.text.feedback.text = message;
     }
 
     constructor(gameData: GameData,
         controlEvents: Observable<ControlEvent>) {
         super(gameData, "nova:8502", controlEvents);
 
-        this.outfits = new DefaultMap(() => 0);
+        this.outfits = new Map<string, number>();
         const buttons = {
             catAll: new Button(gameData, "All", 46, { x: -348, y: -176 }),
             catWeapons: new Button(gameData, "Weapons", 72, { x: -284, y: -176 }),
@@ -139,6 +170,9 @@ export class Outfitter extends Menu<OutfitsState> {
         this.text.freeMass.position.x = 300;
         this.text.freeMass.position.y = 106;
 
+        this.text.feedback.position.x = -140;
+        this.text.feedback.position.y = 158;
+
         for (const t of Object.values(this.text)) {
             this.container.addChild(t);
         }
@@ -152,7 +186,8 @@ export class Outfitter extends Menu<OutfitsState> {
         this.itemGrid.drawGrid();
         this.itemGrid.container.position.x = -373;
         this.itemGrid.container.position.y = -153;
-        this.itemGrid.activeTile.subscribe(this.setOutfitSelected.bind(this));
+        this.activeTileSub?.unsubscribe();
+        this.activeTileSub = this.itemGrid.activeTile.subscribe(this.setOutfitSelected.bind(this));
 
         this.controls.controls = {
             left: () => itemGrid.left(),
@@ -213,8 +248,7 @@ export class Outfitter extends Menu<OutfitsState> {
             destination: this.planetData
                 ? { initialPlanetId: this.planetData.id } : undefined,
         });
-        this.outfits = new DefaultMap(() => 0,
-            [...outfits].map(([id, value]) => [id, value.count]));
+        this.loadOutfitsMap(outfits);
         if (ship) {
             this.setShipData(ship);
         }
@@ -239,7 +273,18 @@ export class Outfitter extends Menu<OutfitsState> {
     }
 
     override async show(input: OutfitsState): Promise<OutfitsState> {
+        // Load the ship's current outfits BEFORE building the grid so installed-only
+        // stock outfits (like the Lightning's Light Cannons) appear immediately and
+        // populate outfitDataMap for accurate mass and weapon-mount calculations.
+        this.loadOutfitsMap(input);
+        this.selectedCategory = 'all';
+        this.setFeedback('');
+        if (!this.shipData && this.playerState?.shipId) {
+            this.shipData = await this.gameData.data.Ship.get(this.playerState.shipId)
+                .catch(() => undefined);
+        }
         await this.buildPromise;
+        this.refreshPromise = this.refreshGrid();
         await this.refreshPromise;
         return super.show(input);
     }
@@ -249,20 +294,30 @@ export class Outfitter extends Menu<OutfitsState> {
             return new ItemGrid<OutfitData>(this.gameData, []);
         }
         const ids = (await this.gameData.ids).Outfit;
-        let outfits = await Promise.all(ids.map(id =>
+        let allOutfits = await Promise.all(ids.map(id =>
             this.gameData.data.Outfit.get(id, 100)));
+        const knownIds = new Set(allOutfits.map(o => o.id));
+        const extraInstalledIds = [...this.outfits.keys()].filter(id => !knownIds.has(id));
+        if (extraInstalledIds.length > 0) {
+            const extras = await Promise.all(extraInstalledIds.map(id =>
+                this.gameData.data.Outfit.get(id, 100).catch(() => undefined)));
+            allOutfits = allOutfits.concat(extras.filter((o): o is OutfitData => o !== undefined));
+        }
         const contribute = await this.contribute();
-        if (this.planetData) {
-            outfits = outfits.filter(outfit =>
-                (this.outfits.get(outfit.id) > 0)
-                || isPurchaseAvailable(
-                    outfit,
-                    this.planetData!,
-                    this.playerState,
-                    this.outfits,
-                    contribute,
-                )
-            );
+        let outfits = allOutfits.filter(outfit =>
+            (this.getOutfitCount(outfit.id) > 0)
+            || isPurchaseAvailable(
+                outfit,
+                this.planetData!,
+                this.playerState,
+                this.outfits,
+                contribute,
+            )
+        );
+        // Populate outfitDataMap before category filtering so mass & mount totals
+        // always account for every installed outfit regardless of the active tab.
+        for (const outfit of outfits) {
+            this.outfitDataMap.set(outfit.id, outfit);
         }
         if (this.selectedCategory !== 'all') {
             outfits = outfits.filter(
@@ -270,7 +325,6 @@ export class Outfitter extends Menu<OutfitsState> {
             );
         }
         for (const outfit of outfits) {
-            this.outfitDataMap.set(outfit.id, outfit);
             if (outfit.pict) {
                 void this.gameData.textureFromPictAsync(outfit.pict, 80).catch(() => {});
             }
@@ -284,27 +338,34 @@ export class Outfitter extends Menu<OutfitsState> {
     private async refreshGrid(prebuilt?: ItemGrid<OutfitData>) {
         // The grid is built asynchronously, so the planet can arrive first.
         // Waiting keeps that case from leaving the unfiltered initial grid up.
+        const seq = ++this.refreshSeq;
         await this.buildPromise;
-        if (!this.itemGrid || !this.planetData) {
+        if (!this.itemGrid || !this.planetData || seq !== this.refreshSeq) {
             return;
         }
         const itemGrid = prebuilt ?? await this.makeOutfitsGrid();
+        if (seq !== this.refreshSeq) {
+            return;
+        }
+        this.activeTileSub?.unsubscribe();
         this.container.removeChild(this.itemGrid.container);
         this.itemGrid = itemGrid;
         this.container.addChild(itemGrid.container);
         itemGrid.drawGrid();
         itemGrid.container.position.x = -373;
         itemGrid.container.position.y = -153;
-        itemGrid.activeTile.subscribe(this.setOutfitSelected.bind(this));
+        this.activeTileSub = itemGrid.activeTile.subscribe(this.setOutfitSelected.bind(this));
         this.controls.controls = {
             left: () => itemGrid.left(),
             right: () => itemGrid.right(),
             up: () => itemGrid.up(),
             down: () => itemGrid.down(),
-            buy: this.buyOutfit.bind(this),
-            sell: this.sellOutfit.bind(this),
+            buy: () => void this.buyOutfit(1),
+            sell: () => void this.sellOutfit(1),
             depart: this.done.bind(this),
         };
+        this.updateCreditsText();
+        this.setFreeMassText();
     }
 
     private getInstalledGunCount(): number {
@@ -340,29 +401,46 @@ export class Outfitter extends Menu<OutfitsState> {
         let boughtCount = 0;
         this.combatBusy = true;
         try {
+        this.setFeedback('');
         for (let q = 0; q < quantity; q++) {
-            const currentCount = this.outfits.get(outfit.id);
+            const currentCount = this.getOutfitCount(outfit.id);
             if (outfit.max > 0 && currentCount >= outfit.max) {
-                if (q === 0) console.warn(`Already at maximum (${outfit.max}) for outfit ${outfit.id}.`);
+                if (q === 0) {
+                    this.setFeedback(`Already at maximum (${outfit.max}).`);
+                    console.warn(`Already at maximum (${outfit.max}) for outfit ${outfit.id}.`);
+                }
                 break;
             }
             if (this.shipData && outfit.flags) {
-                if ((outfit.flags & 0x0001) !== 0 && this.getInstalledGunCount() >= this.shipData.maxGuns) {
-                    if (q === 0) console.warn(`No fixed gun mounts available (max: ${this.shipData.maxGuns}).`);
+                const gunCount = this.getInstalledGunCount();
+                if ((outfit.flags & 0x0001) !== 0 && gunCount >= this.shipData.maxGuns) {
+                    if (q === 0) {
+                        this.setFeedback(`No fixed gun mounts available (${gunCount}/${this.shipData.maxGuns}).`);
+                        console.warn(`No fixed gun mounts available (max: ${this.shipData.maxGuns}).`);
+                    }
                     break;
                 }
-                if ((outfit.flags & 0x0002) !== 0 && this.getInstalledTurretCount() >= this.shipData.maxTurrets) {
-                    if (q === 0) console.warn(`No turret mounts available (max: ${this.shipData.maxTurrets}).`);
+                const turretCount = this.getInstalledTurretCount();
+                if ((outfit.flags & 0x0002) !== 0 && turretCount >= this.shipData.maxTurrets) {
+                    if (q === 0) {
+                        this.setFeedback(`No turret mounts available (${turretCount}/${this.shipData.maxTurrets}).`);
+                        console.warn(`No turret mounts available (max: ${this.shipData.maxTurrets}).`);
+                    }
                     break;
                 }
             }
             const mass = outfit.physics.freeMass ?? 0;
-            if (mass > 0 && mass > this.getAvailableMass()) {
-                if (q === 0) console.warn(`Not enough free mass to install outfit ${outfit.id}.`);
+            const availableMass = this.getAvailableMass();
+            if (mass > 0 && mass > availableMass) {
+                if (q === 0) {
+                    this.setFeedback(`Not enough space (needs ${mass} tons, ${availableMass} available).`);
+                    console.warn(`Not enough free mass to install outfit ${outfit.id}.`);
+                }
                 break;
             }
             const price = Math.max(0, Math.floor(outfit.price));
             if (!this.playerState) {
+                this.setFeedback('Cannot purchase right now.');
                 console.warn('Cannot buy outfit without player state.');
                 break;
             }
@@ -373,11 +451,17 @@ export class Outfitter extends Menu<OutfitsState> {
                 this.outfits,
                 await this.contribute(),
             )) {
-                if (q === 0) console.warn(`Outfit ${outfit.id} is not available here.`);
+                if (q === 0) {
+                    this.setFeedback('Not sold at this spaceport.');
+                    console.warn(`Outfit ${outfit.id} is not available here.`);
+                }
                 break;
             }
             if (this.playerState.credits < price) {
-                if (q === 0) console.warn(`Not enough credits to buy outfit ${outfit.id}`);
+                if (q === 0) {
+                    this.setFeedback(`Not enough credits (needs ${formatPrice(price)}).`);
+                    console.warn(`Not enough credits to buy outfit ${outfit.id}`);
+                }
                 break;
             }
             if (this.playerState.combatResources?.ammo[outfit.id] !== undefined) {
@@ -385,6 +469,7 @@ export class Outfitter extends Menu<OutfitsState> {
                     await combatShopTransaction(this.playerState, this.planetData!.id, 'buy', outfit.id, this.outfits);
                 } catch (error) {
                     this.syncCombatAmmo();
+                    this.setFeedback('Ammo purchase rejected.');
                     console.warn('Ammo purchase rejected', error);
                     break;
                 }
@@ -394,7 +479,7 @@ export class Outfitter extends Menu<OutfitsState> {
             // EV Nova Bible: flag 0x0010 removes any items of this type after purchase
             // (used for permits/licenses that grant bits or trigger events).
             if (!outfit.flags || (outfit.flags & 0x0010) === 0) {
-                this.outfits.set(outfit.id, this.playerState.combatResources?.ammo[outfit.id] ?? currentCount + 1);
+                this.setOutfitCount(outfit.id, this.playerState.combatResources?.ammo[outfit.id] ?? currentCount + 1);
             }
             await this.runOutfitSetExpression(outfit.onPurchase, outfit);
             boughtCount++;
@@ -407,6 +492,7 @@ export class Outfitter extends Menu<OutfitsState> {
         }
 
         if (boughtCount > 0) {
+            this.setFeedback('');
             this.playUiSound('nova:150');
             this.itemGrid?.setCounts(this.outfits);
             this.updateCreditsText();
@@ -438,6 +524,7 @@ export class Outfitter extends Menu<OutfitsState> {
         }
         // EV Nova Bible: flag 0x0008 means this item can't be sold.
         if (outfit.flags && (outfit.flags & 0x0008) !== 0) {
+            this.setFeedback('This item cannot be sold.');
             console.warn(`Outfit ${outfit.id} cannot be sold.`);
             return;
         }
@@ -445,12 +532,17 @@ export class Outfitter extends Menu<OutfitsState> {
         let soldCount = 0;
         this.combatBusy = true;
         try {
+        this.setFeedback('');
         for (let q = 0; q < quantity; q++) {
-            const currentCount = this.outfits.get(id);
+            const currentCount = this.getOutfitCount(id);
             if (currentCount <= 0) {
+                if (q === 0) {
+                    this.setFeedback('None installed to sell.');
+                }
                 break;
             }
             if (!this.playerState) {
+                this.setFeedback('Cannot sell right now.');
                 console.warn('Cannot sell outfit without player state.');
                 break;
             }
@@ -459,16 +551,14 @@ export class Outfitter extends Menu<OutfitsState> {
                     await combatShopTransaction(this.playerState, this.planetData!.id, 'sell', id, this.outfits);
                 } catch (error) {
                     this.syncCombatAmmo();
+                    this.setFeedback('Ammo sale rejected.');
                     console.warn('Ammo sale rejected', error);
                     break;
                 }
             } else {
                 this.playerState.credits += Math.floor(Math.max(0, outfit.price) * 0.25);
             }
-            this.outfits.set(id, this.playerState.combatResources?.ammo[id] ?? currentCount - 1);
-            if (this.outfits.get(id) === 0) {
-                this.outfits.delete(id);
-            }
+            this.setOutfitCount(id, this.playerState.combatResources?.ammo[id] ?? currentCount - 1);
             await this.runOutfitSetExpression(outfit.onSell, outfit);
             soldCount++;
         }
@@ -476,6 +566,7 @@ export class Outfitter extends Menu<OutfitsState> {
             this.combatBusy = false;
         }
         if (soldCount > 0) {
+            this.setFeedback('');
             this.playUiSound('nova:151');
             this.itemGrid?.setCounts(this.outfits);
             this.updateCreditsText();
@@ -502,7 +593,7 @@ export class Outfitter extends Menu<OutfitsState> {
             }
             if (!outfit) continue;
             const max = outfit.max ?? 1;
-            let currentCount = this.outfits.get(ammoId) || count;
+            let currentCount = this.getOutfitCount(ammoId) || count;
             if (max <= 0 || currentCount >= max) continue;
             if (!isPurchaseAvailable(outfit, this.planetData, this.playerState,
                 this.outfits, await this.contribute())) continue;
@@ -516,7 +607,7 @@ export class Outfitter extends Menu<OutfitsState> {
                 try {
                     await combatShopTransaction(this.playerState, this.planetData.id, 'buy', outfit.id, this.outfits);
                     currentCount++;
-                    this.outfits.set(ammoId, this.playerState.combatResources?.ammo[ammoId] ?? currentCount);
+                    this.setOutfitCount(ammoId, this.playerState.combatResources?.ammo[ammoId] ?? currentCount);
                     boughtAny = true;
                 } catch (error) {
                     this.syncCombatAmmo();
@@ -557,6 +648,7 @@ export class Outfitter extends Menu<OutfitsState> {
         this.pictContainer.children.length = 0;
         this.text.description.text = "";
         this.text.price.text = "";
+        this.setFeedback("");
         this.text.mass.visible = false;
         this.text.itemMass.visible = false;
         this.text.availableMass.visible = false;
@@ -581,15 +673,15 @@ export class Outfitter extends Menu<OutfitsState> {
         this.text.price.text = formatPrice(outfitTile.item.price);
         this.updateCreditsText();
 
-        if (outfitTile.item.physics.freeMass > 0) {
-            // Set mass text
-            this.text.mass.text = outfitTile.item.physics.freeMass + " tons";
-            this.setFreeMassText();
-            this.text.mass.visible = true;
-            this.text.itemMass.visible = true;
-            this.text.availableMass.visible = true;
-            this.text.freeMass.visible = true;
-        }
+        const itemMass = outfitTile.item.physics.freeMass ?? 0;
+        this.text.mass.text = itemMass < 0
+            ? `+${Math.abs(itemMass)} tons`
+            : `${itemMass} tons`;
+        this.setFreeMassText();
+        this.text.mass.visible = true;
+        this.text.itemMass.visible = true;
+        this.text.availableMass.visible = Boolean(this.shipData);
+        this.text.freeMass.visible = Boolean(this.shipData);
     }
 
     private getUsedOutfitMass(): number {
@@ -618,8 +710,7 @@ export class Outfitter extends Menu<OutfitsState> {
     }
 
     protected override setInput(input: OutfitsState) {
-        this.outfits = new DefaultMap(() => 0, [...input].map(
-            ([k, v]) => [k, v.count]));
+        this.loadOutfitsMap(input);
         super.setInput(input);
         this.itemGrid?.setCounts(this.outfits);
         this.updateCreditsText();
@@ -628,8 +719,7 @@ export class Outfitter extends Menu<OutfitsState> {
 
     protected override done() {
         if (this.combatBusy) return;
-        this.input = new Map([...this.outfits]
-            .map(([id, count]) => [id, { count }]));
+        this.input = this.currentOutfitsState();
         super.done();
     }
 }

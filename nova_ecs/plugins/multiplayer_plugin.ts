@@ -993,6 +993,9 @@ function mergeInboundState(
             const merged = localData !== undefined && policy.merge
                 ? policy.merge(localData, data, context)
                 : data;
+            if (localData !== undefined && Object.is(localData, merged)) {
+                continue;
+            }
             localEntity.components.set(component, merged);
         }
     }

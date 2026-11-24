@@ -581,7 +581,40 @@ export class DeltaMaker {
         }
 
         this.applyRemoteUpdate(entity, () => {
-            this.applyDelta(entity, delta);
+            if (mergeComponent && delta.componentStates?.size) {
+                const filteredStates = new Map(delta.componentStates);
+                const mergedStates = new Map<UnknownComponent, unknown>();
+                for (const [componentName, componentState] of delta.componentStates) {
+                    const component = this.serializer.componentsByName.get(componentName);
+                    if (!component || !localComponents.has(component)) {
+                        continue;
+                    }
+                    const componentType = this.serializer.componentTypes.get(component);
+                    if (!componentType) {
+                        continue;
+                    }
+                    const decoded = componentType.decode(componentState);
+                    if (isLeft(decoded)) {
+                        continue;
+                    }
+                    const local = localComponents.get(component);
+                    const merged = mergeComponent(component, local, decoded.right);
+                    filteredStates.delete(componentName);
+                    localComponents.delete(component);
+                    if (!Object.is(local, merged)) {
+                        mergedStates.set(component, merged);
+                    }
+                }
+                this.applyDelta(entity, {
+                    ...delta,
+                    componentStates: filteredStates.size > 0 ? filteredStates : undefined,
+                });
+                for (const [component, merged] of mergedStates) {
+                    entity.components.set(component, merged);
+                }
+            } else {
+                this.applyDelta(entity, delta);
+            }
             for (const [component, local] of localComponents) {
                 if (!entity.components.has(component)) {
                     continue;

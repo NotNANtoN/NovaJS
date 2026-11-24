@@ -185,6 +185,11 @@ export class ItemGrid<I extends Item> {
     selectId(id: string): boolean {
         const index = this.items.findIndex(item => item.id === id);
         if (index < 0) return false;
+        const pageSize = BOX_COUNT[0] * BOX_COUNT[1];
+        const windowStart = this.scroll * BOX_COUNT[0];
+        if (index < windowStart || index >= windowStart + pageSize) {
+            this.scroll = Math.floor(index / BOX_COUNT[0]);
+        }
         this.selectionIndex = index;
         return true;
     }

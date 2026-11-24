@@ -289,7 +289,8 @@ export const CombatAuthorityComponent = new Component<CombatAuthority>('CombatAu
 replicationPolicies.register(CombatAuthorityComponent, { codec: t.unknown as any, authority: 'local-only' });
 replicationPolicies.register(ShipComponent, {
     codec: ShipType, authority: 'entity-owner', allowOwnerRemoval: false,
-    merge: (local, remote, context) => ownerWrite(context) ? local : remote,
+    merge: (local, remote, context) =>
+        ownerWrite(context) || local.id === remote.id ? local : remote,
 });
 
 /** Paid player shots fail closed until a server ledger is attached. */

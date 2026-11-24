@@ -1,15 +1,17 @@
 import * as t from 'io-ts';
 import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import { ShipData, ShipPhysics } from "novadatainterface/ShipData";
+import { GetEntity } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
+import { StepEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysics, MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
-import { Provide } from 'nova_ecs/provide';
+import { ChangeEvents, Provide } from 'nova_ecs/provide';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { AnimationComponent } from './animation_plugin';
 import { CollisionVulnerabilityComponent } from './collision_interaction';
@@ -46,17 +48,42 @@ export const ShipDataProvider = ProvideAsync({
     }
 });
 
-export const ShipOutfitsProvider = Provide({
+const ShipOutfitsHullComponent = new Component<string>('ShipOutfitsHull');
+
+export const ShipOutfitsProvider = new System({
     name: "ShipOutfitsProvider",
-    provided: OutfitsStateComponent,
-    args: [ShipDataComponent] as const,
-    // Not ShipDataComponent because then this would always be provided
-    // since ShipDataComponent is always provided since it's not multiplayer.
-    update: [ShipComponent],
-    factory(shipData) {
-        return new Map(Object.entries(shipData.outfits)
-            .map(([id, count]) => [id, { count }]));
-    }
+    events: [StepEvent, ChangeEvents.get(ShipComponent), ChangeEvents.get(ShipDataComponent)],
+    args: [
+        Optional(OutfitsStateComponent),
+        Optional(ShipOutfitsHullComponent),
+        GetEntity,
+        ShipComponent,
+        ShipDataComponent,
+    ] as const,
+    // Only reset outfits to stock when OutfitsStateComponent is missing or
+    // ShipComponent.id actually changes to a different hull (once matching
+    // ShipDataComponent is loaded). Re-applying an identical ShipComponent
+    // during network sync must never overwrite player-modified outfits.
+    step(outfitsState, recordedHull, entity, ship, shipData) {
+        if (shipData.id && shipData.id !== 'default' && shipData.id !== ship.id) {
+            return;
+        }
+        if (outfitsState !== undefined) {
+            if (recordedHull === undefined) {
+                entity.components.set(ShipOutfitsHullComponent, ship.id);
+                return;
+            }
+            if (recordedHull === ship.id) {
+                return;
+            }
+        }
+        entity.components.set(ShipOutfitsHullComponent, ship.id);
+        entity.components.set(
+            OutfitsStateComponent,
+            new Map(Object.entries(shipData.outfits)
+                .map(([id, count]) => [id, { count }])),
+        );
+    },
 });
 
 export const ShipPhysicsComponent = new Component<ShipPhysics>('ShipPhysicsComponent');

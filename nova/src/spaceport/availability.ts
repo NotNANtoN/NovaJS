@@ -166,12 +166,12 @@ const CONQUEST_SHARED_OUTFITS = new Set<number>([
     134, 135, 136, 137,           // IR & Radar Missile Launchers + Ammo
     177, 179, 228, 256,           // Fusion/Fission Reactors, Solar Panels, Battery Pack
     180, 182,                     // Carbon Fiber, Titanium Lattice
-    184, 185, 186, 187, 188,      // Sensors, IFF, Auto-recharger, Escape Pod
-    189, 190, 191, 192,           // Cargo/Mass Expansion & Retool
+    186, 188,                     // Auto-recharger, Escape Pod
+    190, 192,                     // Mass Expansion & Mass Retool
     193, 195,                     // Shield Recharger & Shield Buffer
-    197, 199, 201, 202,           // Afterburner, Overdrive, Alluvial Dampener, Horizontal Booster
-    203, 212, 227,                // Sensor Boost, Marine Platoon
-    238, 239, 262,                // Civilian Jammers, Ion Dissipator
+    199,                          // Overdrive
+    227,                          // Marine Platoon
+    262,                          // Ion Dissipator
     270, 271,                     // Asteroid Mining Laser, Asteroid Scoop
     437,                          // Repair Droids
 ]);
@@ -183,7 +183,6 @@ const CONQUEST_SOL_EXCLUSIVE_OUTFITS = new Set<number>([
     165, 166,                     // Thunderhead Bay
     175, 176,                     // EMP Torpedo Tube & Torpedo
     235,                          // Matter/Antimatter Reactor
-    240, 241,                     // Military IR & Radar Jammers
 ]);
 
 const CONQUEST_AURORA_EXCLUSIVE_OUTFITS = new Set<number>([
@@ -192,7 +191,6 @@ const CONQUEST_AURORA_EXCLUSIVE_OUTFITS = new Set<number>([
     169, 170, 215,                // Hail Chaingun, Ammo, Storm Chaingun
     171, 172, 173, 174,           // 100mm / 150mm / 200mm Railguns
     181,                          // Matrix Steel
-    242, 243,                     // Auroran IR & Radar Jammers
 ]);
 
 function isAuroraPlanet(planet: PlanetData): boolean {

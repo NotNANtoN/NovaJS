@@ -305,3 +305,64 @@ describe('spaceport availability', () => {
         }
     });
 });
+describe('Conquest outfitter stock cleanup', () => {
+    const conquestState = {
+        ...createInitialPlayerState(),
+        gameMode: 'conquest' as const,
+    };
+    const solPlanet = {
+        ...getDefaultPlanetData(),
+        id: 'nova:128',
+        name: 'Earth',
+        techLevel: 15,
+        hasOutfitter: true,
+    };
+    const auroraPlanet = {
+        ...getDefaultPlanetData(),
+        id: 'nova:278',
+        name: 'Aurora',
+        techLevel: 15,
+        hasOutfitter: true,
+    };
+
+    it('excludes no-op and unused outfits from Conquest outfitter stock', () => {
+        const removedIds = [
+            184, 185, 187, 189, 191, 197, 201, 202,
+            203, 212, 238, 239, 240, 241, 242, 243,
+        ];
+        for (const num of removedIds) {
+            const outfit = {
+                id: `nova:${num}`,
+                techLevel: 1,
+                availabilityNCB: '',
+                displayWeight: 10,
+                price: 5000,
+            };
+            expect(isPurchaseAvailable(outfit, solPlanet, conquestState))
+                .withContext(`Sol should not stock nova:${num}`)
+                .toBe(false);
+            expect(isPurchaseAvailable(outfit, auroraPlanet, conquestState))
+                .withContext(`Aurora should not stock nova:${num}`)
+                .toBe(false);
+        }
+    });
+
+    it('retains functional Conquest outfits at Sol and Aurora', () => {
+        const sharedWorkingIds = [129, 186, 188, 190, 192, 193, 195, 199, 227, 262, 270, 271, 437];
+        for (const num of sharedWorkingIds) {
+            const outfit = {
+                id: `nova:${num}`,
+                techLevel: 5,
+                availabilityNCB: '',
+                displayWeight: 10,
+                price: 10000,
+            };
+            expect(isPurchaseAvailable(outfit, solPlanet, conquestState))
+                .withContext(`Sol should stock nova:${num}`)
+                .toBe(true);
+            expect(isPurchaseAvailable(outfit, auroraPlanet, conquestState))
+                .withContext(`Aurora should stock nova:${num}`)
+                .toBe(true);
+        }
+    });
+});
